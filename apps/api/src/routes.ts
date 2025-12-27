@@ -289,6 +289,61 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     res.json({ stats: updatedStats });
   });
 
+  app.post("/api/reviews/bulk", (req, res) => {
+    const bodySchema = z.object({
+      reviews: z.array(
+        z.object({
+          wordId: z.number().int().positive(),
+          result: z.enum(["success", "partial", "fail"]),
+        }),
+      ),
+    });
+    const body = bodySchema.parse(req.body);
+
+    const selectStatsStatement = database.prepare(
+      "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at FROM word_stats WHERE word_id = ?",
+    );
+    const upsertStatsStatement = database.prepare(
+      "INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)",
+    );
+    const updateStatsStatement = database.prepare(
+      `
+        UPDATE word_stats
+        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?
+        WHERE word_id = ?
+      `,
+    );
+
+    let appliedCount = 0;
+    const nowIso = new Date().toISOString();
+
+    const transaction = database.transaction(() => {
+      for (const review of body.reviews) {
+        upsertStatsStatement.run(review.wordId);
+        const existingStats = selectStatsStatement.get(review.wordId) as WordStatsRow | undefined;
+        if (!existingStats) continue;
+        const updatedStats = applyReviewToStats(
+          { ...existingStats, last_reviewed_at: existingStats.last_reviewed_at ?? nowIso },
+          review.result as ReviewResult,
+        );
+
+        updateStatsStatement.run(
+          updatedStats.success_count,
+          updatedStats.partial_count,
+          updatedStats.fail_count,
+          updatedStats.score,
+          updatedStats.last_reviewed_at,
+          updatedStats.word_id,
+        );
+        appliedCount += 1;
+      }
+    });
+
+    transaction();
+
+    res.status(201).json({ appliedCount });
+  });
+
   app.get("/api/series", (_req, res) => {
     type SeriesRow = {
       tag_id: number;

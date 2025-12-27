@@ -45,6 +45,20 @@ a {
   letter-spacing: 0.2px;
 }
 
+.topbar__titleLink {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.topbar__titleLink:hover {
+  border-color: rgba(122, 162, 255, 0.35);
+  background: rgba(122, 162, 255, 0.1);
+}
+
 .nav {
   display: flex;
   gap: var(--space-3);
@@ -89,6 +103,7 @@ a {
   border-radius: 12px;
   padding: 10px 14px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .button:disabled {
@@ -99,6 +114,42 @@ a {
 .button--primary {
   border-color: rgba(122, 162, 255, 0.35);
   background: rgba(122, 162, 255, 0.16);
+}
+
+.revealContainer {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.revealButton {
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  padding: 12px 16px;
+  min-width: 240px;
+}
+
+.table--compact th,
+.table--compact td {
+  padding: 10px 10px;
+}
+
+.ratingCell {
+  width: 160px;
+}
+
+.ratingGroup {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.ratingButton {
+  padding: 10px 12px;
+  border-radius: 12px;
 }
 
 .button--success {
@@ -168,6 +219,46 @@ a {
   font-size: 18px;
 }
 
+.wordAnswerGrid {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 8px 14px;
+  margin-top: 4px;
+}
+
+.wordAnswerGrid__label {
+  color: var(--color-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.wordAnswerGrid__value {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.trainTimerRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.trainProgress {
+  margin-top: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.trainProgress__bar {
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(122, 162, 255, 0.7);
+}
+
 .muted {
   color: var(--color-muted);
 }
@@ -180,13 +271,65 @@ a {
 .table th,
 .table td {
   text-align: left;
-  padding: 10px 8px;
+  padding: 14px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  vertical-align: top;
+  vertical-align: middle;
+}
+
+.tableActionsCell {
+  padding: 10px 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.table td:last-child,
+.table th:last-child {
+  text-align: right;
+  width: 1%;
+}
+
+.tableRowLink {
+  cursor: pointer;
+}
+
+.tableRowLink:hover td {
+  background: rgba(122, 162, 255, 0.06);
+}
+
+.tableRowLink td {
+  transition: background 140ms ease;
 }
 
 .table th {
   color: var(--color-muted);
   font-weight: 600;
+  font-size: 12px;
+}
+
+.sectionHeader {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--color-text);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.sectionHeader__chevron {
+  color: var(--color-muted);
+}
+
+.sectionHeader__title {
+  font-weight: 800;
+}
+
+.sectionHeader__meta {
+  margin-left: auto;
   font-size: 12px;
 }

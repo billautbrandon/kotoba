@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import { fetchSeries } from "../../api";
 
@@ -11,6 +11,7 @@ type SeriesRow = {
 };
 
 export function HomePage() {
+  const navigate = useNavigate();
   const [series, setSeries] = useState<SeriesRow[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -81,19 +82,30 @@ export function HomePage() {
                 <th>Tag</th>
                 <th>Mots</th>
                 <th>Score (cumul)</th>
-                <th>Action</th>
+                <th />
               </tr>
             </thead>
             <tbody>
               {series.map((row) => (
-                <tr key={row.tagId}>
+                <tr
+                  key={row.tagId}
+                  className="tableRowLink"
+                  tabIndex={0}
+                  onClick={() =>
+                    navigate(`/series/${row.tagId}?name=${encodeURIComponent(row.tagName)}`)
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(`/series/${row.tagId}?name=${encodeURIComponent(row.tagName)}`);
+                    }
+                  }}
+                >
                   <td>{row.tagName}</td>
                   <td className="muted">{row.wordsCount}</td>
                   <td className="muted">{row.totalScore}</td>
-                  <td>
-                    <Link className="button button--primary" to={`/train/tag/${row.tagId}`}>
-                      Lancer
-                    </Link>
+                  <td className="muted" style={{ textAlign: "right" }}>
+                    →
                   </td>
                 </tr>
               ))}

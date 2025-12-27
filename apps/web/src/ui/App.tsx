@@ -1,8 +1,9 @@
 import React from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
 
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { HomePage } from "./pages/HomePage";
+import { SeriesStartPage } from "./pages/SeriesStartPage";
 import { TrainPage } from "./pages/TrainPage";
 import { WordsPage } from "./pages/WordsPage";
 
@@ -10,7 +11,9 @@ export function App() {
   return (
     <div className="container">
       <header className="topbar">
-        <div className="topbar__title">Kotoba</div>
+        <Link className="topbar__titleLink" to="/">
+          Kotoba
+        </Link>
         <nav className="nav">
           <NavLink
             className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
@@ -44,8 +47,9 @@ export function App() {
         <div className="panel__content">
           <Routes>
             <Route path="/" element={<HomePage />} />
-            <Route path="/train" element={<TrainPage mode="all" />} />
-            <Route path="/train/difficult" element={<TrainPage mode="difficult" />} />
+            <Route path="/series/:tagId" element={<SeriesStartPage />} />
+            <Route path="/train" element={<Navigate to="/" replace />} />
+            <Route path="/train/difficult" element={<Navigate to="/" replace />} />
             <Route path="/train/tag/:tagId" element={<TrainPage mode="tag" />} />
             <Route path="/difficult" element={<DifficultWordsPage />} />
             <Route path="/words" element={<WordsPage />} />

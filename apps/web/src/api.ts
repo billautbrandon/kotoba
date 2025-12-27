@@ -166,6 +166,20 @@ export async function submitReview(wordId: number, result: ReviewResult): Promis
   }
 }
 
+export async function submitBulkReviews(
+  reviews: Array<{ wordId: number; result: ReviewResult }>,
+): Promise<{ appliedCount: number }> {
+  const response = await fetch("/api/reviews/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviews }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to submit bulk reviews");
+  }
+  return (await response.json()) as { appliedCount: number };
+}
+
 export async function exportBackup(): Promise<unknown> {
   const response = await fetch("/api/export");
   if (!response.ok) {

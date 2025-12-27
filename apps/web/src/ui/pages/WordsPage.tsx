@@ -376,43 +376,7 @@ export function WordsPage() {
 
       {words && words.length > 0 ? (
         <div style={{ marginTop: 16 }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Français</th>
-                <th>Kana / Kanji</th>
-                <th>Rōmaji</th>
-                <th>Tags</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {words.map((word) => (
-                <tr key={word.id}>
-                  <td>{word.french}</td>
-                  <td className="muted">{word.kanji ?? word.kana ?? "—"}</td>
-                  <td className="muted">{word.romaji ?? "—"}</td>
-                  <td className="muted">
-                    {word.tags.length > 0 ? word.tags.map((tag) => tag.name).join(", ") : "—"}
-                  </td>
-                  <td>
-                    <div className="row">
-                      <button className="button" type="button" onClick={() => startEdit(word)}>
-                        Modifier
-                      </button>
-                      <button
-                        className="button button--danger"
-                        type="button"
-                        onClick={() => handleDelete(word.id)}
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <WordsGroupedByTag words={words} startEdit={startEdit} handleDelete={handleDelete} />
         </div>
       ) : null}
 
@@ -450,6 +414,126 @@ export function WordsPage() {
           {jsonImportStatus ? <div className="muted">{jsonImportStatus}</div> : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function WordsGroupedByTag(props: {
+  words: WordWithTags[];
+  startEdit: (word: WordWithTags) => void;
+  handleDelete: (wordId: number) => Promise<void>;
+}) {
+  const groups = useMemo(() => {
+    const wordsByGroupKey = new Map<string, WordWithTags[]>();
+    for (const word of props.words) {
+      const tagNames = [...word.tags.map((tag) => tag.name)].sort((a, b) => a.localeCompare(b));
+      const groupKey = tagNames.length > 0 ? tagNames[0] : "Sans tag";
+      const groupWords = wordsByGroupKey.get(groupKey) ?? [];
+      groupWords.push(word);
+      wordsByGroupKey.set(groupKey, groupWords);
+    }
+
+    const groupKeys = Array.from(wordsByGroupKey.keys()).sort((a, b) => {
+      if (a === "Sans tag") return 1;
+      if (b === "Sans tag") return -1;
+      return a.localeCompare(b);
+    });
+
+    return groupKeys.map((groupKey) => ({
+      groupKey,
+      words: wordsByGroupKey.get(groupKey) ?? [],
+    }));
+  }, [props.words]);
+
+  const [collapsedByGroupKey, setCollapsedByGroupKey] = useState<Record<string, boolean>>(() => {
+    const initialState: Record<string, boolean> = {};
+    for (const group of groups) {
+      initialState[group.groupKey] = true;
+    }
+    return initialState;
+  });
+
+  useEffect(() => {
+    setCollapsedByGroupKey((previousValue) => {
+      const nextValue: Record<string, boolean> = { ...previousValue };
+      for (const group of groups) {
+        if (nextValue[group.groupKey] === undefined) {
+          nextValue[group.groupKey] = true;
+        }
+      }
+      return nextValue;
+    });
+  }, [groups]);
+
+  function toggleGroup(groupKey: string) {
+    setCollapsedByGroupKey((previousValue) => ({
+      ...previousValue,
+      [groupKey]: !(previousValue[groupKey] ?? false),
+    }));
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {groups.map((group) => {
+        const isCollapsed = collapsedByGroupKey[group.groupKey] ?? false;
+        return (
+          <div key={group.groupKey}>
+            <button
+              className="sectionHeader"
+              type="button"
+              onClick={() => toggleGroup(group.groupKey)}
+            >
+              <span className="sectionHeader__chevron">{isCollapsed ? "▸" : "▾"}</span>
+              <span className="sectionHeader__title">{group.groupKey}</span>
+              <span className="sectionHeader__meta muted">{group.words.length} mot(s)</span>
+            </button>
+
+            {isCollapsed ? null : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Français</th>
+                    <th>Kana / Kanji</th>
+                    <th>Rōmaji</th>
+                    <th>Tags</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.words.map((word) => (
+                    <tr key={word.id}>
+                      <td>{word.french}</td>
+                      <td className="muted">{word.kanji ?? word.kana ?? "—"}</td>
+                      <td className="muted">{word.romaji ?? "—"}</td>
+                      <td className="muted">
+                        {word.tags.length > 0 ? word.tags.map((tag) => tag.name).join(", ") : "—"}
+                      </td>
+                      <td>
+                        <div className="row">
+                          <button
+                            className="button"
+                            type="button"
+                            onClick={() => props.startEdit(word)}
+                          >
+                            Modifier
+                          </button>
+                          <button
+                            className="button button--danger"
+                            type="button"
+                            onClick={() => void props.handleDelete(word.id)}
+                          >
+                            Supprimer
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
