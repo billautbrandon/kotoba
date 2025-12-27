@@ -1,0 +1,16 @@
+{
+  "name": "kotoba",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @kotoba/api\" \"npm run dev -w @kotoba/web\"",
+    "build": "npm run build -w @kotoba/api && npm run build -w @kotoba/web",
+    "start": "npm run start -w @kotoba/api",
+    "biome:check": "biome check .",
+    "biome:fix": "biome check . --write"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "concurrently": "9.1.0"
+  }
+}

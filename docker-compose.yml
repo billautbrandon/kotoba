@@ -1,0 +1,19 @@
+services:
+  ganti-server:
+    image: node:20-bullseye
+    container_name: ganti-server
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - kotoba_node_modules:/app/node_modules
+      - kotoba_data:/app/data
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    command: bash -lc "npm install && npm run dev"
+
+volumes:
+  kotoba_node_modules:
+  kotoba_data:
+
+
