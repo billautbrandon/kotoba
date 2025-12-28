@@ -9,9 +9,8 @@ COPY apps/api/package.json ./apps/api/
 # Install dependencies
 RUN npm ci
 
-# Copy source code
+# Copy source code (tsconfig.json is already included in apps/api/)
 COPY apps/api ./apps/api
-COPY tsconfig.json ./apps/api/tsconfig.json 2>/dev/null || true
 
 # Build
 WORKDIR /app/apps/api
