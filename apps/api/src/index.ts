@@ -9,6 +9,13 @@ import { registerApiRoutes } from "./routes.js";
 const apiPort = Number(process.env.PORT ?? 3001);
 
 const app = express();
+
+// When running behind nginx in production, the API itself receives HTTP traffic from the proxy.
+// We must trust the proxy so Express can infer HTTPS from X-Forwarded-Proto.
+// This is required for secure cookies (cookie.secure=true) to be set by express-session.
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
 const allowedOrigins =
   process.env.NODE_ENV === "production"
     ? ["https://kotoba.ovh", "https://www.kotoba.ovh"]
