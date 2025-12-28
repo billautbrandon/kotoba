@@ -75,7 +75,20 @@ export function App() {
     };
   }, [isDropdownOpen]);
 
-  const isAuthenticated = Boolean(currentUser) && !isAuthLoading;
+  const isAuthenticated = Boolean(currentUser);
+
+  const requireAuth = (element: React.ReactElement) => {
+    // IMPORTANT: do not redirect while auth state is still loading,
+    // otherwise a refresh on /kanji (or any page) will always bounce to /login then /
+    // and you won't stay on the same page after refresh.
+    if (isAuthLoading) {
+      return <div className="muted">Chargement...</div>;
+    }
+    if (!currentUser) {
+      return <Navigate to="/login" replace state={{ from: location }} />;
+    }
+    return element;
+  };
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -245,54 +258,71 @@ export function App() {
             <Route
               path="/login"
               element={
-                isAuthenticated ? (
-                  <Navigate to="/" replace />
+                isAuthLoading ? (
+                  <div className="muted">Chargement...</div>
+                ) : currentUser ? (
+                  <Navigate
+                    to={
+                      (typeof location.state === "object" &&
+                      location.state &&
+                      "from" in location.state &&
+                      (location.state as { from?: { pathname?: string; search?: string } }).from?.pathname
+                        ? `${(location.state as { from?: { pathname?: string; search?: string } }).from?.pathname}${(location.state as { from?: { pathname?: string; search?: string } }).from?.search ?? ""}`
+                        : "/")
+                    }
+                    replace
+                  />
                 ) : (
                   <LoginPage
                     onAuthenticated={(user) => {
                       setCurrentUser(user);
-                      navigate("/", { replace: true });
+                      const from =
+                        typeof location.state === "object" &&
+                        location.state &&
+                        "from" in location.state
+                          ? (location.state as { from?: { pathname?: string; search?: string } }).from
+                          : undefined;
+                      navigate(from?.pathname ? `${from.pathname}${from.search ?? ""}` : "/", {
+                        replace: true,
+                      });
                     }}
                   />
                 )
               }
             />
 
-            <Route
-              path="/"
-              element={isAuthenticated ? <HomePage /> : <Navigate to="/login" replace />}
-            />
+            <Route path="/" element={requireAuth(<HomePage />)} />
             <Route
               path="/series/:tagId"
-              element={isAuthenticated ? <SeriesStartPage /> : <Navigate to="/login" replace />}
+              element={requireAuth(<SeriesStartPage />)}
             />
             <Route path="/train" element={<Navigate to="/" replace />} />
             <Route path="/train/difficult" element={<Navigate to="/" replace />} />
             <Route
               path="/train/tag/:tagId"
               element={
-                isAuthenticated ? <TrainPage mode="tag" /> : <Navigate to="/login" replace />
+                requireAuth(<TrainPage mode="tag" />)
               }
             />
             <Route
               path="/difficult"
-              element={isAuthenticated ? <DifficultWordsPage /> : <Navigate to="/login" replace />}
+              element={requireAuth(<DifficultWordsPage />)}
             />
             <Route
               path="/dictionary"
-              element={isAuthenticated ? <DictionaryPage /> : <Navigate to="/login" replace />}
+              element={requireAuth(<DictionaryPage />)}
             />
             <Route
               path="/kanji"
-              element={isAuthenticated ? <KanjiLearningPage /> : <Navigate to="/login" replace />}
+              element={requireAuth(<KanjiLearningPage />)}
             />
             <Route
               path="/words"
-              element={isAuthenticated ? <WordsPage /> : <Navigate to="/login" replace />}
+              element={requireAuth(<WordsPage />)}
             />
             <Route
               path="/settings"
-              element={isAuthenticated ? <ChangePasswordPage /> : <Navigate to="/login" replace />}
+              element={requireAuth(<ChangePasswordPage />)}
             />
             <Route path="*" element={<Navigate to="/train" replace />} />
           </Routes>

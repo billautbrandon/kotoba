@@ -1,7 +1,7 @@
 /**
  * Convertit un kanji en code Unicode puis en chemin SVG
  * @param kanji - Un caractère kanji (ex: "食")
- * @returns Le chemin vers le fichier SVG (ex: "/kanji/u98df.svg")
+ * @returns Le chemin vers le fichier SVG (ex: "/public/kanji/u98df.svg")
  */
 export function kanjiToSvgPath(kanji: string): string {
   if (!kanji || kanji.length === 0) {
@@ -15,7 +15,9 @@ export function kanjiToSvgPath(kanji: string): string {
   }
   // Convertir en hexadécimal avec préfixe "u" et extension ".svg"
   const hexCode = codePoint.toString(16).toLowerCase();
-  return `/kanji/u${hexCode}.svg`;
+  // In production, nginx serves static assets from dist/public at /public/*
+  // (and we also alias /kanji/* -> /public/kanji/* for backward compatibility).
+  return `/public/kanji/u${hexCode}.svg`;
 }
 
 /**

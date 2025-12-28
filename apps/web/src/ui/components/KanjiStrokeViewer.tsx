@@ -367,7 +367,7 @@ export function KanjiStrokeViewer({
           SVG non disponible
           <br />
           <span style={{ fontSize: "10px" }}>
-            (Ajoutez le fichier {kanjiToSvgPath(kanji).replace("/kanji/", "")} dans /public/kanji/)
+            (Ajoutez le fichier {kanjiToSvgPath(kanji).split("/").slice(-1)[0]} dans /public/kanji/)
           </span>
         </div>
       </div>

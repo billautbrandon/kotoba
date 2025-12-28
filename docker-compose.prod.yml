@@ -6,9 +6,11 @@ services:
     container_name: kotoba-api
     volumes:
       - ./data:/app/data
+      - kanji_svgs:/shared/kanji
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - KANJI_SVG_DIR=/shared/kanji
     env_file:
       - .env.prod
     restart: unless-stopped
@@ -40,6 +42,7 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
       - web_dist:/usr/share/nginx/html:ro
+      - kanji_svgs:/usr/share/nginx/html/public/kanji:ro
     depends_on:
       - api
       - web
@@ -55,5 +58,7 @@ volumes:
   kotoba_data:
     driver: local
   web_dist:
+    driver: local
+  kanji_svgs:
     driver: local
 

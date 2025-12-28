@@ -10,10 +10,21 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Chemin vers le dossier kanji
-// Dans Docker, le code s'exécute depuis /app
-// On utilise directement le chemin absolu pour éviter les problèmes de résolution de chemin
-const kanjiDir = "/app/apps/web/public/kanji";
+function resolveKanjiDir(): string {
+  // In production, we mount a shared volume that nginx serves from:
+  // - API writes SVGs to KANJI_SVG_DIR (e.g. /shared/kanji)
+  // - nginx serves them at /public/kanji/*
+  const envDir = process.env.KANJI_SVG_DIR;
+  if (envDir && envDir.trim()) {
+    return envDir.trim();
+  }
+
+  // Default: when running from `apps/api`, the sibling web public folder is at ../web/public/kanji
+  // This works both locally and in docker images where cwd is /app/apps/api
+  return path.resolve(process.cwd(), "../web/public/kanji");
+}
+
+const kanjiDir = resolveKanjiDir();
 
 // S'assurer que le dossier existe
 if (!fs.existsSync(kanjiDir)) {
