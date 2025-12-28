@@ -379,7 +379,7 @@ export function TrainPage(props: { mode: TrainMode }) {
               onClick={handleCancelSession}
               disabled={isSubmitting}
               style={{
-                background: showCancelConfirm ? "var(--color-danger)" : "transparent",
+                background: showCancelConfirm ? "var(--color-danger)" : "#fff",
                 color: showCancelConfirm ? "#ffffff" : "var(--color-text-soft)",
                 borderColor: showCancelConfirm ? "var(--color-danger)" : "var(--color-border)",
               }}

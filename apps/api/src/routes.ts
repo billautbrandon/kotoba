@@ -142,6 +142,38 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     });
   });
 
+  app.post(
+    "/api/auth/change-password",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const bodySchema = z.object({
+        currentPassword: z.string().min(1),
+        newPassword: z.string().min(8).max(200),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const userRow = database
+        .prepare("SELECT id, password_hash FROM users WHERE id = ?")
+        .get(userId) as { id: number; password_hash: string } | undefined;
+
+      if (!userRow) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      const isValid = await verifyPassword(body.currentPassword, userRow.password_hash);
+      if (!isValid) {
+        res.status(401).json({ error: "Current password is incorrect" });
+        return;
+      }
+
+      const newPasswordHash = await hashPassword(body.newPassword);
+      database.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newPasswordHash, userId);
+
+      res.status(200).json({ success: true });
+    }),
+  );
+
   app.use("/api", (req, res, next) => {
     if (req.path.startsWith("/auth") || req.path.startsWith("/health")) {
       next();

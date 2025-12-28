@@ -89,10 +89,26 @@ export async function logoutUser(): Promise<void> {
   }
 }
 
-export async function fetchWords(includeStats: boolean): Promise<WordWithStats[] | Word[]> {
-  const response = await fetch(`/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=0`, {
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const response = await fetch("/api/auth/change-password", {
+    method: "POST",
     credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPassword, newPassword }),
   });
+  if (!response.ok) {
+    const error = (await response.json()) as { error?: string };
+    throw new Error(error.error ?? "Failed to change password");
+  }
+}
+
+export async function fetchWords(includeStats: boolean): Promise<WordWithStats[] | Word[]> {
+  const response = await fetch(
+    `/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=0`,
+    {
+      credentials: "include",
+    },
+  );
   if (!response.ok) {
     throw new Error("Failed to fetch words");
   }
@@ -103,9 +119,12 @@ export async function fetchWords(includeStats: boolean): Promise<WordWithStats[]
 export async function fetchWordsWithTags(
   includeStats: boolean,
 ): Promise<WordWithTags[] | WordWithStatsAndTags[]> {
-  const response = await fetch(`/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=1`, {
-    credentials: "include",
-  });
+  const response = await fetch(
+    `/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=1`,
+    {
+      credentials: "include",
+    },
+  );
   if (!response.ok) {
     throw new Error("Failed to fetch words");
   }

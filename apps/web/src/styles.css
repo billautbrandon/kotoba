@@ -206,7 +206,7 @@ a {
   border: 2px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: 0 4px 16px var(--color-shadow-strong);
-  min-width: 180px;
+  min-width: 240px;
   z-index: 1000;
   overflow: hidden;
 }
@@ -319,7 +319,7 @@ a {
 
 .button {
   border: 2px solid var(--color-border);
-  background: var(--color-panel-subtle);
+  background: var(--color-panel);
   color: var(--color-text);
   border-radius: var(--radius-md);
   padding: 14px 24px;
@@ -456,7 +456,7 @@ a {
   width: 100%;
   border-radius: var(--radius-md);
   border: 2px solid var(--color-border);
-  background: var(--color-panel-subtle);
+  background: var(--color-panel);
   color: var(--color-text);
   padding: 14px 18px;
   font-size: 17px;
@@ -599,7 +599,7 @@ a {
 .dictionaryGrid {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
 
 .dictionaryCard {
@@ -615,7 +615,7 @@ a {
 .dictionaryCard__inner {
   position: relative;
   width: 100%;
-  min-height: 170px;
+  min-height: 200px;
   transform-style: preserve-3d;
   transition: transform 120ms ease-out;
 }
@@ -630,12 +630,14 @@ a {
   border-radius: var(--radius-xl);
   border: 2px solid var(--color-border);
   background: var(--color-panel);
-  padding: var(--space-5);
+  padding: var(--space-6);
   backface-visibility: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
   box-shadow: 0 2px 8px var(--color-shadow);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .dictionaryCard__face--back {
@@ -651,17 +653,26 @@ a {
 }
 
 .dictionaryCard__main {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: 0.1px;
   color: var(--color-text);
-  line-height: 1.4;
+  line-height: 1.5;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
 }
 
 .dictionaryCard__meta {
   margin-top: auto;
   color: var(--color-muted);
   font-size: 12px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .dictionaryCard__backGrid {
@@ -686,6 +697,10 @@ a {
 
 .dictionaryCard__rowValue {
   font-weight: 700;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  line-height: 1.5;
 }
 
 .dictionaryCard__note {
@@ -766,7 +781,7 @@ a {
 .textarea {
   width: 100%;
   border: 2px solid var(--color-border);
-  background: var(--color-panel-subtle);
+  background: var(--color-panel);
   color: var(--color-text);
   border-radius: var(--radius-md);
   padding: 12px 16px;

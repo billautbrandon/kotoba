@@ -3,6 +3,7 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from
 
 import type { User } from "../api";
 import { fetchMe, fetchSeries, logoutUser } from "../api";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { HomePage } from "./pages/HomePage";
@@ -129,12 +130,16 @@ export function App() {
         </button>
         {isDropdownOpen && (
           <div className="topbarUser__dropdown">
-            <div
-              className="topbarUser__dropdownItem"
-              style={{ fontWeight: 700, cursor: "default" }}
+            <button
+              className="topbarUser__dropdownItem topbarUser__dropdownItem--header"
+              type="button"
+              onClick={() => {
+                setIsDropdownOpen(false);
+                navigate("/settings");
+              }}
             >
               {currentUser.username}
-            </div>
+            </button>
             <button
               className="topbarUser__dropdownItem"
               type="button"
@@ -244,6 +249,10 @@ export function App() {
             <Route
               path="/words"
               element={isAuthenticated ? <WordsPage /> : <Navigate to="/login" replace />}
+            />
+            <Route
+              path="/settings"
+              element={isAuthenticated ? <ChangePasswordPage /> : <Navigate to="/login" replace />}
             />
             <Route path="*" element={<Navigate to="/train" replace />} />
           </Routes>

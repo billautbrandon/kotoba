@@ -357,7 +357,7 @@ export function WordsPage() {
                         padding: "8px 14px",
                         borderRadius: "var(--radius-md)",
                         border: `2px solid ${isSelected ? "var(--color-primary)" : "var(--color-border)"}`,
-                        background: isSelected ? "rgba(199, 62, 29, 0.1)" : "transparent",
+                        background: isSelected ? "rgba(199, 62, 29, 0.1)" : "#fff",
                         color: isSelected ? "var(--color-primary)" : "var(--color-text-soft)",
                         fontWeight: isSelected ? 700 : 600,
                         fontSize: "15px",

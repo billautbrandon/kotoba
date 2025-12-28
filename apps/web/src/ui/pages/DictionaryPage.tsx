@@ -106,6 +106,12 @@ export function DictionaryPage() {
 
   const otherLanguages = useMemo(() => getOtherLanguages(frontLanguage), [frontLanguage]);
 
+  const allWordIds = useMemo(() => new Set(words.map((word) => word.id)), [words]);
+  const allFlipped = useMemo(
+    () => allWordIds.size > 0 && Array.from(allWordIds).every((id) => flippedWordIds.has(id)),
+    [allWordIds, flippedWordIds],
+  );
+
   const wordsByTag = useMemo(() => {
     const grouped = new Map<string, WordWithTags[]>();
     words.forEach((word) => {
@@ -204,7 +210,21 @@ export function DictionaryPage() {
                 }}
                 aria-label="Vue en cartes"
               >
-                🃏
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ display: "block" }}
+                >
+                  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                  <path d="M5 3m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z" />
+                </svg>
               </button>
               <button
                 type="button"
@@ -226,6 +246,25 @@ export function DictionaryPage() {
               </button>
             </div>
           </div>
+
+          {viewMode === "cards" && words.length > 0 && (
+            <div className="field field--inline">
+              <button
+                className="button"
+                type="button"
+                onClick={() => {
+                  if (allFlipped) {
+                    setFlippedWordIds(new Set());
+                  } else {
+                    setFlippedWordIds(allWordIds);
+                  }
+                }}
+                style={{ whiteSpace: "nowrap" }}
+              >
+                {allFlipped ? "Masquer toutes les cartes" : "Afficher toutes les cartes"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -237,11 +276,7 @@ export function DictionaryPage() {
           const isCollapsed = collapsedTags[tag] ?? false;
           return (
             <div key={tag} style={{ marginBottom: "var(--space-10)" }}>
-              <button
-                className="sectionHeader"
-                type="button"
-                onClick={() => toggleTag(tag)}
-              >
+              <button className="sectionHeader" type="button" onClick={() => toggleTag(tag)}>
                 <span className="sectionHeader__chevron">{isCollapsed ? "▸" : "▾"}</span>
                 <span className="sectionHeader__title">{tag}</span>
                 <span className="sectionHeader__meta muted">{tagWords.length} mot(s)</span>
