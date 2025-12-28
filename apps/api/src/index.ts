@@ -40,6 +40,8 @@ const sessionConfig = {
     secure: process.env.NODE_ENV === "production",
     maxAge: 1000 * 60 * 60 * 24,
     path: "/",
+    // Do NOT set domain explicitly - let browser use default (current domain)
+    // Setting domain explicitly can cause issues with cookies
   },
 };
 
@@ -54,19 +56,24 @@ if (process.env.NODE_ENV === "production") {
 
 app.use(session(sessionConfig));
 
-// Debug middleware to log session creation
+// Debug middleware to log session creation and Set-Cookie headers
 if (process.env.NODE_ENV === "production") {
   app.use((req, res, next) => {
     if (req.path.startsWith("/api/auth/login") || req.path.startsWith("/api/auth/register")) {
-      res.on("finish", () => {
+      const originalEnd = res.end;
+      res.end = function (chunk?: unknown, encoding?: unknown, cb?: unknown) {
         if (req.session && req.session.userId) {
           console.log("[kotoba/api] Session created:", {
             userId: req.session.userId,
             cookie: req.session.cookie,
             sessionId: req.sessionID,
           });
+          // Log Set-Cookie header
+          const setCookieHeader = res.getHeader("Set-Cookie");
+          console.log("[kotoba/api] Set-Cookie header:", setCookieHeader);
         }
-      });
+        return originalEnd.call(this, chunk, encoding, cb);
+      };
     }
     next();
   });
