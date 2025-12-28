@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile.api
     container_name: kotoba-api
-    working_dir: /app
     volumes:
       - ./data:/app/data
     environment:
