@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import { type WordWithStats, fetchSeriesWords, submitBulkReviews } from "../../api";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  type WordWithStats,
+  computeFailRate,
+  fetchSeriesWords,
+  submitBulkReviews,
+} from "../../api";
 
 type TrainMode = "tag";
 type SessionMode = "manual" | "timer";
@@ -10,10 +15,14 @@ type PromptMode = "french" | "romaji" | "kana" | "kanji";
 export function TrainPage(props: { mode: TrainMode }) {
   const routeParams = useParams();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const tagId = props.mode === "tag" ? Number(routeParams.tagId) : null;
+  const tagName = searchParams.get("name") ?? null;
   const sessionMode = (searchParams.get("mode") as SessionMode | null) ?? "manual";
   const timerSeconds = Number(searchParams.get("seconds") ?? 5);
   const promptMode = (searchParams.get("prompt") as PromptMode | null) ?? "french";
+  const onlyDifficult = searchParams.get("difficult") === "1";
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const [words, setWords] = useState<WordWithStats[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -31,7 +40,11 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [wordStartedAtMs, setWordStartedAtMs] = useState<number | null>(null);
   const [clockNowMs, setClockNowMs] = useState<number>(() => Date.now());
 
-  const modeLabel = `Série (tag ${tagId ?? "?"})`;
+  const modeLabel = useMemo(() => {
+    if (tagName) return `Série (${tagName})`;
+    if (tagId) return `Série (tag ${tagId})`;
+    return "Série";
+  }, [tagId, tagName]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -54,7 +67,15 @@ export function TrainPage(props: { mode: TrainMode }) {
         }
         const loadedWords = await fetchSeriesWords(tagId);
 
-        const shuffledWords = shuffleWords(loadedWords);
+        let filteredWords = loadedWords;
+        if (onlyDifficult) {
+          filteredWords = loadedWords.filter((word) => {
+            const failRate = computeFailRate(word);
+            return word.score < 0 || failRate > 0.5;
+          });
+        }
+
+        const shuffledWords = shuffleWords(filteredWords);
         if (!isCancelled) {
           setWords(shuffledWords);
         }
@@ -74,7 +95,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     return () => {
       isCancelled = true;
     };
-  }, [tagId]);
+  }, [tagId, onlyDifficult]);
 
   const currentWord = useMemo(() => {
     if (!words || words.length === 0) return null;
@@ -273,18 +294,6 @@ export function TrainPage(props: { mode: TrainMode }) {
     return allFields.filter((field) => field.key !== promptMode);
   }, [currentWord, promptMode]);
 
-  const settingsLink = useMemo(() => {
-    if (!tagId) return "/series/";
-    const query = new URLSearchParams();
-    query.set("name", `tag ${tagId}`);
-    query.set("mode", sessionMode);
-    if (sessionMode === "timer") {
-      query.set("seconds", String(timerSeconds));
-    }
-    query.set("prompt", promptMode);
-    return `/series/${tagId}?${query.toString()}`;
-  }, [promptMode, sessionMode, tagId, timerSeconds]);
-
   function setRating(wordId: number, rating: SessionRating) {
     setRatingsByWordId((previousValue) => ({ ...previousValue, [wordId]: rating }));
   }
@@ -307,22 +316,25 @@ export function TrainPage(props: { mode: TrainMode }) {
     }
   }
 
+  function goToPreviousWord() {
+    setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
+    setIsRevealed(false);
+  }
+
+  function handleCancelSession() {
+    if (showCancelConfirm) {
+      navigate("/");
+    } else {
+      setShowCancelConfirm(true);
+    }
+  }
+
   return (
     <div>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{modeLabel}</div>
-          <div className="muted" style={{ marginTop: 4 }}>
-            Passe les mots, puis note toute la série à la fin.
-          </div>
-        </div>
-        <div className="row">
-          <Link className="button" to="/">
-            Séries
-          </Link>
-          <Link className="button" to={settingsLink}>
-            Réglages
-          </Link>
+      <div style={{ marginBottom: "var(--space-6)" }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{modeLabel}</div>
+        <div className="muted" style={{ marginTop: 4 }}>
+          Passe les mots, puis note toute la série à la fin.
         </div>
       </div>
 
@@ -346,7 +358,78 @@ export function TrainPage(props: { mode: TrainMode }) {
 
       {currentWord && !isSessionFinished ? (
         <div style={{ marginTop: 20 }}>
-          <div className="wordCard">
+          <div
+            style={{
+              marginBottom: "var(--space-6)",
+              padding: "var(--space-5)",
+              background: "var(--color-panel-subtle)",
+              border: "2px solid var(--color-border)",
+              borderRadius: "var(--radius-lg)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-primary)" }}>
+              Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
+            </div>
+            <button
+              className="button"
+              type="button"
+              onClick={handleCancelSession}
+              disabled={isSubmitting}
+              style={{
+                background: showCancelConfirm ? "var(--color-danger)" : "transparent",
+                color: showCancelConfirm ? "#ffffff" : "var(--color-text-soft)",
+                borderColor: showCancelConfirm ? "var(--color-danger)" : "var(--color-border)",
+              }}
+            >
+              {showCancelConfirm ? "Confirmer l'annulation" : "Annuler la série"}
+            </button>
+          </div>
+
+          {showCancelConfirm && (
+            <div
+              style={{
+                marginBottom: "var(--space-6)",
+                padding: "var(--space-5)",
+                background: "rgba(199, 62, 29, 0.1)",
+                border: "2px solid var(--color-primary)",
+                borderRadius: "var(--radius-lg)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "var(--space-4)",
+              }}
+            >
+              <div style={{ fontSize: "16px", fontWeight: 600 }}>
+                Êtes-vous sûr de vouloir annuler cette série ? Vos progrès ne seront pas
+                enregistrés.
+              </div>
+              <button
+                className="button"
+                type="button"
+                onClick={() => setShowCancelConfirm(false)}
+                style={{ flexShrink: 0 }}
+              >
+                Non, continuer
+              </button>
+            </div>
+          )}
+
+          <div
+            className="wordCard"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "500px",
+              padding: "var(--space-12)",
+              maxWidth: "900px",
+              margin: "0 auto",
+            }}
+          >
             {timerUi ? (
               <div style={{ marginBottom: 12 }}>
                 <div className="trainTimerRow">
@@ -367,62 +450,146 @@ export function TrainPage(props: { mode: TrainMode }) {
               </div>
             ) : null}
 
-            <div className="wordCard__prompt">À écrire sur papier (ou dans ta tête)</div>
-            <div className="wordCard__main">{promptText}</div>
+            <div
+              className="wordCard__main"
+              style={{
+                fontSize: "64px",
+                textAlign: "center",
+                marginBottom: "var(--space-10)",
+                fontWeight: 800,
+                letterSpacing: "0.5px",
+                lineHeight: 1.2,
+              }}
+            >
+              {promptText}
+            </div>
 
-            {isRevealed ? (
-              <div className="wordCard__answer">
-                <div className="wordAnswerGrid">
-                  {revealFields.map((field) => (
-                    <React.Fragment key={field.key}>
-                      <div className="wordAnswerGrid__label">{field.label}</div>
-                      <div className="wordAnswerGrid__value">{field.value ?? "—"}</div>
-                    </React.Fragment>
-                  ))}
-                </div>
-                {currentWord.note ? (
-                  <div style={{ marginTop: 8 }} className="muted">
-                    {currentWord.note}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="revealContainer">
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Clique pour afficher la réponse, puis continue.
-                </div>
+            {!isRevealed ? (
+              <div className="row" style={{ gap: "var(--space-4)", marginTop: "var(--space-6)" }}>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={goToPreviousWord}
+                  disabled={currentIndex === 0 || isSubmitting}
+                  style={{ padding: "var(--space-4) var(--space-6)", fontSize: "16px" }}
+                >
+                  ← Précédent
+                </button>
                 <button
                   className="button button--primary revealButton"
                   type="button"
                   onClick={() => setIsRevealed(true)}
+                  style={{ padding: "var(--space-4) var(--space-8)", fontSize: "16px" }}
                 >
                   Afficher la réponse
                 </button>
-              </div>
-            )}
-
-            {isRevealed && sessionMode === "manual" ? (
-              <div style={{ marginTop: 16 }} className="row">
                 <button
                   className="button"
                   type="button"
                   onClick={() => advanceToNextWord()}
                   disabled={isSubmitting}
+                  style={{ padding: "var(--space-4) var(--space-6)", fontSize: "16px" }}
                 >
-                  Suivant
+                  Suivant →
                 </button>
               </div>
-            ) : null}
+            ) : (
+              <>
+                <div
+                  className="wordCard__answer"
+                  style={{
+                    width: "100%",
+                    maxWidth: "700px",
+                    textAlign: "center",
+                    marginBottom: "var(--space-8)",
+                  }}
+                >
+                  <div
+                    className="wordAnswerGrid"
+                    style={{
+                      gridTemplateColumns: "120px 1fr",
+                      gap: "var(--space-5) var(--space-6)",
+                      marginBottom: "var(--space-6)",
+                    }}
+                  >
+                    {revealFields.map((field) => (
+                      <React.Fragment key={field.key}>
+                        <div
+                          className="wordAnswerGrid__label"
+                          style={{
+                            fontSize: "14px",
+                            textAlign: "right",
+                            paddingTop: "var(--space-2)",
+                          }}
+                        >
+                          {field.label}
+                        </div>
+                        <div
+                          className="wordAnswerGrid__value"
+                          style={{ fontSize: "28px", fontWeight: 700, textAlign: "left" }}
+                        >
+                          {field.value ?? "—"}
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  {currentWord.note ? (
+                    <div
+                      style={{
+                        marginTop: "var(--space-8)",
+                        padding: "var(--space-5)",
+                        background: "var(--color-panel-subtle)",
+                        borderRadius: "var(--radius-lg)",
+                        fontSize: "16px",
+                        lineHeight: 1.6,
+                      }}
+                      className="muted"
+                    >
+                      {currentWord.note}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="row" style={{ gap: "var(--space-4)" }}>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={goToPreviousWord}
+                    disabled={currentIndex === 0 || isSubmitting}
+                    style={{ padding: "var(--space-4) var(--space-6)", fontSize: "16px" }}
+                  >
+                    ← Précédent
+                  </button>
+                  <button
+                    className="button button--primary"
+                    type="button"
+                    onClick={() => advanceToNextWord()}
+                    disabled={isSubmitting}
+                    style={{ padding: "var(--space-4) var(--space-6)", fontSize: "16px" }}
+                  >
+                    Suivant →
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
-          <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>
-            Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0} — mode{" "}
-            <strong>{sessionMode === "manual" ? "manuel" : `timer ${timerSeconds}s`}</strong> —
-            question: <strong>{promptLabel}</strong>
+          <div
+            className="muted"
+            style={{
+              marginTop: "var(--space-4)",
+              fontSize: 13,
+              padding: "var(--space-3)",
+              background: "var(--color-panel-subtle)",
+              borderRadius: "var(--radius-md)",
+            }}
+          >
+            Mode <strong>{sessionMode === "manual" ? "manuel" : `timer ${timerSeconds}s`}</strong> —
+            Question: <strong>{promptLabel}</strong>
             {sessionMode === "manual" ? (
               <>
                 {" "}
-                — raccourcis: <strong>→</strong> / <strong>Entrée</strong>
+                — Raccourcis: <strong>→</strong> / <strong>Entrée</strong> pour avancer,{" "}
+                <strong>←</strong> pour revenir
               </>
             ) : null}
           </div>

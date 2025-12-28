@@ -61,12 +61,16 @@ export async function registerUser(username: string, password: string): Promise<
   return payload.user;
 }
 
-export async function loginUser(username: string, password: string): Promise<User> {
+export async function loginUser(
+  username: string,
+  password: string,
+  rememberMe?: boolean,
+): Promise<User> {
   const response = await fetch("/api/auth/login", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, rememberMe: rememberMe ?? false }),
   });
   if (!response.ok) {
     throw new Error("Failed to login");

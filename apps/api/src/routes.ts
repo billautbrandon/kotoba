@@ -104,6 +104,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       const bodySchema = z.object({
         username: z.string().min(1),
         password: z.string().min(1),
+        rememberMe: z.boolean().optional(),
       });
       const body = bodySchema.parse(req.body);
       const username = body.username.trim().toLowerCase();
@@ -121,6 +122,12 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       if (!isValid) {
         res.status(401).json({ error: "Invalid credentials" });
         return;
+      }
+
+      if (body.rememberMe) {
+        req.session.cookie.maxAge = 1000 * 60 * 60 * 24 * 30;
+      } else {
+        req.session.cookie.maxAge = 1000 * 60 * 60 * 24;
       }
 
       req.session.userId = userRow.id;

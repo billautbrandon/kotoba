@@ -29,6 +29,7 @@ export function SeriesStartPage() {
   const [promptMode, setPromptMode] = useState<PromptMode>(() => {
     return loadSeriesSettingsFromStorage().promptMode;
   });
+  const [onlyDifficult, setOnlyDifficult] = useState<boolean>(false);
 
   const tagLabel = useMemo(() => {
     if (tagNameFromQuery) return tagNameFromQuery;
@@ -42,18 +43,26 @@ export function SeriesStartPage() {
 
   function start() {
     if (!Number.isFinite(tagId)) return;
+    const difficultParam = onlyDifficult ? "&difficult=1" : "";
+    const nameParam = tagNameFromQuery ? `&name=${encodeURIComponent(tagNameFromQuery)}` : "";
     if (sessionMode === "manual") {
-      navigate(`/train/tag/${tagId}?mode=manual&prompt=${promptMode}`);
+      navigate(`/train/tag/${tagId}?mode=manual&prompt=${promptMode}${difficultParam}${nameParam}`);
       return;
     }
-    navigate(`/train/tag/${tagId}?mode=timer&seconds=${timerSeconds}&prompt=${promptMode}`);
+    navigate(
+      `/train/tag/${tagId}?mode=timer&seconds=${timerSeconds}&prompt=${promptMode}${difficultParam}${nameParam}`,
+    );
   }
 
   return (
     <div>
-      <div style={{ fontSize: 18, fontWeight: 700 }}>Démarrer une série</div>
-      <div className="muted" style={{ marginTop: 4 }}>
-        Série: <strong>{tagLabel}</strong>
+      <div className="pageHeader">
+        <div>
+          <h1 className="pageTitle">Démarrer une série</h1>
+          <p className="pageSubtitle">
+            Série: <strong>{tagLabel}</strong>
+          </p>
+        </div>
       </div>
 
       {!Number.isFinite(tagId) ? (
@@ -61,94 +70,174 @@ export function SeriesStartPage() {
           Tag invalide.
         </div>
       ) : (
-        <div style={{ marginTop: 16 }}>
-          <div className="wordCard">
-            <div className="muted" style={{ fontSize: 12 }}>
-              Mode
-            </div>
-
-            <div className="row" style={{ marginTop: 10 }}>
-              <label
-                className="nav__link"
-                style={{ display: "flex", gap: 8, alignItems: "center" }}
-              >
-                <input
-                  type="radio"
-                  checked={sessionMode === "manual"}
-                  onChange={() => setSessionMode("manual")}
-                />
-                Manuel
-              </label>
-              <label
-                className="nav__link"
-                style={{ display: "flex", gap: 8, alignItems: "center" }}
-              >
-                <input
-                  type="radio"
-                  checked={sessionMode === "timer"}
-                  onChange={() => setSessionMode("timer")}
-                />
-                Temps
-              </label>
-            </div>
-
-            {sessionMode === "manual" ? (
-              <div className="muted" style={{ marginTop: 10 }}>
-                Raccourcis: <strong>→</strong> / <strong>Entrée</strong> pour avancer,{" "}
-                <strong>←</strong> pour revenir.
-              </div>
-            ) : (
-              <div style={{ marginTop: 12 }}>
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-                  Durée par mot
-                </div>
-                <div className="row">
-                  {[3, 5, 8].map((seconds) => (
-                    <button
-                      key={seconds}
-                      className={`button ${timerSeconds === seconds ? "button--primary" : ""}`}
-                      type="button"
-                      onClick={() => setTimerSeconds(seconds)}
-                    >
-                      {seconds}s
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ marginTop: 16 }}>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-                Question (mode)
-              </div>
-              <div className="row">
-                {(
-                  [
-                    ["french", "FR"],
-                    ["romaji", "Rōmaji"],
-                    ["kana", "Kana"],
-                    ["kanji", "Kanji"],
-                  ] as Array<[PromptMode, string]>
-                ).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    className={`button ${promptMode === mode ? "button--primary" : ""}`}
-                    type="button"
-                    onClick={() => setPromptMode(mode)}
+        <div style={{ marginTop: "var(--space-8)" }}>
+          <div className="panel">
+            <div className="panel__content">
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-8)" }}>
+                <div>
+                  <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "var(--space-4)" }}>
+                    Mode d'entraînement
+                  </h2>
+                  <div
+                    className="row"
+                    style={{ gap: "var(--space-3)", marginBottom: "var(--space-4)" }}
                   >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "var(--space-3)",
+                        cursor: "pointer",
+                        padding: "var(--space-4)",
+                        border: `2px solid ${sessionMode === "manual" ? "var(--color-primary)" : "var(--color-border)"}`,
+                        borderRadius: "var(--radius-md)",
+                        background:
+                          sessionMode === "manual" ? "rgba(199, 62, 29, 0.1)" : "transparent",
+                        flex: 1,
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        checked={sessionMode === "manual"}
+                        onChange={() => setSessionMode("manual")}
+                        style={{ width: "20px", height: "20px", cursor: "pointer" }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600 }}>Manuel</div>
+                        <div className="muted" style={{ fontSize: "14px", marginTop: "4px" }}>
+                          Raccourcis: <strong>→</strong> / <strong>Entrée</strong> pour avancer,{" "}
+                          <strong>←</strong> pour revenir
+                        </div>
+                      </div>
+                    </label>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "var(--space-3)",
+                        cursor: "pointer",
+                        padding: "var(--space-4)",
+                        border: `2px solid ${sessionMode === "timer" ? "var(--color-primary)" : "var(--color-border)"}`,
+                        borderRadius: "var(--radius-md)",
+                        background:
+                          sessionMode === "timer" ? "rgba(199, 62, 29, 0.1)" : "transparent",
+                        flex: 1,
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        checked={sessionMode === "timer"}
+                        onChange={() => setSessionMode("timer")}
+                        style={{ width: "20px", height: "20px", cursor: "pointer" }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600 }}>Temps</div>
+                        <div className="muted" style={{ fontSize: "14px", marginTop: "4px" }}>
+                          Durée automatique par mot
+                        </div>
+                      </div>
+                    </label>
+                  </div>
 
-            <div className="row" style={{ marginTop: 16 }}>
-              <button className="button button--primary" type="button" onClick={() => start()}>
-                Démarrer
-              </button>
-              <Link className="button" to="/">
-                Retour
-              </Link>
+                  {sessionMode === "timer" && (
+                    <div>
+                      <div
+                        className="muted"
+                        style={{ fontSize: "14px", marginBottom: "var(--space-3)" }}
+                      >
+                        Durée par mot
+                      </div>
+                      <div className="row" style={{ gap: "var(--space-3)" }}>
+                        {[3, 5, 8].map((seconds) => (
+                          <button
+                            key={seconds}
+                            className={`button ${timerSeconds === seconds ? "button--primary" : ""}`}
+                            type="button"
+                            onClick={() => setTimerSeconds(seconds)}
+                          >
+                            {seconds}s
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    borderTop: "2px solid var(--color-border)",
+                    paddingTop: "var(--space-8)",
+                  }}
+                >
+                  <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "var(--space-4)" }}>
+                    Format de question
+                  </h2>
+                  <div className="row" style={{ gap: "var(--space-3)" }}>
+                    {(
+                      [
+                        ["french", "FR"],
+                        ["romaji", "Rōmaji"],
+                        ["kana", "Kana"],
+                        ["kanji", "Kanji"],
+                      ] as Array<[PromptMode, string]>
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        className={`button ${promptMode === mode ? "button--primary" : ""}`}
+                        type="button"
+                        onClick={() => setPromptMode(mode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    borderTop: "2px solid var(--color-border)",
+                    paddingTop: "var(--space-8)",
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "var(--space-3)",
+                      cursor: "pointer",
+                      fontSize: "16px",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={onlyDifficult}
+                      onChange={(e) => setOnlyDifficult(e.target.checked)}
+                      style={{ width: "20px", height: "20px", cursor: "pointer" }}
+                    />
+                    <span>Uniquement les mots difficiles</span>
+                  </label>
+                </div>
+
+                <div
+                  style={{
+                    borderTop: "2px solid var(--color-border)",
+                    paddingTop: "var(--space-8)",
+                  }}
+                >
+                  <div className="row" style={{ gap: "var(--space-3)" }}>
+                    <button
+                      className="button button--primary"
+                      type="button"
+                      onClick={() => start()}
+                    >
+                      Démarrer
+                    </button>
+                    <Link className="button" to="/">
+                      Retour
+                    </Link>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

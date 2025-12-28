@@ -10,6 +10,7 @@ export function LoginPage(props: { onAuthenticated: (user: User) => void }) {
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -43,7 +44,7 @@ export function LoginPage(props: { onAuthenticated: (user: User) => void }) {
 
       const user =
         mode === "login"
-          ? await loginUser(normalizedUsername, password)
+          ? await loginUser(normalizedUsername, password, rememberMe)
           : await registerUser(normalizedUsername, password);
       props.onAuthenticated(user);
     } catch {
@@ -88,6 +89,27 @@ export function LoginPage(props: { onAuthenticated: (user: User) => void }) {
               placeholder="••••••••"
             />
           </label>
+
+          {mode === "login" && (
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-3)",
+                cursor: "pointer",
+                fontSize: "15px",
+                marginTop: "var(--space-2)",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                style={{ width: "18px", height: "18px", cursor: "pointer" }}
+              />
+              <span>Rester connecté</span>
+            </label>
+          )}
 
           {errorMessage ? <div className="formError">{errorMessage}</div> : null}
 

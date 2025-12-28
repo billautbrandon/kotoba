@@ -241,163 +241,201 @@ export function WordsPage() {
 
   return (
     <div>
-      <div style={{ fontSize: 18, fontWeight: 700 }}>Mots</div>
-      <div className="muted" style={{ marginTop: 4 }}>
-        {wordsCount} mot(s). Ajoute le français, puis (optionnel) kana/kanji/romaji.
+      <div className="pageHeader">
+        <div>
+          <h1 className="pageTitle">Mots</h1>
+          <p className="pageSubtitle">
+            {wordsCount} mot(s). Ajoute le français, puis (optionnel) kana/kanji/romaji.
+          </p>
+        </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: "var(--space-8)" }}>
         <form onSubmit={handleSubmit}>
-          <div className="row">
-            <div className="field" style={{ flex: "1 1 220px" }}>
-              <label htmlFor={frenchInputId}>Français</label>
-              <input
-                id={frenchInputId}
-                className="input"
-                value={formState.french}
-                onChange={(event) => setFormState({ ...formState, french: event.target.value })}
-              />
+          <div
+            style={{
+              padding: "var(--space-6)",
+              border: "2px solid var(--color-border)",
+              borderRadius: "var(--radius-lg)",
+              background: "var(--color-panel-subtle)",
+            }}
+          >
+            <div className="row" style={{ gap: "var(--space-4)" }}>
+              <div className="field" style={{ flex: "1 1 240px" }}>
+                <label htmlFor={frenchInputId}>Français</label>
+                <input
+                  id={frenchInputId}
+                  className="input"
+                  value={formState.french}
+                  onChange={(event) => setFormState({ ...formState, french: event.target.value })}
+                  placeholder="Ex: Bonjour"
+                />
+              </div>
+              <div className="field" style={{ flex: "1 1 200px" }}>
+                <label htmlFor={kanaInputId}>Kana</label>
+                <input
+                  id={kanaInputId}
+                  className="input"
+                  value={formState.kana}
+                  onChange={(event) => setFormState({ ...formState, kana: event.target.value })}
+                  placeholder="Ex: こんにちは"
+                />
+              </div>
+              <div className="field" style={{ flex: "1 1 200px" }}>
+                <label htmlFor={kanjiInputId}>Kanji</label>
+                <input
+                  id={kanjiInputId}
+                  className="input"
+                  value={formState.kanji}
+                  onChange={(event) => setFormState({ ...formState, kanji: event.target.value })}
+                  placeholder="Ex: 今日は"
+                />
+              </div>
+              <div className="field" style={{ flex: "1 1 200px" }}>
+                <label htmlFor={romajiInputId}>Rōmaji</label>
+                <input
+                  id={romajiInputId}
+                  className="input"
+                  value={formState.romaji}
+                  onChange={(event) => setFormState({ ...formState, romaji: event.target.value })}
+                  placeholder="Ex: konnichiwa"
+                />
+              </div>
             </div>
-            <div className="field" style={{ flex: "1 1 180px" }}>
-              <label htmlFor={kanaInputId}>Kana</label>
-              <input
-                id={kanaInputId}
-                className="input"
-                value={formState.kana}
-                onChange={(event) => setFormState({ ...formState, kana: event.target.value })}
-              />
-            </div>
-            <div className="field" style={{ flex: "1 1 180px" }}>
-              <label htmlFor={kanjiInputId}>Kanji</label>
-              <input
-                id={kanjiInputId}
-                className="input"
-                value={formState.kanji}
-                onChange={(event) => setFormState({ ...formState, kanji: event.target.value })}
-              />
-            </div>
-            <div className="field" style={{ flex: "1 1 180px" }}>
-              <label htmlFor={romajiInputId}>Rōmaji</label>
-              <input
-                id={romajiInputId}
-                className="input"
-                value={formState.romaji}
-                onChange={(event) => setFormState({ ...formState, romaji: event.target.value })}
-              />
-            </div>
-          </div>
 
-          <div className="field" style={{ marginTop: 12 }}>
-            <label htmlFor={noteTextareaId}>Note</label>
-            <textarea
-              id={noteTextareaId}
-              className="textarea"
-              value={formState.note}
-              onChange={(event) => setFormState({ ...formState, note: event.target.value })}
-            />
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-              Tags (un mot peut avoir plusieurs tags)
-            </div>
-            <div className="row" style={{ alignItems: "center" }}>
-              <input
-                className="input"
-                style={{ maxWidth: 280 }}
-                value={newTagName}
-                placeholder="Nouveau tag…"
-                onChange={(event) => setNewTagName(event.target.value)}
+            <div className="field" style={{ marginTop: "var(--space-5)" }}>
+              <label htmlFor={noteTextareaId}>Note</label>
+              <textarea
+                id={noteTextareaId}
+                className="textarea"
+                value={formState.note}
+                onChange={(event) => setFormState({ ...formState, note: event.target.value })}
+                placeholder="Note optionnelle..."
               />
-              <button className="button" type="button" onClick={() => handleCreateTag()}>
-                Ajouter le tag
+            </div>
+
+            <div style={{ marginTop: "var(--space-5)" }}>
+              <div className="field__label" style={{ marginBottom: "var(--space-3)" }}>
+                Tags (un mot peut avoir plusieurs tags)
+              </div>
+              <div className="row" style={{ alignItems: "center", gap: "var(--space-3)" }}>
+                <input
+                  className="input"
+                  style={{ flex: "0 1 300px" }}
+                  value={newTagName}
+                  placeholder="Nouveau tag…"
+                  onChange={(event) => setNewTagName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleCreateTag();
+                    }
+                  }}
+                />
+                <button className="button" type="button" onClick={() => void handleCreateTag()}>
+                  Ajouter le tag
+                </button>
+              </div>
+
+              <div
+                className="row"
+                style={{ marginTop: "var(--space-4)", gap: "var(--space-3)", flexWrap: "wrap" }}
+              >
+                {(tags ?? []).map((tag) => {
+                  const isSelected = formState.selectedTagIds.includes(tag.id);
+                  const checkboxId = `tag-${tag.id}`;
+                  return (
+                    <label
+                      key={tag.id}
+                      htmlFor={checkboxId}
+                      style={{
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "var(--space-2)",
+                        userSelect: "none",
+                        padding: "8px 14px",
+                        borderRadius: "var(--radius-md)",
+                        border: `2px solid ${isSelected ? "var(--color-primary)" : "var(--color-border)"}`,
+                        background: isSelected ? "rgba(199, 62, 29, 0.1)" : "transparent",
+                        color: isSelected ? "var(--color-primary)" : "var(--color-text-soft)",
+                        fontWeight: isSelected ? 700 : 600,
+                        fontSize: "15px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <input
+                        id={checkboxId}
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleTag(tag.id)}
+                        style={{ cursor: "pointer" }}
+                      />
+                      {tag.name}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="row" style={{ marginTop: "var(--space-6)", gap: "var(--space-3)" }}>
+              <button className="button button--primary" type="submit">
+                {isEditing ? "Mettre à jour" : "Ajouter le mot"}
               </button>
+              {isEditing ? (
+                <button className="button" type="button" onClick={() => cancelEdit()}>
+                  Annuler
+                </button>
+              ) : null}
             </div>
-
-            <div className="row" style={{ marginTop: 10 }}>
-              {(tags ?? []).map((tag) => {
-                const isSelected = formState.selectedTagIds.includes(tag.id);
-                const checkboxId = `tag-${tag.id}`;
-                return (
-                  <label
-                    key={tag.id}
-                    htmlFor={checkboxId}
-                    className="nav__link"
-                    style={{
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      userSelect: "none",
-                      color: isSelected ? "var(--color-text)" : "var(--color-muted)",
-                      borderColor: isSelected
-                        ? "rgba(122, 162, 255, 0.35)"
-                        : "rgba(255, 255, 255, 0.08)",
-                      background: isSelected ? "rgba(122, 162, 255, 0.12)" : "transparent",
-                    }}
-                  >
-                    <input
-                      id={checkboxId}
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleTag(tag.id)}
-                    />
-                    {tag.name}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="row" style={{ marginTop: 12 }}>
-            <button className="button button--primary" type="submit">
-              {isEditing ? "Mettre à jour" : "Ajouter"}
-            </button>
-            {isEditing ? (
-              <button className="button" type="button" onClick={() => cancelEdit()}>
-                Annuler
-              </button>
-            ) : null}
           </div>
         </form>
       </div>
 
       {errorMessage ? (
-        <div style={{ marginTop: 12 }} className="muted">
-          Erreur: {errorMessage}
+        <div style={{ marginTop: "var(--space-5)" }} className="formError">
+          {errorMessage}
         </div>
       ) : null}
 
       {isLoading ? (
-        <div style={{ marginTop: 16 }} className="muted">
+        <div style={{ marginTop: "var(--space-6)" }} className="muted">
           Chargement…
         </div>
       ) : null}
 
       {words && words.length > 0 ? (
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: "var(--space-10)" }}>
           <WordsGroupedByTag words={words} startEdit={startEdit} handleDelete={handleDelete} />
         </div>
       ) : null}
 
-      <div style={{ marginTop: 24 }}>
-        <div style={{ fontSize: 16, fontWeight: 750 }}>Import / Export JSON</div>
-        <div className="muted" style={{ marginTop: 4 }}>
+      <div
+        style={{
+          marginTop: "var(--space-10)",
+          paddingTop: "var(--space-8)",
+          borderTop: "2px solid var(--color-border)",
+        }}
+      >
+        <h2 className="pageTitle" style={{ fontSize: "28px", marginBottom: "var(--space-3)" }}>
+          Import / Export JSON
+        </h2>
+        <p className="pageSubtitle" style={{ marginBottom: "var(--space-5)" }}>
           Colle un JSON (tableau de mots, ou export complet) pour ajouter en masse, et exporte pour
           backup.
-        </div>
+        </p>
 
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row" style={{ gap: "var(--space-3)", marginBottom: "var(--space-5)" }}>
           <button
             className="button button--primary"
             type="button"
-            onClick={() => handleExportBackup()}
+            onClick={() => void handleExportBackup()}
           >
             Exporter backup
           </button>
         </div>
 
-        <div className="field" style={{ marginTop: 12 }}>
+        <div className="field">
           <label htmlFor={jsonImportTextareaId}>JSON à importer</label>
           <textarea
             id={jsonImportTextareaId}
@@ -405,13 +443,21 @@ export function WordsPage() {
             value={jsonImportText}
             onChange={(event) => setJsonImportText(event.target.value)}
             placeholder='Ex: [{"french":"bonjour","kana":"こんにちは","tags":["salutations"]}]'
+            style={{ minHeight: "120px" }}
           />
         </div>
-        <div className="row" style={{ marginTop: 12 }}>
-          <button className="button" type="button" onClick={() => handleImportJson()}>
+        <div
+          className="row"
+          style={{ marginTop: "var(--space-4)", gap: "var(--space-3)", alignItems: "center" }}
+        >
+          <button className="button" type="button" onClick={() => void handleImportJson()}>
             Importer
           </button>
-          {jsonImportStatus ? <div className="muted">{jsonImportStatus}</div> : null}
+          {jsonImportStatus ? (
+            <div className="muted" style={{ fontSize: "15px" }}>
+              {jsonImportStatus}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -473,11 +519,11 @@ function WordsGroupedByTag(props: {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
       {groups.map((group) => {
         const isCollapsed = collapsedByGroupKey[group.groupKey] ?? false;
         return (
-          <div key={group.groupKey}>
+          <div key={group.groupKey} style={{ marginBottom: "var(--space-4)" }}>
             <button
               className="sectionHeader"
               type="button"
@@ -489,47 +535,79 @@ function WordsGroupedByTag(props: {
             </button>
 
             {isCollapsed ? null : (
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Français</th>
-                    <th>Kana / Kanji</th>
-                    <th>Rōmaji</th>
-                    <th>Tags</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.words.map((word) => (
-                    <tr key={word.id}>
-                      <td>{word.french}</td>
-                      <td className="muted">{word.kanji ?? word.kana ?? "—"}</td>
-                      <td className="muted">{word.romaji ?? "—"}</td>
-                      <td className="muted">
-                        {word.tags.length > 0 ? word.tags.map((tag) => tag.name).join(", ") : "—"}
-                      </td>
-                      <td>
-                        <div className="row">
-                          <button
-                            className="button"
-                            type="button"
-                            onClick={() => props.startEdit(word)}
-                          >
-                            Modifier
-                          </button>
-                          <button
-                            className="button button--danger"
-                            type="button"
-                            onClick={() => void props.handleDelete(word.id)}
-                          >
-                            Supprimer
-                          </button>
-                        </div>
-                      </td>
+              <div
+                style={{
+                  border: "2px solid var(--color-border)",
+                  borderRadius: "var(--radius-lg)",
+                  overflow: "hidden",
+                }}
+              >
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Français</th>
+                      <th>Kana / Kanji</th>
+                      <th>Rōmaji</th>
+                      <th>Tags</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {group.words.map((word) => (
+                      <tr key={word.id}>
+                        <td style={{ fontWeight: 600 }}>{word.french}</td>
+                        <td className="muted">{word.kanji ?? word.kana ?? "—"}</td>
+                        <td className="muted">{word.romaji ?? "—"}</td>
+                        <td className="muted">
+                          {word.tags.length > 0 ? (
+                            <div
+                              style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}
+                            >
+                              {word.tags.map((tag) => (
+                                <span
+                                  key={tag.id}
+                                  style={{
+                                    padding: "4px 10px",
+                                    borderRadius: "var(--radius-md)",
+                                    background: "rgba(199, 62, 29, 0.08)",
+                                    color: "var(--color-primary)",
+                                    fontSize: "13px",
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {tag.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          <div className="row" style={{ gap: "var(--space-2)" }}>
+                            <button
+                              className="button"
+                              type="button"
+                              onClick={() => props.startEdit(word)}
+                              style={{ padding: "8px 16px", fontSize: "15px" }}
+                            >
+                              Modifier
+                            </button>
+                            <button
+                              className="button button--danger"
+                              type="button"
+                              onClick={() => void props.handleDelete(word.id)}
+                              style={{ padding: "8px 16px", fontSize: "15px" }}
+                            >
+                              Supprimer
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         );

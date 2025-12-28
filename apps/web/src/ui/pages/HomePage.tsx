@@ -51,31 +51,42 @@ export function HomePage() {
 
   return (
     <div>
-      <div style={{ fontSize: 18, fontWeight: 700 }}>Séries</div>
-      <div className="muted" style={{ marginTop: 4 }}>
-        Lance une session d’entraînement par tag. ({totalWords} mots au total, tags inclus)
+      <div className="pageHeader">
+        <div>
+          <h1 className="pageTitle">Séries</h1>
+          <p className="pageSubtitle">
+            Lance une session d'entraînement par tag. ({totalWords} mots au total, tags inclus)
+          </p>
+        </div>
       </div>
 
       {isLoading ? (
-        <div className="muted" style={{ marginTop: 16 }}>
+        <div className="muted" style={{ marginTop: "var(--space-6)" }}>
           Chargement…
         </div>
       ) : null}
 
       {errorMessage ? (
-        <div className="muted" style={{ marginTop: 16 }}>
-          Erreur: {errorMessage}
+        <div className="formError" style={{ marginTop: "var(--space-6)" }}>
+          {errorMessage}
         </div>
       ) : null}
 
       {!isLoading && series && series.length === 0 ? (
-        <div className="muted" style={{ marginTop: 16 }}>
-          Aucune série: crée des tags et assigne-les à des mots dans “Mots”.
+        <div className="muted" style={{ marginTop: "var(--space-6)" }}>
+          Aucune série: crée des tags et assigne-les à des mots dans "Mots".
         </div>
       ) : null}
 
       {series && series.length > 0 ? (
-        <div style={{ marginTop: 16 }}>
+        <div
+          style={{
+            marginTop: "var(--space-8)",
+            border: "2px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            overflow: "hidden",
+          }}
+        >
           <table className="table">
             <thead>
               <tr>
@@ -101,7 +112,7 @@ export function HomePage() {
                     }
                   }}
                 >
-                  <td>{row.tagName}</td>
+                  <td style={{ fontWeight: 600 }}>{row.tagName}</td>
                   <td className="muted">{row.wordsCount}</td>
                   <td className="muted">{row.totalScore}</td>
                   <td className="muted" style={{ textAlign: "right" }}>
