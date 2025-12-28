@@ -20,14 +20,24 @@ RUN npm run build
 # Copy public assets into dist after build (for kanji SVGs, etc.)
 RUN mkdir -p dist/public && cp -r public/* dist/public/ 2>/dev/null || true
 
-# Production image with nginx (we'll serve via nginx container, but keep this for reference)
+# Production image with nginx (we'll serve via nginx container)
 FROM node:20-bullseye-slim
 
 WORKDIR /app
 
-# Copy built files (includes public assets in dist/public)
-COPY --from=builder /app/apps/web/dist ./dist
+# Copy built files to a temporary location
+COPY --from=builder /app/apps/web/dist /app/dist
 
-# This container doesn't run anything, nginx serves the files
+# Create entrypoint script to copy files to volume on startup
+RUN echo '#!/bin/sh\n\
+if [ -d /app/dist ] && [ "$(ls -A /app/dist)" ]; then\n\
+  echo "Copying files to /usr/share/nginx/html..."\n\
+  cp -r /app/dist/* /usr/share/nginx/html/\n\
+  echo "Files copied successfully"\n\
+fi\n\
+exec sleep infinity' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+# This container copies files to volume then sleeps
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["sleep", "infinity"]
 
