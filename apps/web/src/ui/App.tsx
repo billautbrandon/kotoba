@@ -7,6 +7,7 @@ import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { HomePage } from "./pages/HomePage";
+import { KanjiLearningPage } from "./pages/KanjiLearningPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SeriesStartPage } from "./pages/SeriesStartPage";
 import { TrainPage } from "./pages/TrainPage";
@@ -201,6 +202,13 @@ export function App() {
               <span style={{ marginRight: "var(--space-2)" }}>📖</span>
               Dictionnaire
             </NavLink>
+            <NavLink
+              className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
+              to="/kanji"
+            >
+              <span style={{ marginRight: "var(--space-2)" }}>✍️</span>
+              Tracé
+            </NavLink>
           </nav>
 
           <div className="topbar__right">{topbarRight}</div>
@@ -245,6 +253,10 @@ export function App() {
             <Route
               path="/dictionary"
               element={isAuthenticated ? <DictionaryPage /> : <Navigate to="/login" replace />}
+            />
+            <Route
+              path="/kanji"
+              element={isAuthenticated ? <KanjiLearningPage /> : <Navigate to="/login" replace />}
             />
             <Route
               path="/words"

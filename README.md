@@ -32,4 +32,24 @@ Puis, pour lancer Biome (dans le container):
 docker exec -it kotoba npx biome check --changed
 ```
 
+## Téléchargement automatique des SVG de kanji
+
+L'application supporte l'affichage de l'ordre de tracé des kanji avec animations. Pour télécharger automatiquement les fichiers SVG pour tous les kanji utilisés dans votre vocabulaire :
+
+```bash
+make download-kanji
+```
+
+Ou directement :
+```bash
+cd apps/api && npm run download-kanji-svg
+```
+
+Ce script :
+- Extrait automatiquement tous les kanji uniques de votre base de données
+- Télécharge les fichiers SVG correspondants depuis KanjiVG
+- Les sauvegarde dans `apps/web/public/kanji/` avec le bon format de nommage
+
+Le script est idempotent : l'exécuter plusieurs fois ne téléchargera que les fichiers manquants.
+
 

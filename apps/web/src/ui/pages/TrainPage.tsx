@@ -6,6 +6,8 @@ import {
   fetchSeriesWords,
   submitBulkReviews,
 } from "../../api";
+import { extractKanji } from "../../utils/kanji";
+import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
 
 type TrainMode = "tag";
 type SessionMode = "manual" | "timer";
@@ -31,6 +33,8 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isRevealed, setIsRevealed] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [showKanjiViewer, setShowKanjiViewer] = useState(false);
+  const [selectedKanjiForViewer, setSelectedKanjiForViewer] = useState<string | null>(null);
 
   const [isSessionFinished, setIsSessionFinished] = useState<boolean>(false);
   const [ratingsByWordId, setRatingsByWordId] = useState<Record<number, SessionRating | null>>({});
@@ -103,6 +107,20 @@ export function TrainPage(props: { mode: TrainMode }) {
   }, [words, currentIndex]);
 
   const currentWordId = currentWord ? currentWord.id : null;
+
+  // Extraire les kanji du mot actuel
+  const currentWordKanji = useMemo(() => {
+    if (!currentWord?.kanji) return [];
+    return extractKanji(currentWord.kanji);
+  }, [currentWord]);
+
+  // Ouvrir le visualiseur de kanji
+  const handleShowKanjiStroke = () => {
+    if (currentWordKanji.length > 0) {
+      setSelectedKanjiForViewer(currentWordKanji[0]);
+      setShowKanjiViewer(true);
+    }
+  };
 
   useEffect(() => {
     if (!words || words.length === 0) return;
@@ -548,6 +566,21 @@ export function TrainPage(props: { mode: TrainMode }) {
                       {currentWord.note}
                     </div>
                   ) : null}
+                  {currentWordKanji.length > 0 && (
+                    <div style={{ marginTop: "var(--space-6)" }}>
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={handleShowKanjiStroke}
+                        style={{
+                          padding: "var(--space-3) var(--space-5)",
+                          fontSize: "14px",
+                        }}
+                      >
+                        Voir le sens de tracé ({currentWordKanji.length} kanji)
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="row" style={{ gap: "var(--space-4)" }}>
                   <button
@@ -681,6 +714,19 @@ export function TrainPage(props: { mode: TrainMode }) {
           </div>
         </div>
       ) : null}
+
+      {/* Modal pour le visualiseur de kanji */}
+      {showKanjiViewer && selectedKanjiForViewer && (
+        <KanjiViewerModal
+          kanjiList={currentWordKanji}
+          selectedKanji={selectedKanjiForViewer}
+          onSelectKanji={setSelectedKanjiForViewer}
+          onClose={() => {
+            setShowKanjiViewer(false);
+            setSelectedKanjiForViewer(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -707,4 +753,168 @@ function formatMs(milliseconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * Modal pour afficher le visualiseur de kanji
+ */
+function KanjiViewerModal({
+  kanjiList,
+  selectedKanji,
+  onSelectKanji,
+  onClose,
+}: {
+  kanjiList: string[];
+  selectedKanji: string;
+  onSelectKanji: (kanji: string) => void;
+  onClose: () => void;
+}) {
+  const [showNumbers, setShowNumbers] = useState(false);
+  const [animate, setAnimate] = useState(false);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0, 0, 0, 0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 10000,
+        padding: "var(--space-6)",
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "var(--color-panel)",
+          borderRadius: "var(--radius-lg)",
+          padding: "var(--space-8)",
+          maxWidth: "600px",
+          width: "100%",
+          maxHeight: "90vh",
+          overflow: "auto",
+          border: "2px solid var(--color-border)",
+          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "var(--space-6)",
+          }}
+        >
+          <h2 style={{ fontSize: "24px", fontWeight: 700, margin: 0 }}>Sens de tracé</h2>
+          <button
+            className="button"
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: "var(--space-2) var(--space-4)",
+              fontSize: "18px",
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {kanjiList.length > 1 && (
+          <div style={{ marginBottom: "var(--space-6)" }}>
+            <div className="field__label" style={{ marginBottom: "var(--space-3)" }}>
+              Choisir un kanji
+            </div>
+            <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+              {kanjiList.map((kanji) => (
+                <button
+                  key={kanji}
+                  type="button"
+                  className={`button ${selectedKanji === kanji ? "button--primary" : ""}`}
+                  onClick={() => {
+                    onSelectKanji(kanji);
+                    setShowNumbers(false);
+                    setAnimate(false);
+                  }}
+                  style={{
+                    fontSize: "24px",
+                    padding: "var(--space-3) var(--space-5)",
+                    minWidth: "60px",
+                  }}
+                >
+                  {kanji}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div
+          style={{
+            marginBottom: "var(--space-6)",
+            display: "flex",
+            gap: "var(--space-4)",
+            flexWrap: "wrap",
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-2)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showNumbers}
+              onChange={(e) => setShowNumbers(e.target.checked)}
+            />
+            <span>Afficher les numéros</span>
+          </label>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-2)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={animate}
+              onChange={(e) => setAnimate(e.target.checked)}
+            />
+            <span>Animer le tracé</span>
+          </label>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "var(--space-4)",
+            padding: "var(--space-6)",
+            background: "var(--color-panel-subtle)",
+            borderRadius: "var(--radius-lg)",
+          }}
+        >
+          <div style={{ fontSize: "18px", fontWeight: 700 }}>{selectedKanji}</div>
+          <KanjiStrokeViewer
+            kanji={selectedKanji}
+            showNumbers={showNumbers}
+            animate={animate}
+            size={300}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
