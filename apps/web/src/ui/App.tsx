@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import type { User } from "../api";
-import { fetchMe, fetchSeries, logoutUser } from "../api";
+import { downloadMissingKanjiSvgs, fetchMe, fetchSeries, logoutUser } from "../api";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
@@ -29,6 +29,7 @@ export function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [hasSeries, setHasSeries] = useState<boolean>(false);
+  const [isDownloadingKanji, setIsDownloadingKanji] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isSeriesPage =
@@ -150,6 +151,29 @@ export function App() {
               }}
             >
               Ajouter du vocabulaire
+            </button>
+            <button
+              className="topbarUser__dropdownItem"
+              type="button"
+              disabled={isDownloadingKanji}
+              onClick={async () => {
+                setIsDropdownOpen(false);
+                setIsDownloadingKanji(true);
+                try {
+                  const result = await downloadMissingKanjiSvgs();
+                  alert(
+                    `Téléchargement terminé !\n${result.downloaded} kanji téléchargé(s) sur ${result.missingCount} manquant(s).\n${result.failed} échec(s).`,
+                  );
+                } catch (error) {
+                  alert(
+                    `Erreur lors du téléchargement: ${error instanceof Error ? error.message : "Erreur inconnue"}`,
+                  );
+                } finally {
+                  setIsDownloadingKanji(false);
+                }
+              }}
+            >
+              {isDownloadingKanji ? "Téléchargement..." : "Télécharger les kanji non disponibles"}
             </button>
             <button
               className="topbarUser__dropdownItem topbarUser__dropdownItem--danger"

@@ -300,3 +300,26 @@ export function computeFailRate(word: WordWithStats): number {
   if (attempts === 0) return 0;
   return word.fail_count / attempts;
 }
+
+export async function downloadMissingKanjiSvgs(): Promise<{
+  success: boolean;
+  total: number;
+  downloaded: number;
+  failed: number;
+  missingCount: number;
+}> {
+  const response = await fetch("/api/kanji/download-missing", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Failed to download missing kanji SVGs");
+  }
+  return (await response.json()) as {
+    success: boolean;
+    total: number;
+    downloaded: number;
+    failed: number;
+    missingCount: number;
+  };
+}

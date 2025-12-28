@@ -5,6 +5,10 @@ import type { Request } from "express";
 
 import { type PublicUser, hashPassword, verifyPassword } from "./auth.js";
 import { type ReviewResult, type WordStatsRow, applyReviewToStats } from "./db.js";
+import {
+  downloadKanjiSvgsFromText,
+  downloadMissingKanjiSvgs,
+} from "./kanji-downloader.js";
 
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
   const wrapAsync =
@@ -168,7 +172,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       }
 
       const newPasswordHash = await hashPassword(body.newPassword);
-      database.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newPasswordHash, userId);
+      database
+        .prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+        .run(newPasswordHash, userId);
 
       res.status(200).json({ success: true });
     }),
@@ -387,6 +393,11 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       )
       .get(wordId, userId);
 
+    // Télécharger automatiquement les SVG des kanji (de manière asynchrone, sans bloquer)
+    downloadKanjiSvgsFromText(body.kanji).catch((error) => {
+      console.error("Error downloading kanji SVGs for new word:", error);
+    });
+
     res.status(201).json({ word: createdWord });
   });
 
@@ -408,6 +419,11 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     });
     const body = bodySchema.parse(req.body);
 
+    // Récupérer l'ancien kanji pour comparer
+    const oldWord = database
+      .prepare("SELECT kanji FROM words WHERE id = ? AND user_id = ?")
+      .get(wordId, userId) as { kanji: string | null } | undefined;
+
     const updateResult = database
       .prepare(
         "UPDATE words SET french = ?, romaji = ?, kana = ?, kanji = ?, note = ? WHERE id = ? AND user_id = ?",
@@ -424,6 +440,13 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     if (updateResult.changes === 0) {
       res.status(404).json({ error: "Word not found" });
       return;
+    }
+
+    // Télécharger automatiquement les SVG des kanji si le kanji a changé (de manière asynchrone, sans bloquer)
+    if (body.kanji !== oldWord?.kanji) {
+      downloadKanjiSvgsFromText(body.kanji).catch((error) => {
+        console.error("Error downloading kanji SVGs for updated word:", error);
+      });
     }
 
     const updatedWord = database
@@ -829,6 +852,25 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
     res.status(201).json({ importedWordsCount, importedTagsCount });
   });
+
+  app.post(
+    "/api/kanji/download-missing",
+    wrapAsync(async (_req, res) => {
+      const userId = getRequiredUserId(_req);
+      
+      // Vérifier que l'utilisateur est authentifié (déjà fait par getRequiredUserId)
+      // Télécharger les kanji manquants
+      const result = await downloadMissingKanjiSvgs(database);
+      
+      res.json({
+        success: true,
+        total: result.total,
+        downloaded: result.downloaded,
+        failed: result.failed,
+        missingCount: result.missing.length,
+      });
+    }),
+  );
 }
 
 function parseTagsConcat(value: unknown): Array<{ id: number; name: string }> {

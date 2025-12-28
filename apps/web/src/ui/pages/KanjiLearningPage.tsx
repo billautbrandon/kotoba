@@ -101,7 +101,6 @@ export function KanjiLearningPage() {
                       setShowNumbers(false);
                       setAnimate(false);
                     }}
-                    style={{ fontSize: "16px", padding: "var(--space-3)" }}
                   >
                     <option value="">-- Choisir un mot --</option>
                     {wordsWithKanji.map((word) => (
