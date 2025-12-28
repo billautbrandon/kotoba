@@ -60,8 +60,7 @@ app.use(session(sessionConfig));
 if (process.env.NODE_ENV === "production") {
   app.use((req, res, next) => {
     if (req.path.startsWith("/api/auth/login") || req.path.startsWith("/api/auth/register")) {
-      const originalEnd = res.end;
-      res.end = function (chunk?: unknown, encoding?: unknown, cb?: unknown) {
+      res.on("finish", () => {
         if (req.session && req.session.userId) {
           console.log("[kotoba/api] Session created:", {
             userId: req.session.userId,
@@ -72,8 +71,7 @@ if (process.env.NODE_ENV === "production") {
           const setCookieHeader = res.getHeader("Set-Cookie");
           console.log("[kotoba/api] Set-Cookie header:", setCookieHeader);
         }
-        return originalEnd.call(this, chunk, encoding, cb);
-      };
+      });
     }
     next();
   });
