@@ -9,12 +9,22 @@ import { registerApiRoutes } from "./routes.js";
 const apiPort = Number(process.env.PORT ?? 3001);
 
 const app = express();
+const allowedOrigins =
+  process.env.NODE_ENV === "production"
+    ? ["https://kotoba.ovh", "https://www.kotoba.ovh"]
+    : ["http://localhost:3000", "http://localhost:3001"];
+
 app.use(
   cors({
-    origin:
-      process.env.NODE_ENV === "production"
-        ? ["https://kotoba.ovh", "https://www.kotoba.ovh"]
-        : true,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   }),
 );
