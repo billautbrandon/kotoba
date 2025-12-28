@@ -29,21 +29,48 @@ app.use(
   }),
 );
 app.use(express.json({ limit: "1mb" }));
-app.use(
-  session({
-    name: "kotoba.sid",
-    secret: process.env.SESSION_SECRET ?? "dev-secret-change-me",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 1000 * 60 * 60 * 24,
-      path: "/",
-    },
-  }),
-);
+const sessionConfig = {
+  name: "kotoba.sid",
+  secret: process.env.SESSION_SECRET ?? "dev-secret-change-me",
+  resave: false,
+  saveUninitialized: true, // Changed to true to ensure session is created
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax" as const, // Use "lax" even in production since frontend and API are on same domain via nginx
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 1000 * 60 * 60 * 24,
+    path: "/",
+  },
+};
+
+if (process.env.NODE_ENV === "production") {
+  console.log("[kotoba/api] Session config:", {
+    name: sessionConfig.name,
+    secure: sessionConfig.cookie.secure,
+    sameSite: sessionConfig.cookie.sameSite,
+    path: sessionConfig.cookie.path,
+  });
+}
+
+app.use(session(sessionConfig));
+
+// Debug middleware to log session creation
+if (process.env.NODE_ENV === "production") {
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api/auth/login") || req.path.startsWith("/api/auth/register")) {
+      res.on("finish", () => {
+        if (req.session && req.session.userId) {
+          console.log("[kotoba/api] Session created:", {
+            userId: req.session.userId,
+            cookie: req.session.cookie,
+            sessionId: req.sessionID,
+          });
+        }
+      });
+    }
+    next();
+  });
+}
 
 const database = openDatabase();
 registerApiRoutes(app, database);

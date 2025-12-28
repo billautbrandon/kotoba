@@ -94,11 +94,19 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
       req.session.userId = insertedUserId;
 
-      const createdUser = database
-        .prepare("SELECT id, username, created_at FROM users WHERE id = ?")
-        .get(insertedUserId) as PublicUser;
+      // Force session save to ensure cookie is set
+      req.session.save((err) => {
+        if (err) {
+          console.error("[kotoba/api] Session save error:", err);
+          res.status(500).json({ error: "Failed to create session" });
+          return;
+        }
+        const createdUser = database
+          .prepare("SELECT id, username, created_at FROM users WHERE id = ?")
+          .get(insertedUserId) as PublicUser;
 
-      res.status(201).json({ user: createdUser });
+        res.status(201).json({ user: createdUser });
+      });
     }),
   );
 
@@ -135,8 +143,17 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       }
 
       req.session.userId = userRow.id;
-      const { password_hash, ...publicUser } = userRow;
-      res.json({ user: publicUser });
+      
+      // Force session save to ensure cookie is set
+      req.session.save((err) => {
+        if (err) {
+          console.error("[kotoba/api] Session save error:", err);
+          res.status(500).json({ error: "Failed to create session" });
+          return;
+        }
+        const { password_hash, ...publicUser } = userRow;
+        res.json({ user: publicUser });
+      });
     }),
   );
 
