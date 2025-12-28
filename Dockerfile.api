@@ -6,15 +6,14 @@ WORKDIR /app
 COPY package*.json ./
 COPY apps/api/package.json ./apps/api/
 
-# Install dependencies
+# Install all dependencies (including devDependencies for build)
 RUN npm ci
 
 # Copy source code (tsconfig.json is already included in apps/api/)
 COPY apps/api ./apps/api
 
-# Build
-WORKDIR /app/apps/api
-RUN npm run build
+# Build (from workspace root to ensure proper module resolution)
+RUN npm run build -w @kotoba/api
 
 # Production image
 FROM node:20-bullseye-slim
