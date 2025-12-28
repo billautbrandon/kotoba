@@ -17,14 +17,16 @@ COPY assets ./assets
 WORKDIR /app/apps/web
 RUN npm run build
 
+# Copy public assets into dist after build (for kanji SVGs, etc.)
+RUN mkdir -p dist/public && cp -r public/* dist/public/ 2>/dev/null || true
+
 # Production image with nginx (we'll serve via nginx container, but keep this for reference)
 FROM node:20-bullseye-slim
 
 WORKDIR /app
 
-# Just keep the built files for nginx to serve
+# Copy built files (includes public assets in dist/public)
 COPY --from=builder /app/apps/web/dist ./dist
-COPY --from=builder /app/apps/web/public ./public
 
 # This container doesn't run anything, nginx serves the files
 CMD ["sleep", "infinity"]
