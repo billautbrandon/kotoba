@@ -1,0 +1,31 @@
+FROM node:20-bullseye AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY apps/web/package.json ./apps/web/
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY apps/web ./apps/web
+COPY assets ./assets
+
+# Build
+WORKDIR /app/apps/web
+RUN npm run build
+
+# Production image with nginx (we'll serve via nginx container, but keep this for reference)
+FROM node:20-bullseye-slim
+
+WORKDIR /app
+
+# Just keep the built files for nginx to serve
+COPY --from=builder /app/apps/web/dist ./dist
+COPY --from=builder /app/apps/web/public ./public
+
+# This container doesn't run anything, nginx serves the files
+CMD ["sleep", "infinity"]
+

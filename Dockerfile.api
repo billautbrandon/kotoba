@@ -1,0 +1,42 @@
+FROM node:20-bullseye AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY apps/api/package.json ./apps/api/
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY apps/api ./apps/api
+COPY tsconfig.json ./apps/api/tsconfig.json 2>/dev/null || true
+
+# Build
+WORKDIR /app/apps/api
+RUN npm run build
+
+# Production image
+FROM node:20-bullseye-slim
+
+WORKDIR /app
+
+# Install only production dependencies
+COPY package*.json ./
+COPY apps/api/package.json ./apps/api/
+RUN npm ci --omit=dev
+
+# Copy built files
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
+
+# Create data directory
+RUN mkdir -p /app/data
+
+WORKDIR /app/apps/api
+
+EXPOSE 3001
+
+CMD ["node", "dist/index.js"]
+

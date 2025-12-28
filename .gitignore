@@ -2,6 +2,7 @@ node_modules/
 dist/
 .DS_Store
 .env
+.env.prod
 apps/web/public/kanji/
 
 # SQLite
@@ -9,5 +10,10 @@ data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Production SSL certificates
+nginx/ssl/*.key
+nginx/ssl/*.crt
+!nginx/ssl/.gitkeep
 
 
