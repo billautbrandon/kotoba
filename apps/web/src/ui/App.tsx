@@ -245,12 +245,16 @@ export function App() {
             <Route
               path="/login"
               element={
-                <LoginPage
-                  onAuthenticated={(user) => {
-                    setCurrentUser(user);
-                    navigate("/", { replace: true });
-                  }}
-                />
+                isAuthenticated ? (
+                  <Navigate to="/" replace />
+                ) : (
+                  <LoginPage
+                    onAuthenticated={(user) => {
+                      setCurrentUser(user);
+                      navigate("/", { replace: true });
+                    }}
+                  />
+                )
               }
             />
 
