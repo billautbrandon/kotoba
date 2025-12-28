@@ -20,8 +20,7 @@ body {
       rgba(255, 255, 255, 0.03) 10px,
       rgba(0, 0, 0, 0.03) 10px,
       rgba(0, 0, 0, 0.03) 20px
-    ),
-    var(--color-bg);
+    ), var(--color-bg);
   color: var(--color-text);
 }
 
@@ -41,30 +40,55 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-4);
+  padding: var(--space-4) var(--space-6);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-lg);
   background: rgba(18, 26, 42, 0.6);
   backdrop-filter: blur(10px);
 }
 
-.topbar__title {
-  font-weight: 700;
-  letter-spacing: 0.2px;
+.topbar__left {
+  display: flex;
+  align-items: center;
+}
+
+.topbar__nav {
+  justify-content: center;
+  flex: 1;
+}
+
+.topbar__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .topbar__titleLink {
-  font-weight: 800;
-  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
   padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.topbar__titleMain {
+  font-size: 20px;
+}
+
+.topbar__titleKana {
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.75);
+  letter-spacing: 0.2px;
 }
 
 .topbar__titleLink:hover {
-  border-color: rgba(122, 162, 255, 0.35);
-  background: rgba(122, 162, 255, 0.1);
+  border-color: rgba(177, 26, 31, 0.45);
+  background: rgba(177, 26, 31, 0.12);
 }
 
 .nav {
@@ -78,7 +102,6 @@ a {
   align-items: center;
   gap: var(--space-3);
   color: var(--color-muted);
-  margin-left: auto;
 }
 
 .topbarUser__name {
@@ -98,15 +121,16 @@ a {
 
 .nav__link {
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .nav__link--active {
   color: var(--color-text);
-  border-color: rgba(122, 162, 255, 0.35);
-  background: rgba(122, 162, 255, 0.12);
+  border-color: rgba(177, 26, 31, 0.45);
+  background: rgba(177, 26, 31, 0.12);
 }
 
 .panel {
@@ -143,8 +167,8 @@ a {
 }
 
 .button--primary {
-  border-color: rgba(122, 162, 255, 0.35);
-  background: rgba(122, 162, 255, 0.16);
+  border-color: rgba(177, 26, 31, 0.45);
+  background: rgba(177, 26, 31, 0.16);
 }
 
 .auth {
@@ -245,6 +269,49 @@ a {
   box-shadow: 0 0 0 3px rgba(169, 2, 17, 0.16);
 }
 
+.segmented {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 4px;
+  gap: 4px;
+  margin: 0;
+}
+
+.segmented__button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.segmented__button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.segmented__button--active {
+  border-color: rgba(177, 26, 31, 0.45);
+  background: rgba(177, 26, 31, 0.16);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .pageHeader {
   display: flex;
   align-items: flex-end;
@@ -278,6 +345,7 @@ a {
   text-align: left;
   cursor: pointer;
   perspective: 1000px;
+  color: var(--color-text);
 }
 
 .dictionaryCard__inner {
@@ -285,7 +353,7 @@ a {
   width: 100%;
   min-height: 170px;
   transform-style: preserve-3d;
-  transition: transform 220ms ease;
+  transition: transform 120ms ease-out;
 }
 
 .dictionaryCard__inner--flipped {
@@ -321,6 +389,7 @@ a {
   font-size: 22px;
   font-weight: 800;
   letter-spacing: 0.2px;
+  color: var(--color-text);
 }
 
 .dictionaryCard__meta {

@@ -3,8 +3,8 @@ import { Link, NavLink, Navigate, Route, Routes, useNavigate } from "react-route
 
 import type { User } from "../api";
 import { fetchMe, logoutUser } from "../api";
-import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { DictionaryPage } from "./pages/DictionaryPage";
+import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SeriesStartPage } from "./pages/SeriesStartPage";
@@ -21,14 +21,17 @@ export function App() {
     async function loadMe() {
       try {
         const user = await fetchMe();
-        if (!isMounted) return;
-        setCurrentUser(user);
+        if (isMounted) {
+          setCurrentUser(user);
+        }
       } catch {
-        if (!isMounted) return;
-        setCurrentUser(null);
+        if (isMounted) {
+          setCurrentUser(null);
+        }
       } finally {
-        if (!isMounted) return;
-        setIsAuthLoading(false);
+        if (isMounted) {
+          setIsAuthLoading(false);
+        }
       }
     }
     loadMe();
@@ -63,11 +66,14 @@ export function App() {
   return (
     <div className="container">
       <header className="topbar">
-        <Link className="topbar__titleLink" to="/">
-          Kotoba
-        </Link>
-        {topbarRight}
-        <nav className="nav">
+        <div className="topbar__left">
+          <Link className="topbar__titleLink" to="/">
+            <span className="topbar__titleMain">Kotoba</span>
+            <span className="topbar__titleKana">言葉</span>
+          </Link>
+        </div>
+
+        <nav className="topbar__nav nav">
           <NavLink
             className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
             to="/"
@@ -100,6 +106,8 @@ export function App() {
             Mots
           </NavLink>
         </nav>
+
+        <div className="topbar__right">{topbarRight}</div>
       </header>
 
       <div className="panel">
@@ -129,7 +137,9 @@ export function App() {
             <Route path="/train/difficult" element={<Navigate to="/" replace />} />
             <Route
               path="/train/tag/:tagId"
-              element={isAuthenticated ? <TrainPage mode="tag" /> : <Navigate to="/login" replace />}
+              element={
+                isAuthenticated ? <TrainPage mode="tag" /> : <Navigate to="/login" replace />
+              }
             />
             <Route
               path="/difficult"

@@ -38,7 +38,9 @@ export function DictionaryPage() {
   const [words, setWords] = useState<WordWithTags[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [frontLanguage, setFrontLanguage] = useState<DictionaryLanguage>(() => loadDictionaryLanguage());
+  const [frontLanguage, setFrontLanguage] = useState<DictionaryLanguage>(() =>
+    loadDictionaryLanguage(),
+  );
   const [flippedWordIds, setFlippedWordIds] = useState<Set<number>>(() => new Set());
 
   useEffect(() => {
@@ -52,14 +54,17 @@ export function DictionaryPage() {
       setErrorMessage(null);
       try {
         const fetched = (await fetchWordsWithTags(false)) as WordWithTags[];
-        if (!isMounted) return;
-        setWords(fetched);
+        if (isMounted) {
+          setWords(fetched);
+        }
       } catch {
-        if (!isMounted) return;
-        setErrorMessage("Impossible de charger le dictionnaire.");
+        if (isMounted) {
+          setErrorMessage("Impossible de charger le dictionnaire.");
+        }
       } finally {
-        if (!isMounted) return;
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     }
     load();
@@ -78,20 +83,26 @@ export function DictionaryPage() {
           <p className="pageSubtitle">Toutes tes cartes, en grille. Clique pour retourner.</p>
         </div>
 
-        <label className="field field--inline">
+        <div className="field field--inline">
           <div className="field__label">Langue</div>
-          <select
-            className="select"
-            value={frontLanguage}
-            onChange={(event) => setFrontLanguage(event.target.value as DictionaryLanguage)}
-          >
-            {Object.entries(dictionaryLanguageLabels).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <fieldset className="segmented">
+            <legend className="srOnly">Langue du dictionnaire</legend>
+            {(Object.keys(dictionaryLanguageLabels) as DictionaryLanguage[]).map((language) => {
+              const isSelected = language === frontLanguage;
+              return (
+                <button
+                  key={language}
+                  type="button"
+                  className={`segmented__button ${isSelected ? "segmented__button--active" : ""}`}
+                  aria-pressed={isSelected}
+                  onClick={() => setFrontLanguage(language)}
+                >
+                  {dictionaryLanguageLabels[language]}
+                </button>
+              );
+            })}
+          </fieldset>
+        </div>
       </div>
 
       {isLoading ? <div className="muted">Chargement…</div> : null}
@@ -121,9 +132,13 @@ export function DictionaryPage() {
                 });
               }}
             >
-              <div className={`dictionaryCard__inner ${isFlipped ? "dictionaryCard__inner--flipped" : ""}`}>
+              <div
+                className={`dictionaryCard__inner ${isFlipped ? "dictionaryCard__inner--flipped" : ""}`}
+              >
                 <div className="dictionaryCard__face dictionaryCard__face--front">
-                  <div className="dictionaryCard__lang">{dictionaryLanguageLabels[frontLanguage]}</div>
+                  <div className="dictionaryCard__lang">
+                    {dictionaryLanguageLabels[frontLanguage]}
+                  </div>
                   <div className="dictionaryCard__main">{safeFrontValue}</div>
                   <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
                 </div>
@@ -134,7 +149,9 @@ export function DictionaryPage() {
                       const value = getWordField(word, language).trim() || "—";
                       return (
                         <div key={language} className="dictionaryCard__row">
-                          <div className="dictionaryCard__rowLabel">{dictionaryLanguageLabels[language]}</div>
+                          <div className="dictionaryCard__rowLabel">
+                            {dictionaryLanguageLabels[language]}
+                          </div>
                           <div className="dictionaryCard__rowValue">{value}</div>
                         </div>
                       );
@@ -151,5 +168,3 @@ export function DictionaryPage() {
     </div>
   );
 }
-
-
