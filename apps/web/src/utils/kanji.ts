@@ -54,3 +54,4 @@ export async function kanjiSvgExists(kanji: string): Promise<boolean> {
     return false;
   }
 }
+

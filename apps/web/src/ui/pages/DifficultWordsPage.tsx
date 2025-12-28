@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 import { type WordWithStats, computeFailRate, fetchDifficultWords } from "../../api";
+import { AudioButton } from "../components/AudioButton";
 
 export function DifficultWordsPage() {
   const [words, setWords] = useState<WordWithStats[] | null>(null);
@@ -88,7 +89,12 @@ export function DifficultWordsPage() {
                 return (
                   <tr key={word.id}>
                     <td>{word.french}</td>
-                    <td className="muted">{word.kanji ?? word.kana ?? word.romaji ?? "—"}</td>
+                    <td className="muted">
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        {word.kanji ?? word.kana ?? word.romaji ?? "—"}
+                        {word.kana && <AudioButton text={word.kana} size="small" />}
+                      </span>
+                    </td>
                     <td className="muted">
                       {attempts} essais — ❌ {(failRate * 100).toFixed(0)}%
                     </td>

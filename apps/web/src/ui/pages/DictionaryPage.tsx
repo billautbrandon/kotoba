@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import type { WordWithTags } from "../../api";
 import { fetchWordsWithTags } from "../../api";
+import { AudioButton } from "../components/AudioButton";
 
 type DictionaryLanguage = "fr" | "romaji" | "kana" | "kanji";
 
@@ -315,7 +316,17 @@ export function DictionaryPage() {
                                 <div className="dictionaryCard__lang">
                                   {dictionaryLanguageLabels[frontLanguage]}
                                 </div>
-                                <div className="dictionaryCard__main">{safeFrontValue}</div>
+                                <div
+                                  className="dictionaryCard__main"
+                                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                                >
+                                  {safeFrontValue}
+                                  {frontLanguage === "kana" && (
+                                    <span onClick={(e) => e.stopPropagation()}>
+                                      <AudioButton text={safeFrontValue} size="small" />
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
                               </div>
 
@@ -328,7 +339,17 @@ export function DictionaryPage() {
                                         <div className="dictionaryCard__rowLabel">
                                           {dictionaryLanguageLabels[language]}
                                         </div>
-                                        <div className="dictionaryCard__rowValue">{value}</div>
+                                        <div
+                                          className="dictionaryCard__rowValue"
+                                          style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                                        >
+                                          {value}
+                                          {language === "kana" && (
+                                            <span onClick={(e) => e.stopPropagation()}>
+                                              <AudioButton text={value} size="small" />
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
                                     );
                                   })}
@@ -365,13 +386,27 @@ export function DictionaryPage() {
                             <React.Fragment key={word.id}>
                               <tr>
                                 <td style={{ fontWeight: 600, fontSize: "18px" }}>
-                                  {safeFrontValue}
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                    {safeFrontValue}
+                                    {frontLanguage === "kana" && (
+                                      <span onClick={(e) => e.stopPropagation()}>
+                                        <AudioButton text={safeFrontValue} size="small" />
+                                      </span>
+                                    )}
+                                  </span>
                                 </td>
                                 {otherLanguages.map((lang) => {
                                   const value = getWordField(word, lang).trim() || "—";
                                   return (
                                     <td key={lang} className="muted" style={{ fontSize: "16px" }}>
-                                      {value}
+                                      <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                        {value}
+                                        {lang === "kana" && (
+                                          <span onClick={(e) => e.stopPropagation()}>
+                                            <AudioButton text={value} size="small" />
+                                          </span>
+                                        )}
+                                      </span>
                                     </td>
                                   );
                                 })}

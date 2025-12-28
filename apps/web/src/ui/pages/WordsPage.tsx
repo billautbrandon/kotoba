@@ -13,6 +13,7 @@ import {
   importWordsFromJson,
   updateWord,
 } from "../../api";
+import { AudioButton } from "../components/AudioButton";
 
 type WordFormState = {
   french: string;
@@ -556,7 +557,12 @@ function WordsGroupedByTag(props: {
                     {group.words.map((word) => (
                       <tr key={word.id}>
                         <td style={{ fontWeight: 600 }}>{word.french}</td>
-                        <td className="muted">{word.kanji ?? word.kana ?? "—"}</td>
+                        <td className="muted">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            {word.kanji ?? word.kana ?? "—"}
+                            {word.kana && <AudioButton text={word.kana} size="small" />}
+                          </span>
+                        </td>
                         <td className="muted">{word.romaji ?? "—"}</td>
                         <td className="muted">
                           {word.tags.length > 0 ? (

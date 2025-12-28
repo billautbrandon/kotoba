@@ -7,6 +7,7 @@ import {
   submitBulkReviews,
 } from "../../api";
 import { extractKanji } from "../../utils/kanji";
+import { AudioButton } from "../components/AudioButton";
 import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
 
 type TrainMode = "tag";
@@ -477,9 +478,14 @@ export function TrainPage(props: { mode: TrainMode }) {
                 fontWeight: 800,
                 letterSpacing: "0.5px",
                 lineHeight: 1.2,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "12px",
               }}
             >
               {promptText}
+              {promptMode === "kana" && <AudioButton text={promptText} size="large" />}
             </div>
 
             {!isRevealed ? (
@@ -544,9 +550,17 @@ export function TrainPage(props: { mode: TrainMode }) {
                         </div>
                         <div
                           className="wordAnswerGrid__value"
-                          style={{ fontSize: "28px", fontWeight: 700, textAlign: "left" }}
+                          style={{
+                            fontSize: "28px",
+                            fontWeight: 700,
+                            textAlign: "left",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
                         >
                           {field.value ?? "—"}
+                          {field.key === "kana" && <AudioButton text={field.value ?? ""} size="medium" />}
                         </div>
                       </React.Fragment>
                     ))}
