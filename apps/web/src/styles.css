@@ -12,8 +12,16 @@ body {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: radial-gradient(1000px 600px at 20% 10%, #182447 0%, transparent 55%),
-    radial-gradient(900px 600px at 90% 20%, #1a2f4d 0%, transparent 50%), var(--color-bg);
+  background: radial-gradient(900px 520px at 15% 10%, rgba(169, 2, 17, 0.22) 0%, transparent 58%),
+    radial-gradient(900px 520px at 90% 20%, rgba(33, 79, 140, 0.22) 0%, transparent 55%),
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.03) 0px,
+      rgba(255, 255, 255, 0.03) 10px,
+      rgba(0, 0, 0, 0.03) 10px,
+      rgba(0, 0, 0, 0.03) 20px
+    ),
+    var(--color-bg);
   color: var(--color-text);
 }
 
@@ -36,7 +44,7 @@ a {
   padding: var(--space-4);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-lg);
-  background: rgba(18, 26, 42, 0.7);
+  background: rgba(18, 26, 42, 0.6);
   backdrop-filter: blur(10px);
 }
 
@@ -63,6 +71,29 @@ a {
   display: flex;
   gap: var(--space-3);
   flex-wrap: wrap;
+}
+
+.topbarUser {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-muted);
+  margin-left: auto;
+}
+
+.topbarUser__name {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.button--ghost {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.button--ghost:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .nav__link {
@@ -114,6 +145,219 @@ a {
 .button--primary {
   border-color: rgba(122, 162, 255, 0.35);
   background: rgba(122, 162, 255, 0.16);
+}
+
+.auth {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.authCard {
+  width: min(520px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  background: rgba(18, 26, 42, 0.55);
+  backdrop-filter: blur(10px);
+  padding: var(--space-6);
+}
+
+.authCard__header {
+  margin-bottom: var(--space-5);
+}
+
+.authCard__title {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: 0.2px;
+}
+
+.authCard__subtitle {
+  margin: var(--space-2) 0 0;
+  color: var(--color-muted);
+}
+
+.authCard__switch {
+  margin-top: var(--space-4);
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.formError {
+  border: 1px solid rgba(169, 2, 17, 0.35);
+  background: rgba(169, 2, 17, 0.16);
+  color: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.linkButton {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  padding: 0;
+  font-weight: 700;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+.form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.field--inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.field__label {
+  color: var(--color-muted);
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.input,
+.select {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text);
+  padding: 10px 12px;
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: rgba(169, 2, 17, 0.45);
+  box-shadow: 0 0 0 3px rgba(169, 2, 17, 0.16);
+}
+
+.pageHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.pageTitle {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: 0.2px;
+}
+
+.pageSubtitle {
+  margin: var(--space-2) 0 0;
+  color: var(--color-muted);
+}
+
+.dictionaryGrid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.dictionaryCard {
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  perspective: 1000px;
+}
+
+.dictionaryCard__inner {
+  position: relative;
+  width: 100%;
+  min-height: 170px;
+  transform-style: preserve-3d;
+  transition: transform 220ms ease;
+}
+
+.dictionaryCard__inner--flipped {
+  transform: rotateY(180deg);
+}
+
+.dictionaryCard__face {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(18, 26, 42, 0.55);
+  backdrop-filter: blur(10px);
+  padding: var(--space-4);
+  backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dictionaryCard__face--back {
+  transform: rotateY(180deg);
+}
+
+.dictionaryCard__lang {
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.dictionaryCard__main {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.dictionaryCard__meta {
+  margin-top: auto;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.dictionaryCard__backGrid {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.dictionaryCard__row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.dictionaryCard__rowLabel {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.dictionaryCard__rowValue {
+  font-weight: 700;
+}
+
+.dictionaryCard__note {
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
 }
 
 .revealContainer {

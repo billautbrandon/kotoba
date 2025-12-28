@@ -1,19 +1,72 @@
-import React from "react";
-import { Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
+import type { User } from "../api";
+import { fetchMe, logoutUser } from "../api";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
+import { DictionaryPage } from "./pages/DictionaryPage";
 import { HomePage } from "./pages/HomePage";
+import { LoginPage } from "./pages/LoginPage";
 import { SeriesStartPage } from "./pages/SeriesStartPage";
 import { TrainPage } from "./pages/TrainPage";
 import { WordsPage } from "./pages/WordsPage";
 
 export function App() {
+  const navigate = useNavigate();
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadMe() {
+      try {
+        const user = await fetchMe();
+        if (!isMounted) return;
+        setCurrentUser(user);
+      } catch {
+        if (!isMounted) return;
+        setCurrentUser(null);
+      } finally {
+        if (!isMounted) return;
+        setIsAuthLoading(false);
+      }
+    }
+    loadMe();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const topbarRight = useMemo(() => {
+    if (isAuthLoading) return <span className="topbarUser">Chargement…</span>;
+    if (!currentUser) return <span className="topbarUser">Invité</span>;
+    return (
+      <div className="topbarUser">
+        <span className="topbarUser__name">{currentUser.username}</span>
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={async () => {
+            await logoutUser();
+            setCurrentUser(null);
+            navigate("/login", { replace: true });
+          }}
+        >
+          Déconnexion
+        </button>
+      </div>
+    );
+  }, [currentUser, isAuthLoading, navigate]);
+
+  const isAuthenticated = Boolean(currentUser) && !isAuthLoading;
+
   return (
     <div className="container">
       <header className="topbar">
         <Link className="topbar__titleLink" to="/">
           Kotoba
         </Link>
+        {topbarRight}
         <nav className="nav">
           <NavLink
             className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
@@ -36,6 +89,12 @@ export function App() {
           </NavLink>
           <NavLink
             className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
+            to="/dictionary"
+          >
+            Dictionnaire
+          </NavLink>
+          <NavLink
+            className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
             to="/words"
           >
             Mots
@@ -46,13 +105,44 @@ export function App() {
       <div className="panel">
         <div className="panel__content">
           <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/series/:tagId" element={<SeriesStartPage />} />
+            <Route
+              path="/login"
+              element={
+                <LoginPage
+                  onAuthenticated={(user) => {
+                    setCurrentUser(user);
+                    navigate("/", { replace: true });
+                  }}
+                />
+              }
+            />
+
+            <Route
+              path="/"
+              element={isAuthenticated ? <HomePage /> : <Navigate to="/login" replace />}
+            />
+            <Route
+              path="/series/:tagId"
+              element={isAuthenticated ? <SeriesStartPage /> : <Navigate to="/login" replace />}
+            />
             <Route path="/train" element={<Navigate to="/" replace />} />
             <Route path="/train/difficult" element={<Navigate to="/" replace />} />
-            <Route path="/train/tag/:tagId" element={<TrainPage mode="tag" />} />
-            <Route path="/difficult" element={<DifficultWordsPage />} />
-            <Route path="/words" element={<WordsPage />} />
+            <Route
+              path="/train/tag/:tagId"
+              element={isAuthenticated ? <TrainPage mode="tag" /> : <Navigate to="/login" replace />}
+            />
+            <Route
+              path="/difficult"
+              element={isAuthenticated ? <DifficultWordsPage /> : <Navigate to="/login" replace />}
+            />
+            <Route
+              path="/dictionary"
+              element={isAuthenticated ? <DictionaryPage /> : <Navigate to="/login" replace />}
+            />
+            <Route
+              path="/words"
+              element={isAuthenticated ? <WordsPage /> : <Navigate to="/login" replace />}
+            />
             <Route path="*" element={<Navigate to="/train" replace />} />
           </Routes>
         </div>

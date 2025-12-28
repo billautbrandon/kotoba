@@ -1,19 +1,163 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
 
+import type { Request } from "express";
+
+import { type PublicUser, hashPassword, verifyPassword } from "./auth.js";
 import { type ReviewResult, type WordStatsRow, applyReviewToStats } from "./db.js";
 
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
+  const wrapAsync =
+    (
+      handler: (
+        req: import("express").Request,
+        res: import("express").Response,
+        next: import("express").NextFunction,
+      ) => Promise<void>,
+    ) =>
+    (
+      req: import("express").Request,
+      res: import("express").Response,
+      next: import("express").NextFunction,
+    ) => {
+      handler(req, res, next).catch(next);
+    };
+
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
 
+  app.get("/api/auth/me", (req, res) => {
+    const userId = getSessionUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const userRow = database
+      .prepare("SELECT id, username, created_at FROM users WHERE id = ?")
+      .get(userId) as PublicUser | undefined;
+
+    if (!userRow) {
+      req.session.destroy(() => undefined);
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    res.json({ user: userRow });
+  });
+
+  app.post(
+    "/api/auth/register",
+    wrapAsync(async (req, res) => {
+      const bodySchema = z.object({
+        username: z.string().min(3).max(48),
+        password: z.string().min(8).max(200),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const username = body.username.trim().toLowerCase();
+      if (!username) {
+        res.status(400).json({ error: "Username is required" });
+        return;
+      }
+
+      const existingUser = database
+        .prepare("SELECT id FROM users WHERE username = ?")
+        .get(username) as { id: number } | undefined;
+      if (existingUser) {
+        res.status(409).json({ error: "Username already exists" });
+        return;
+      }
+
+      const usersCountRow = database.prepare("SELECT COUNT(*) AS count FROM users").get() as {
+        count: number;
+      };
+      const isFirstUser = usersCountRow.count === 0;
+
+      const passwordHash = await hashPassword(body.password);
+      const insertResult = database
+        .prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)")
+        .run(username, passwordHash);
+      const insertedUserId = Number(insertResult.lastInsertRowid);
+
+      // If the app existed before user support, we may have orphan data with NULL user_id.
+      // We auto-claim it for the first user to avoid "data disappearance" after upgrade.
+      if (isFirstUser) {
+        database.prepare("UPDATE words SET user_id = ? WHERE user_id IS NULL").run(insertedUserId);
+        database.prepare("UPDATE tags SET user_id = ? WHERE user_id IS NULL").run(insertedUserId);
+      }
+
+      req.session.userId = insertedUserId;
+
+      const createdUser = database
+        .prepare("SELECT id, username, created_at FROM users WHERE id = ?")
+        .get(insertedUserId) as PublicUser;
+
+      res.status(201).json({ user: createdUser });
+    }),
+  );
+
+  app.post(
+    "/api/auth/login",
+    wrapAsync(async (req, res) => {
+      const bodySchema = z.object({
+        username: z.string().min(1),
+        password: z.string().min(1),
+      });
+      const body = bodySchema.parse(req.body);
+      const username = body.username.trim().toLowerCase();
+
+      const userRow = database
+        .prepare("SELECT id, username, password_hash, created_at FROM users WHERE username = ?")
+        .get(username) as (PublicUser & { password_hash: string }) | undefined;
+
+      if (!userRow) {
+        res.status(401).json({ error: "Invalid credentials" });
+        return;
+      }
+
+      const isValid = await verifyPassword(body.password, userRow.password_hash);
+      if (!isValid) {
+        res.status(401).json({ error: "Invalid credentials" });
+        return;
+      }
+
+      req.session.userId = userRow.id;
+      const { password_hash, ...publicUser } = userRow;
+      res.json({ user: publicUser });
+    }),
+  );
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.status(204).send();
+    });
+  });
+
+  app.use("/api", (req, res, next) => {
+    if (req.path.startsWith("/auth") || req.path.startsWith("/health")) {
+      next();
+      return;
+    }
+    const userId = getSessionUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+    next();
+  });
+
   app.get("/api/tags", (_req, res) => {
-    const rows = database.prepare("SELECT id, name, created_at FROM tags ORDER BY name ASC").all();
+    const userId = getRequiredUserId(_req);
+    const rows = database
+      .prepare("SELECT id, name, created_at FROM tags WHERE user_id = ? ORDER BY name ASC")
+      .all(userId);
     res.json({ tags: rows });
   });
 
   app.post("/api/tags", (req, res) => {
+    const userId = getRequiredUserId(req);
     const bodySchema = z.object({
       name: z.string().min(1),
     });
@@ -25,25 +169,29 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       return;
     }
 
-    database.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)").run(trimmedName);
+    database
+      .prepare("INSERT OR IGNORE INTO tags (user_id, name) VALUES (?, ?)")
+      .run(userId, trimmedName);
     const createdOrExistingTag = database
-      .prepare("SELECT id, name, created_at FROM tags WHERE name = ?")
-      .get(trimmedName);
+      .prepare("SELECT id, name, created_at FROM tags WHERE user_id = ? AND name = ?")
+      .get(userId, trimmedName);
 
     res.status(201).json({ tag: createdOrExistingTag });
   });
 
   app.delete("/api/tags/:id", (req, res) => {
+    const userId = getRequiredUserId(req);
     const tagId = Number(req.params.id);
     if (!Number.isFinite(tagId)) {
       res.status(400).json({ error: "Invalid tag id" });
       return;
     }
-    database.prepare("DELETE FROM tags WHERE id = ?").run(tagId);
+    database.prepare("DELETE FROM tags WHERE id = ? AND user_id = ?").run(tagId, userId);
     res.status(204).send();
   });
 
   app.get("/api/words", (req, res) => {
+    const userId = getRequiredUserId(req);
     const includeStats = req.query.includeStats === "1" || req.query.includeStats === "true";
     const includeTags = req.query.includeTags === "1" || req.query.includeTags === "true";
 
@@ -57,10 +205,11 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         w.note,
         w.created_at
       FROM words w
+      WHERE w.user_id = ?
     `;
 
     if (!includeStats && !includeTags) {
-      const rows = database.prepare(`${baseSelect} ORDER BY w.id DESC`).all();
+      const rows = database.prepare(`${baseSelect} ORDER BY w.id DESC`).all(userId);
       res.json({ words: rows });
       return;
     }
@@ -105,12 +254,13 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         FROM words w
         LEFT JOIN word_stats s ON s.word_id = w.id
         LEFT JOIN word_tags wt ON wt.word_id = w.id
-        LEFT JOIN tags t ON t.id = wt.tag_id
+        LEFT JOIN tags t ON t.id = wt.tag_id AND t.user_id = ?
+        WHERE w.user_id = ?
         GROUP BY w.id
         ORDER BY w.id DESC
       `,
       )
-      .all() as WordJoinedRow[];
+      .all(userId, userId) as WordJoinedRow[];
 
     const wordsWithOptionalTags = rows.map((row): WordWithStatsColumns | WordWithStatsAndTags => {
       const parsedTags = parseTagsConcat(row.tags_concat);
@@ -150,6 +300,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   });
 
   app.post("/api/words", (req, res) => {
+    const userId = getRequiredUserId(req);
     const bodySchema = z.object({
       french: z.string().min(1),
       romaji: z.string().optional().nullable(),
@@ -161,9 +312,10 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     const body = bodySchema.parse(req.body);
 
     const insertWordStatement = database.prepare(
-      "INSERT INTO words (french, romaji, kana, kanji, note) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO words (user_id, french, romaji, kana, kanji, note) VALUES (?, ?, ?, ?, ?, ?)",
     );
     const insertResult = insertWordStatement.run(
+      userId,
       body.french,
       body.romaji ?? null,
       body.kana ?? null,
@@ -178,19 +330,29 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       const insertWordTagStatement = database.prepare(
         "INSERT OR IGNORE INTO word_tags (word_id, tag_id) VALUES (?, ?)",
       );
+      const tagBelongsToUserStatement = database.prepare(
+        "SELECT 1 FROM tags WHERE id = ? AND user_id = ?",
+      );
       for (const tagId of body.tagIds) {
+        const canUseTag = tagBelongsToUserStatement.get(tagId, userId) as
+          | Record<string, unknown>
+          | undefined;
+        if (!canUseTag) continue;
         insertWordTagStatement.run(wordId, tagId);
       }
     }
 
     const createdWord = database
-      .prepare("SELECT id, french, romaji, kana, kanji, note, created_at FROM words WHERE id = ?")
-      .get(wordId);
+      .prepare(
+        "SELECT id, french, romaji, kana, kanji, note, created_at FROM words WHERE id = ? AND user_id = ?",
+      )
+      .get(wordId, userId);
 
     res.status(201).json({ word: createdWord });
   });
 
   app.put("/api/words/:id", (req, res) => {
+    const userId = getRequiredUserId(req);
     const wordId = Number(req.params.id);
     if (!Number.isFinite(wordId)) {
       res.status(400).json({ error: "Invalid word id" });
@@ -207,9 +369,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     });
     const body = bodySchema.parse(req.body);
 
-    database
+    const updateResult = database
       .prepare(
-        "UPDATE words SET french = ?, romaji = ?, kana = ?, kanji = ?, note = ? WHERE id = ?",
+        "UPDATE words SET french = ?, romaji = ?, kana = ?, kanji = ?, note = ? WHERE id = ? AND user_id = ?",
       )
       .run(
         body.french,
@@ -218,18 +380,32 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         body.kanji ?? null,
         body.note ?? null,
         wordId,
+        userId,
       );
+    if (updateResult.changes === 0) {
+      res.status(404).json({ error: "Word not found" });
+      return;
+    }
 
     const updatedWord = database
-      .prepare("SELECT id, french, romaji, kana, kanji, note, created_at FROM words WHERE id = ?")
-      .get(wordId);
+      .prepare(
+        "SELECT id, french, romaji, kana, kanji, note, created_at FROM words WHERE id = ? AND user_id = ?",
+      )
+      .get(wordId, userId);
 
     if (body.tagIds) {
       database.prepare("DELETE FROM word_tags WHERE word_id = ?").run(wordId);
       const insertWordTagStatement = database.prepare(
         "INSERT OR IGNORE INTO word_tags (word_id, tag_id) VALUES (?, ?)",
       );
+      const tagBelongsToUserStatement = database.prepare(
+        "SELECT 1 FROM tags WHERE id = ? AND user_id = ?",
+      );
       for (const tagId of body.tagIds) {
+        const canUseTag = tagBelongsToUserStatement.get(tagId, userId) as
+          | Record<string, unknown>
+          | undefined;
+        if (!canUseTag) continue;
         insertWordTagStatement.run(wordId, tagId);
       }
     }
@@ -238,22 +414,38 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   });
 
   app.delete("/api/words/:id", (req, res) => {
+    const userId = getRequiredUserId(req);
     const wordId = Number(req.params.id);
     if (!Number.isFinite(wordId)) {
       res.status(400).json({ error: "Invalid word id" });
       return;
     }
 
-    database.prepare("DELETE FROM words WHERE id = ?").run(wordId);
+    const deleteResult = database
+      .prepare("DELETE FROM words WHERE id = ? AND user_id = ?")
+      .run(wordId, userId);
+    if (deleteResult.changes === 0) {
+      res.status(404).json({ error: "Word not found" });
+      return;
+    }
     res.status(204).send();
   });
 
   app.post("/api/reviews", (req, res) => {
+    const userId = getRequiredUserId(req);
     const bodySchema = z.object({
       wordId: z.number().int().positive(),
       result: z.enum(["success", "partial", "fail"]),
     });
     const body = bodySchema.parse(req.body);
+
+    const wordRow = database
+      .prepare("SELECT id FROM words WHERE id = ? AND user_id = ?")
+      .get(body.wordId, userId) as { id: number } | undefined;
+    if (!wordRow) {
+      res.status(404).json({ error: "Word not found" });
+      return;
+    }
 
     database.prepare("INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)").run(body.wordId);
 
@@ -290,6 +482,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   });
 
   app.post("/api/reviews/bulk", (req, res) => {
+    const userId = getRequiredUserId(req);
     const bodySchema = z.object({
       reviews: z.array(
         z.object({
@@ -300,6 +493,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     });
     const body = bodySchema.parse(req.body);
 
+    const wordBelongsToUserStatement = database.prepare(
+      "SELECT 1 FROM words WHERE id = ? AND user_id = ?",
+    );
     const selectStatsStatement = database.prepare(
       "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at FROM word_stats WHERE word_id = ?",
     );
@@ -319,6 +515,10 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
     const transaction = database.transaction(() => {
       for (const review of body.reviews) {
+        const canReviewWord = wordBelongsToUserStatement.get(review.wordId, userId) as
+          | Record<string, unknown>
+          | undefined;
+        if (!canReviewWord) continue;
         upsertStatsStatement.run(review.wordId);
         const existingStats = selectStatsStatement.get(review.wordId) as WordStatsRow | undefined;
         if (!existingStats) continue;
@@ -345,6 +545,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   });
 
   app.get("/api/series", (_req, res) => {
+    const userId = getRequiredUserId(_req);
     type SeriesRow = {
       tag_id: number;
       tag_name: string;
@@ -358,16 +559,18 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         SELECT
           t.id AS tag_id,
           t.name AS tag_name,
-          COUNT(DISTINCT wt.word_id) AS words_count,
+          COUNT(DISTINCT w.id) AS words_count,
           COALESCE(SUM(s.score), 0) AS total_score
         FROM tags t
         LEFT JOIN word_tags wt ON wt.tag_id = t.id
-        LEFT JOIN word_stats s ON s.word_id = wt.word_id
+        LEFT JOIN words w ON w.id = wt.word_id AND w.user_id = ?
+        LEFT JOIN word_stats s ON s.word_id = w.id
+        WHERE t.user_id = ?
         GROUP BY t.id
         ORDER BY t.name ASC
       `,
       )
-      .all() as SeriesRow[];
+      .all(userId, userId) as SeriesRow[];
 
     res.json({
       series: seriesRows.map((row) => ({
@@ -380,6 +583,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   });
 
   app.get("/api/series/:tagId/words", (req, res) => {
+    const userId = getRequiredUserId(req);
     const tagId = Number(req.params.tagId);
     if (!Number.isFinite(tagId)) {
       res.status(400).json({ error: "Invalid tag id" });
@@ -404,17 +608,19 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           s.last_reviewed_at AS last_reviewed_at
         FROM words w
         INNER JOIN word_tags wt ON wt.word_id = w.id
+        INNER JOIN tags t ON t.id = wt.tag_id
         LEFT JOIN word_stats s ON s.word_id = w.id
-        WHERE wt.tag_id = ?
+        WHERE wt.tag_id = ? AND w.user_id = ? AND t.user_id = ?
         ORDER BY w.id DESC
       `,
       )
-      .all(tagId);
+      .all(tagId, userId, userId);
 
     res.json({ words: rows });
   });
 
   app.get("/api/words/difficult", (req, res) => {
+    const userId = getRequiredUserId(req);
     const scoreThreshold = Number(req.query.scoreThreshold ?? -5);
     const failRateThreshold = Number(req.query.failRateThreshold ?? 0.4);
     const minAttempts = Number(req.query.minAttempts ?? 5);
@@ -438,23 +644,29 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         FROM words w
         LEFT JOIN word_stats s ON s.word_id = w.id
         WHERE
-          COALESCE(s.score, 0) <= ?
+          w.user_id = ?
+          AND (
+            COALESCE(s.score, 0) <= ?
           OR (
             (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) >= ?
             AND (
               (CAST(COALESCE(s.fail_count, 0) AS REAL) / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0))
             ) > ?
           )
+          )
         ORDER BY COALESCE(s.score, 0) ASC, w.id DESC
       `,
       )
-      .all(scoreThreshold, minAttempts, failRateThreshold);
+      .all(userId, scoreThreshold, minAttempts, failRateThreshold);
 
     res.json({ words: rows, params: { scoreThreshold, failRateThreshold, minAttempts } });
   });
 
   app.get("/api/export", (_req, res) => {
-    const tags = database.prepare("SELECT id, name, created_at FROM tags ORDER BY name ASC").all();
+    const userId = getRequiredUserId(_req);
+    const tags = database
+      .prepare("SELECT id, name, created_at FROM tags WHERE user_id = ? ORDER BY name ASC")
+      .all(userId);
     type ExportWordRow = {
       id: number;
       french: string;
@@ -491,12 +703,13 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         FROM words w
         LEFT JOIN word_stats s ON s.word_id = w.id
         LEFT JOIN word_tags wt ON wt.word_id = w.id
-        LEFT JOIN tags t ON t.id = wt.tag_id
+        LEFT JOIN tags t ON t.id = wt.tag_id AND t.user_id = ?
+        WHERE w.user_id = ?
         GROUP BY w.id
         ORDER BY w.id ASC
       `,
       )
-      .all() as ExportWordRow[];
+      .all(userId, userId) as ExportWordRow[];
 
     const words = wordRows.map((row) => {
       const tagNames = parseTagNamesConcat(row.tag_names_concat);
@@ -508,6 +721,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   });
 
   app.post("/api/import", (req, res) => {
+    const userId = getRequiredUserId(req);
     const bodySchema = z.object({
       words: z.array(
         z.object({
@@ -522,10 +736,14 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     });
     const body = bodySchema.parse(req.body);
 
-    const createTagStatement = database.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)");
-    const selectTagIdByNameStatement = database.prepare("SELECT id FROM tags WHERE name = ?");
+    const createTagStatement = database.prepare(
+      "INSERT OR IGNORE INTO tags (user_id, name) VALUES (?, ?)",
+    );
+    const selectTagIdByNameStatement = database.prepare(
+      "SELECT id FROM tags WHERE user_id = ? AND name = ?",
+    );
     const insertWordStatement = database.prepare(
-      "INSERT INTO words (french, romaji, kana, kanji, note) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO words (user_id, french, romaji, kana, kanji, note) VALUES (?, ?, ?, ?, ?, ?)",
     );
     const insertWordStatsStatement = database.prepare(
       "INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)",
@@ -540,6 +758,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     const transaction = database.transaction(() => {
       for (const word of body.words) {
         const insertResult = insertWordStatement.run(
+          userId,
           word.french.trim(),
           word.romaji ?? null,
           word.kana ?? null,
@@ -553,11 +772,13 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
         const tagNames = (word.tags ?? []).map((tagName) => tagName.trim()).filter(Boolean);
         for (const tagName of tagNames) {
-          const createTagResult = createTagStatement.run(tagName);
+          const createTagResult = createTagStatement.run(userId, tagName);
           if (createTagResult.changes > 0) {
             importedTagsCount += 1;
           }
-          const tagRow = selectTagIdByNameStatement.get(tagName) as { id: number } | undefined;
+          const tagRow = selectTagIdByNameStatement.get(userId, tagName) as
+            | { id: number }
+            | undefined;
           if (tagRow) {
             insertWordTagStatement.run(insertedWordId, tagRow.id);
           }
@@ -601,4 +822,18 @@ function parseTagNamesConcat(value: unknown): string[] {
     .map((name) => name.trim())
     .filter(Boolean);
   return Array.from(new Set(names));
+}
+
+function getSessionUserId(req: Request): number | null {
+  const userId = req.session.userId;
+  if (!userId) return null;
+  if (!Number.isFinite(userId)) return null;
+  return userId;
+}
+
+function getRequiredUserId(req: Request): number {
+  const userId = getSessionUserId(req);
+  // The /api auth middleware above guarantees this exists for protected routes.
+  // In case of misconfiguration, returning 0 scopes queries to nothing instead of crashing the server.
+  return userId ?? 0;
 }

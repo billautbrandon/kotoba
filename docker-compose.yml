@@ -1,7 +1,7 @@
 services:
-  ganti-server:
+  kotoba:
     image: node:20-bullseye
-    container_name: ganti-server
+    container_name: kotoba
     working_dir: /app
     volumes:
       - ./:/app

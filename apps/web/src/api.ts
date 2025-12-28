@@ -1,3 +1,9 @@
+export type User = {
+  id: number;
+  username: string;
+  created_at: string;
+};
+
 export type Word = {
   id: number;
   french: string;
@@ -32,8 +38,57 @@ export type WordWithStatsAndTags = WordWithStats & {
 
 export type ReviewResult = "success" | "partial" | "fail";
 
+export async function fetchMe(): Promise<User> {
+  const response = await fetch("/api/auth/me", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Not authenticated");
+  }
+  const payload = (await response.json()) as { user: User };
+  return payload.user;
+}
+
+export async function registerUser(username: string, password: string): Promise<User> {
+  const response = await fetch("/api/auth/register", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to register");
+  }
+  const payload = (await response.json()) as { user: User };
+  return payload.user;
+}
+
+export async function loginUser(username: string, password: string): Promise<User> {
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to login");
+  }
+  const payload = (await response.json()) as { user: User };
+  return payload.user;
+}
+
+export async function logoutUser(): Promise<void> {
+  const response = await fetch("/api/auth/logout", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Failed to logout");
+  }
+}
+
 export async function fetchWords(includeStats: boolean): Promise<WordWithStats[] | Word[]> {
-  const response = await fetch(`/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=0`);
+  const response = await fetch(`/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=0`, {
+    credentials: "include",
+  });
   if (!response.ok) {
     throw new Error("Failed to fetch words");
   }
@@ -44,7 +99,9 @@ export async function fetchWords(includeStats: boolean): Promise<WordWithStats[]
 export async function fetchWordsWithTags(
   includeStats: boolean,
 ): Promise<WordWithTags[] | WordWithStatsAndTags[]> {
-  const response = await fetch(`/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=1`);
+  const response = await fetch(`/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=1`, {
+    credentials: "include",
+  });
   if (!response.ok) {
     throw new Error("Failed to fetch words");
   }
@@ -53,7 +110,7 @@ export async function fetchWordsWithTags(
 }
 
 export async function fetchDifficultWords(): Promise<WordWithStats[]> {
-  const response = await fetch("/api/words/difficult");
+  const response = await fetch("/api/words/difficult", { credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to fetch difficult words");
   }
@@ -64,7 +121,7 @@ export async function fetchDifficultWords(): Promise<WordWithStats[]> {
 export async function fetchSeries(): Promise<
   Array<{ tagId: number; tagName: string; wordsCount: number; totalScore: number }>
 > {
-  const response = await fetch("/api/series");
+  const response = await fetch("/api/series", { credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to fetch series");
   }
@@ -75,7 +132,7 @@ export async function fetchSeries(): Promise<
 }
 
 export async function fetchSeriesWords(tagId: number): Promise<WordWithStats[]> {
-  const response = await fetch(`/api/series/${tagId}/words`);
+  const response = await fetch(`/api/series/${tagId}/words`, { credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to fetch series words");
   }
@@ -84,7 +141,7 @@ export async function fetchSeriesWords(tagId: number): Promise<WordWithStats[]> 
 }
 
 export async function fetchTags(): Promise<Tag[]> {
-  const response = await fetch("/api/tags");
+  const response = await fetch("/api/tags", { credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to fetch tags");
   }
@@ -95,6 +152,7 @@ export async function fetchTags(): Promise<Tag[]> {
 export async function createTag(name: string): Promise<Tag> {
   const response = await fetch("/api/tags", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
@@ -115,6 +173,7 @@ export async function createWord(word: {
 }): Promise<Word> {
   const response = await fetch("/api/words", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(word),
   });
@@ -138,6 +197,7 @@ export async function updateWord(
 ): Promise<Word> {
   const response = await fetch(`/api/words/${id}`, {
     method: "PUT",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(word),
   });
@@ -149,7 +209,7 @@ export async function updateWord(
 }
 
 export async function deleteWord(id: number): Promise<void> {
-  const response = await fetch(`/api/words/${id}`, { method: "DELETE" });
+  const response = await fetch(`/api/words/${id}`, { method: "DELETE", credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to delete word");
   }
@@ -158,6 +218,7 @@ export async function deleteWord(id: number): Promise<void> {
 export async function submitReview(wordId: number, result: ReviewResult): Promise<void> {
   const response = await fetch("/api/reviews", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ wordId, result }),
   });
@@ -171,6 +232,7 @@ export async function submitBulkReviews(
 ): Promise<{ appliedCount: number }> {
   const response = await fetch("/api/reviews/bulk", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reviews }),
   });
@@ -181,7 +243,7 @@ export async function submitBulkReviews(
 }
 
 export async function exportBackup(): Promise<unknown> {
-  const response = await fetch("/api/export");
+  const response = await fetch("/api/export", { credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to export backup");
   }
@@ -200,6 +262,7 @@ export async function importWordsFromJson(
 ): Promise<{ importedWordsCount: number; importedTagsCount: number }> {
   const response = await fetch("/api/import", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ words }),
   });

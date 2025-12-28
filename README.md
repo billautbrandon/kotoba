@@ -20,7 +20,7 @@ npm run dev
 
 ## Démarrage (Docker)
 
-Le `docker-compose.yml` démarre un container nommé **`ganti-server`** pour coller aux commandes de dev.
+Le `docker-compose.yml` démarre un container nommé **`kotoba`**.
 
 ```bash
 docker compose up --build
@@ -29,7 +29,7 @@ docker compose up --build
 Puis, pour lancer Biome (dans le container):
 
 ```bash
-docker exec -it ganti-server npx biome check --changed
+docker exec -it kotoba npx biome check --changed
 ```
 
 

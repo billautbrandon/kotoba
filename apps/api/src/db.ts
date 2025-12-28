@@ -14,6 +14,7 @@ export type ReviewResult = "success" | "partial" | "fail";
 
 export type WordRow = {
   id: number;
+  user_id: number | null;
   french: string;
   romaji: string | null;
   kana: string | null;
@@ -41,6 +42,7 @@ export type WordWithStatsRow = WordRow & {
 
 export type TagRow = {
   id: number;
+  user_id: number | null;
   name: string;
   created_at: string;
 };
@@ -55,14 +57,23 @@ export function openDatabase() {
 
 function ensureSchema(database: Database.Database) {
   database.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS words (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
       french TEXT NOT NULL,
       romaji TEXT,
       kana TEXT,
       kanji TEXT,
       note TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS word_stats (
@@ -77,8 +88,10 @@ function ensureSchema(database: Database.Database) {
 
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      user_id INTEGER,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS word_tags (
@@ -92,7 +105,89 @@ function ensureSchema(database: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_word_tags_tag_id ON word_tags(tag_id);
     CREATE INDEX IF NOT EXISTS idx_word_tags_word_id ON word_tags(word_id);
+    CREATE INDEX IF NOT EXISTS idx_words_user_id ON words(user_id);
+    CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_user_id_name ON tags(user_id, name);
   `);
+
+  ensureColumnExists(database, "words", "user_id", "INTEGER");
+  ensureColumnExists(database, "tags", "user_id", "INTEGER");
+  rebuildTagsAndWordTagsIfNeeded(database);
+}
+
+function ensureColumnExists(
+  database: Database.Database,
+  tableName: string,
+  columnName: string,
+  columnType: string,
+) {
+  const columnRows = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
+    name: string;
+  }>;
+  const hasColumn = columnRows.some((column) => column.name === columnName);
+  if (hasColumn) return;
+  database.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`);
+}
+
+function rebuildTagsAndWordTagsIfNeeded(database: Database.Database) {
+  // We need tags uniqueness to be scoped by user_id (user_id, name), not globally by name.
+  // If the existing `tags` table was created with a UNIQUE constraint on `name`, SQLite creates
+  // an autoindex like `sqlite_autoindex_tags_1` which we cannot drop. In that case we rebuild.
+  try {
+    const indexList = database.prepare("PRAGMA index_list(tags)").all() as Array<{
+      name: string;
+      unique: number;
+      origin: string;
+    }>;
+
+    const hasUniqueConstraintIndex = indexList.some(
+      (indexRow) => indexRow.unique === 1 && indexRow.origin === "u",
+    );
+    if (!hasUniqueConstraintIndex) return;
+
+    database.exec("PRAGMA foreign_keys = OFF;");
+    const transaction = database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS tags_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER,
+          name TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO tags_new (id, user_id, name, created_at)
+        SELECT id, user_id, name, created_at FROM tags;
+
+        CREATE TABLE IF NOT EXISTS word_tags_new (
+          word_id INTEGER NOT NULL,
+          tag_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (word_id, tag_id),
+          FOREIGN KEY(word_id) REFERENCES words(id) ON DELETE CASCADE,
+          FOREIGN KEY(tag_id) REFERENCES tags_new(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO word_tags_new (word_id, tag_id, created_at)
+        SELECT word_id, tag_id, created_at FROM word_tags;
+
+        DROP TABLE word_tags;
+        DROP TABLE tags;
+
+        ALTER TABLE tags_new RENAME TO tags;
+        ALTER TABLE word_tags_new RENAME TO word_tags;
+
+        CREATE INDEX IF NOT EXISTS idx_word_tags_tag_id ON word_tags(tag_id);
+        CREATE INDEX IF NOT EXISTS idx_word_tags_word_id ON word_tags(word_id);
+        CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_user_id_name ON tags(user_id, name);
+      `);
+    });
+
+    transaction();
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON;");
+  }
 }
 
 export function computeScoreDelta(reviewResult: ReviewResult): number {
