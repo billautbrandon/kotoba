@@ -6,6 +6,7 @@ import {
   type WordWithTags,
   createTag,
   createWord,
+  deleteTag,
   deleteWord,
   exportBackup,
   fetchTags,
@@ -191,6 +192,21 @@ export function WordsPage() {
     });
   }
 
+  async function handleDeleteTag(tag: Tag) {
+    if (!window.confirm(`Supprimer le tag « ${tag.name} » ?`)) return;
+    setErrorMessage(null);
+    try {
+      await deleteTag(tag.id);
+      setFormState((previousState) => ({
+        ...previousState,
+        selectedTagIds: previousState.selectedTagIds.filter((id) => id !== tag.id),
+      }));
+      await refreshWordsAndTags();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    }
+  }
+
   async function handleExportBackup() {
     setErrorMessage(null);
     try {
@@ -346,34 +362,56 @@ export function WordsPage() {
                   const isSelected = formState.selectedTagIds.includes(tag.id);
                   const checkboxId = `tag-${tag.id}`;
                   return (
-                    <label
+                    <div
                       key={tag.id}
-                      htmlFor={checkboxId}
                       style={{
-                        cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
                         gap: "var(--space-2)",
-                        userSelect: "none",
-                        padding: "8px 14px",
+                        padding: "6px 12px 6px 14px",
                         borderRadius: "var(--radius-md)",
                         border: `2px solid ${isSelected ? "var(--color-primary)" : "var(--color-border)"}`,
                         background: isSelected ? "rgba(199, 62, 29, 0.1)" : "#fff",
-                        color: isSelected ? "var(--color-primary)" : "var(--color-text-soft)",
-                        fontWeight: isSelected ? 700 : 600,
-                        fontSize: "15px",
-                        transition: "all 0.2s ease",
                       }}
                     >
-                      <input
-                        id={checkboxId}
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleTag(tag.id)}
-                        style={{ cursor: "pointer" }}
-                      />
-                      {tag.name}
-                    </label>
+                      <label
+                        htmlFor={checkboxId}
+                        style={{
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "var(--space-2)",
+                          userSelect: "none",
+                          color: isSelected ? "var(--color-primary)" : "var(--color-text-soft)",
+                          fontWeight: isSelected ? 700 : 600,
+                          fontSize: "15px",
+                          flex: 1,
+                        }}
+                      >
+                        <input
+                          id={checkboxId}
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleTag(tag.id)}
+                          style={{ cursor: "pointer" }}
+                        />
+                        {tag.name}
+                      </label>
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={() => void handleDeleteTag(tag)}
+                        style={{
+                          padding: "2px 8px",
+                          fontSize: "13px",
+                          lineHeight: 1,
+                          color: "var(--color-text-soft)",
+                        }}
+                        aria-label={`Supprimer le tag ${tag.name}`}
+                      >
+                        ×
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -443,16 +481,43 @@ export function WordsPage() {
             className="textarea"
             value={jsonImportText}
             onChange={(event) => setJsonImportText(event.target.value)}
-            placeholder='Ex: [{"french":"bonjour","kana":"こんにちは","tags":["salutations"]}]'
+            placeholder='Colle un JSON. Format: [{"french":"bonjour","romaji":"konnichiwa","kana":"こんにちは","kanji":"今日は","tags":["salutations"]}]. Pour une liste simple, clique "Copier un exemple", envoie-le avec ta liste à une IA, puis importe le JSON généré.'
             style={{ minHeight: "120px" }}
           />
         </div>
         <div
           className="row"
-          style={{ marginTop: "var(--space-4)", gap: "var(--space-3)", alignItems: "center" }}
+          style={{ marginTop: "var(--space-4)", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}
         >
           <button className="button" type="button" onClick={() => void handleImportJson()}>
             Importer
+          </button>
+          <button
+            className="button"
+            type="button"
+            onClick={async () => {
+              const example = [
+                {
+                  french: "bonjour",
+                  romaji: "konnichiwa",
+                  kana: "こんにちは",
+                  kanji: "今日は",
+                  tags: ["salutations"],
+                },
+                {
+                  french: "merci",
+                  romaji: "arigatou",
+                  kana: "ありがとう",
+                  kanji: "有難う",
+                  tags: ["salutations"],
+                },
+              ];
+              await navigator.clipboard.writeText(JSON.stringify(example, null, 2));
+              setJsonImportStatus("Exemple copié dans le presse-papier !");
+              setTimeout(() => setJsonImportStatus(null), 3000);
+            }}
+          >
+            Copier un exemple
           </button>
           {jsonImportStatus ? (
             <div className="muted" style={{ fontSize: "15px" }}>

@@ -4,22 +4,31 @@ import {
   type WordWithStats,
   computeFailRate,
   fetchSeriesWords,
+  fetchSrsWords,
   submitBulkReviews,
 } from "../../api";
 import { extractKanji } from "../../utils/kanji";
 import { AudioButton } from "../components/AudioButton";
 import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
 
-type TrainMode = "tag";
+type TrainMode = "tag" | "srs";
+type SrsCategory = "hard" | "medium" | "easy";
 type SessionMode = "manual" | "timer";
 type SessionRating = "success" | "partial" | "fail";
 type PromptMode = "french" | "romaji" | "kana" | "kanji";
+
+const srsCategoryLabels: Record<SrsCategory, string> = {
+  hard: "Difficile",
+  medium: "Moyen",
+  easy: "Facile",
+};
 
 export function TrainPage(props: { mode: TrainMode }) {
   const routeParams = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const tagId = props.mode === "tag" ? Number(routeParams.tagId) : null;
+  const srsCategory = (routeParams.category as SrsCategory | undefined) ?? "hard";
   const tagName = searchParams.get("name") ?? null;
   const sessionMode = (searchParams.get("mode") as SessionMode | null) ?? "manual";
   const timerSeconds = Number(searchParams.get("seconds") ?? 5);
@@ -46,10 +55,11 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [clockNowMs, setClockNowMs] = useState<number>(() => Date.now());
 
   const modeLabel = useMemo(() => {
+    if (props.mode === "srs") return `SRS — ${srsCategoryLabels[srsCategory]}`;
     if (tagName) return `Série (${tagName})`;
     if (tagId) return `Série (tag ${tagId})`;
     return "Série";
-  }, [tagId, tagName]);
+  }, [props.mode, srsCategory, tagId, tagName]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -67,13 +77,20 @@ export function TrainPage(props: { mode: TrainMode }) {
       setWordStartedAtMs(nowMs);
 
       try {
-        if (!tagId || !Number.isFinite(tagId)) {
-          throw new Error("Tag invalide");
+        let loadedWords: WordWithStats[];
+
+        if (props.mode === "srs") {
+          const srsData = await fetchSrsWords();
+          loadedWords = srsData[srsCategory] ?? [];
+        } else {
+          if (!tagId || !Number.isFinite(tagId)) {
+            throw new Error("Tag invalide");
+          }
+          loadedWords = await fetchSeriesWords(tagId);
         }
-        const loadedWords = await fetchSeriesWords(tagId);
 
         let filteredWords = loadedWords;
-        if (onlyDifficult) {
+        if (props.mode === "tag" && onlyDifficult) {
           filteredWords = loadedWords.filter((word) => {
             const failRate = computeFailRate(word);
             return word.score < 0 || failRate > 0.5;
@@ -100,7 +117,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     return () => {
       isCancelled = true;
     };
-  }, [tagId, onlyDifficult]);
+  }, [props.mode, tagId, srsCategory, onlyDifficult]);
 
   const currentWord = useMemo(() => {
     if (!words || words.length === 0) return null;
@@ -201,10 +218,19 @@ export function TrainPage(props: { mode: TrainMode }) {
     return () => window.clearInterval(intervalId);
   }, [isSessionFinished, sessionMode]);
 
+  const handleRatingKey = useCallback(
+    (rating: SessionRating) => {
+      if (currentWordId) {
+        setRating(currentWordId, rating);
+        advanceToNextWord();
+      }
+    },
+    [advanceToNextWord, currentWordId],
+  );
+
   useEffect(() => {
     if (!words || words.length === 0) return;
     if (isSessionFinished) return;
-    if (sessionMode !== "manual") return;
 
     function onKeyDown(event: KeyboardEvent) {
       const activeElement = document.activeElement;
@@ -212,21 +238,44 @@ export function TrainPage(props: { mode: TrainMode }) {
       const isTypingContext = activeTagName === "input" || activeTagName === "textarea";
       if (isTypingContext) return;
 
-      if (event.key === "ArrowRight" || event.key === "Enter") {
-        event.preventDefault();
-        advanceToNextWord();
+      if (isRevealed && currentWordId) {
+        const is1 = event.key === "1" || event.code === "Digit1" || event.code === "Numpad1";
+        const is2 = event.key === "2" || event.code === "Digit2" || event.code === "Numpad2";
+        const is3 = event.key === "3" || event.code === "Digit3" || event.code === "Numpad3";
+        if (is1) {
+          event.preventDefault();
+          handleRatingKey("success");
+          return;
+        }
+        if (is2) {
+          event.preventDefault();
+          handleRatingKey("partial");
+          return;
+        }
+        if (is3) {
+          event.preventDefault();
+          handleRatingKey("fail");
+          return;
+        }
       }
 
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
-        setIsRevealed(false);
+      if (sessionMode === "manual") {
+        if (event.key === "ArrowRight" || event.key === "Enter") {
+          event.preventDefault();
+          advanceToNextWord();
+        }
+
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          setCurrentIndex((previousIndex) => Math.max(0, previousIndex - 1));
+          setIsRevealed(false);
+        }
       }
     }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [advanceToNextWord, isSessionFinished, sessionMode, words]);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [advanceToNextWord, currentWordId, handleRatingKey, isRevealed, isSessionFinished, sessionMode, words]);
 
   const allSessionWordIds = useMemo(() => {
     return (words ?? []).map((word) => word.id);
@@ -342,7 +391,7 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   function handleCancelSession() {
     if (showCancelConfirm) {
-      navigate("/");
+      navigate(props.mode === "srs" ? "/srs" : "/");
     } else {
       setShowCancelConfirm(true);
     }
@@ -596,7 +645,7 @@ export function TrainPage(props: { mode: TrainMode }) {
                     </div>
                   )}
                 </div>
-                <div className="row" style={{ gap: "var(--space-4)" }}>
+                <div className="row" style={{ gap: "var(--space-4)", flexWrap: "wrap", alignItems: "center" }}>
                   <button
                     className="button"
                     type="button"
@@ -606,15 +655,75 @@ export function TrainPage(props: { mode: TrainMode }) {
                   >
                     ← Précédent
                   </button>
-                  <button
-                    className="button button--primary"
-                    type="button"
-                    onClick={() => advanceToNextWord()}
-                    disabled={isSubmitting}
-                    style={{ padding: "var(--space-4) var(--space-6)", fontSize: "16px" }}
+                  <div
+                    className="ratingGroup"
+                    style={{
+                      display: "flex",
+                      gap: "var(--space-3)",
+                      flexWrap: "wrap",
+                    }}
                   >
-                    Suivant →
-                  </button>
+                    <button
+                      className={`button ratingButton ${ratingsByWordId[currentWordId ?? 0] === "success" ? "button--success" : ""}`}
+                      type="button"
+                      onClick={() => handleRatingKey("success")}
+                      disabled={isSubmitting}
+                      aria-label="Réussi (1)"
+                      title="Réussi — touche 1"
+                      style={{
+                        padding: "var(--space-5) var(--space-8)",
+                        fontSize: "18px",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "var(--space-1)",
+                        minWidth: 100,
+                      }}
+                    >
+                      <span style={{ fontSize: "28px" }}>✅</span>
+                      <span style={{ fontSize: "13px", fontWeight: 600 }}>Réussi (1)</span>
+                    </button>
+                    <button
+                      className={`button ratingButton ${ratingsByWordId[currentWordId ?? 0] === "partial" ? "button--warning" : ""}`}
+                      type="button"
+                      onClick={() => handleRatingKey("partial")}
+                      disabled={isSubmitting}
+                      aria-label="Partiel (2)"
+                      title="Partiel — touche 2"
+                      style={{
+                        padding: "var(--space-5) var(--space-8)",
+                        fontSize: "18px",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "var(--space-1)",
+                        minWidth: 100,
+                      }}
+                    >
+                      <span style={{ fontSize: "28px" }}>⚠️</span>
+                      <span style={{ fontSize: "13px", fontWeight: 600 }}>Partiel (2)</span>
+                    </button>
+                    <button
+                      className={`button ratingButton ${ratingsByWordId[currentWordId ?? 0] === "fail" ? "button--danger" : ""}`}
+                      type="button"
+                      onClick={() => handleRatingKey("fail")}
+                      disabled={isSubmitting}
+                      aria-label="Raté (3)"
+                      title="Raté — touche 3"
+                      style={{
+                        padding: "var(--space-5) var(--space-8)",
+                        fontSize: "18px",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "var(--space-1)",
+                        minWidth: 100,
+                      }}
+                    >
+                      <span style={{ fontSize: "28px" }}>❌</span>
+                      <span style={{ fontSize: "13px", fontWeight: 600 }}>Raté (3)</span>
+                    </button>
+                  </div>
                 </div>
               </>
             )}
@@ -635,10 +744,17 @@ export function TrainPage(props: { mode: TrainMode }) {
             {sessionMode === "manual" ? (
               <>
                 {" "}
-                — Raccourcis: <strong>→</strong> / <strong>Entrée</strong> pour avancer,{" "}
-                <strong>←</strong> pour revenir
+                — Clique ou <strong>1</strong> ✅ <strong>2</strong> ⚠️ <strong>3</strong> ❌ pour
+                noter, <strong>→</strong>/<strong>Entrée</strong> avancer, <strong>←</strong> revenir
               </>
-            ) : null}
+            ) : (
+              isRevealed && (
+                <>
+                  {" "}
+                  — Touches <strong>1</strong> <strong>2</strong> <strong>3</strong> pour noter
+                </>
+              )
+            )}
           </div>
         </div>
       ) : null}
@@ -721,8 +837,8 @@ export function TrainPage(props: { mode: TrainMode }) {
               >
                 Recommencer
               </button>
-              <Link className="button" to="/">
-                Retour aux séries
+              <Link className="button" to={props.mode === "srs" ? "/srs" : "/"}>
+                {props.mode === "srs" ? "Retour au SRS" : "Retour aux séries"}
               </Link>
             </div>
           </div>

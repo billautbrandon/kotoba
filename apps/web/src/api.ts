@@ -26,6 +26,7 @@ export type WordWithStats = Word & {
   fail_count: number;
   score: number;
   last_reviewed_at: string | null;
+  consecutive_success_count?: number;
 };
 
 export type WordWithTags = Word & {
@@ -141,6 +142,20 @@ export async function fetchDifficultWords(): Promise<WordWithStats[]> {
   return payload.words;
 }
 
+export type SrsWords = {
+  hard: WordWithStats[];
+  medium: WordWithStats[];
+  easy: WordWithStats[];
+};
+
+export async function fetchSrsWords(): Promise<SrsWords> {
+  const response = await fetch("/api/srs/words", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch SRS words");
+  }
+  return (await response.json()) as SrsWords;
+}
+
 export async function fetchSeries(): Promise<
   Array<{ tagId: number; tagName: string; wordsCount: number; totalScore: number }>
 > {
@@ -184,6 +199,16 @@ export async function createTag(name: string): Promise<Tag> {
   }
   const payload = (await response.json()) as { tag: Tag };
   return payload.tag;
+}
+
+export async function deleteTag(tagId: number): Promise<void> {
+  const response = await fetch(`/api/tags/${tagId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Failed to delete tag");
+  }
 }
 
 export async function createWord(word: {

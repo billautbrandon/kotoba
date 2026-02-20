@@ -530,7 +530,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
     const existingStats = database
       .prepare(
-        "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at FROM word_stats WHERE word_id = ?",
+        "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count FROM word_stats WHERE word_id = ?",
       )
       .get(body.wordId) as WordStatsRow | undefined;
 
@@ -544,7 +544,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       .prepare(
         `
         UPDATE word_stats
-        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?
+        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?, consecutive_success_count = ?
         WHERE word_id = ?
       `,
       )
@@ -554,6 +554,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         updatedStats.fail_count,
         updatedStats.score,
         updatedStats.last_reviewed_at,
+        updatedStats.consecutive_success_count,
         updatedStats.word_id,
       );
 
@@ -576,7 +577,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       "SELECT 1 FROM words WHERE id = ? AND user_id = ?",
     );
     const selectStatsStatement = database.prepare(
-      "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at FROM word_stats WHERE word_id = ?",
+      "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count FROM word_stats WHERE word_id = ?",
     );
     const upsertStatsStatement = database.prepare(
       "INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)",
@@ -584,7 +585,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     const updateStatsStatement = database.prepare(
       `
         UPDATE word_stats
-        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?
+        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?, consecutive_success_count = ?
         WHERE word_id = ?
       `,
     );
@@ -612,6 +613,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           updatedStats.fail_count,
           updatedStats.score,
           updatedStats.last_reviewed_at,
+          updatedStats.consecutive_success_count,
           updatedStats.word_id,
         );
         appliedCount += 1;
@@ -646,6 +648,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         LEFT JOIN word_stats s ON s.word_id = w.id
         WHERE t.user_id = ?
         GROUP BY t.id
+        HAVING COUNT(DISTINCT w.id) > 0
         ORDER BY t.name ASC
       `,
       )
@@ -739,6 +742,89 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       .all(userId, scoreThreshold, minAttempts, failRateThreshold);
 
     res.json({ words: rows, params: { scoreThreshold, failRateThreshold, minAttempts } });
+  });
+
+  const srsWordSelect = `
+    SELECT
+      w.id,
+      w.french,
+      w.romaji,
+      w.kana,
+      w.kanji,
+      w.note,
+      w.created_at,
+      COALESCE(s.success_count, 0) AS success_count,
+      COALESCE(s.partial_count, 0) AS partial_count,
+      COALESCE(s.fail_count, 0) AS fail_count,
+      COALESCE(s.score, 0) AS score,
+      s.last_reviewed_at AS last_reviewed_at,
+      COALESCE(s.consecutive_success_count, 0) AS consecutive_success_count
+    FROM words w
+    LEFT JOIN word_stats s ON s.word_id = w.id
+  `;
+
+  app.get("/api/srs/words", (req, res) => {
+    const userId = getRequiredUserId(req);
+
+    const hardRows = database
+      .prepare(
+        `
+        ${srsWordSelect}
+        WHERE w.user_id = ?
+        AND (
+          COALESCE(s.score, 0) < 0
+          OR (
+            (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) >= 5
+            AND (
+              CAST(COALESCE(s.fail_count, 0) AS REAL)
+              / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
+            ) > 0.5
+          )
+        )
+        AND COALESCE(s.consecutive_success_count, 0) < 5
+        ORDER BY COALESCE(s.score, 0) ASC, w.id DESC
+      `,
+      )
+      .all(userId);
+
+    const easyRows = database
+      .prepare(
+        `
+        ${srsWordSelect}
+        WHERE w.user_id = ?
+        AND COALESCE(s.consecutive_success_count, 0) >= 5
+        ORDER BY COALESCE(s.score, 0) DESC, w.id DESC
+      `,
+      )
+      .all(userId);
+
+    const mediumRows = database
+      .prepare(
+        `
+        ${srsWordSelect}
+        WHERE w.user_id = ?
+        AND (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) > 0
+        AND COALESCE(s.consecutive_success_count, 0) < 5
+        AND NOT (
+          COALESCE(s.score, 0) < 0
+          OR (
+            (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) >= 5
+            AND (
+              CAST(COALESCE(s.fail_count, 0) AS REAL)
+              / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
+            ) > 0.5
+          )
+        )
+        ORDER BY COALESCE(s.score, 0) ASC, w.id DESC
+      `,
+      )
+      .all(userId);
+
+    res.json({
+      hard: hardRows,
+      medium: mediumRows,
+      easy: easyRows,
+    });
   });
 
   app.get("/api/export", (_req, res) => {

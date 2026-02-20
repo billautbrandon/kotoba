@@ -30,6 +30,7 @@ export type WordStatsRow = {
   fail_count: number;
   score: number;
   last_reviewed_at: string | null;
+  consecutive_success_count: number;
 };
 
 export type WordWithStatsRow = WordRow & {
@@ -38,6 +39,7 @@ export type WordWithStatsRow = WordRow & {
   fail_count: number;
   score: number;
   last_reviewed_at: string | null;
+  consecutive_success_count: number;
 };
 
 export type TagRow = {
@@ -105,13 +107,18 @@ function ensureSchema(database: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_word_tags_tag_id ON word_tags(tag_id);
     CREATE INDEX IF NOT EXISTS idx_word_tags_word_id ON word_tags(word_id);
+  `);
+
+  ensureColumnExists(database, "words", "user_id", "INTEGER");
+  ensureColumnExists(database, "tags", "user_id", "INTEGER");
+  ensureColumnExists(database, "word_stats", "consecutive_success_count", "INTEGER DEFAULT 0");
+
+  database.exec(`
     CREATE INDEX IF NOT EXISTS idx_words_user_id ON words(user_id);
     CREATE INDEX IF NOT EXISTS idx_tags_user_id ON tags(user_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_user_id_name ON tags(user_id, name);
   `);
 
-  ensureColumnExists(database, "words", "user_id", "INTEGER");
-  ensureColumnExists(database, "tags", "user_id", "INTEGER");
   rebuildTagsAndWordTagsIfNeeded(database);
 }
 
@@ -202,6 +209,7 @@ export function applyReviewToStats(
 ): WordStatsRow {
   const scoreDelta = computeScoreDelta(reviewResult);
   const nowIso = new Date().toISOString();
+  const consecutiveSuccessCount = existingStats.consecutive_success_count ?? 0;
 
   return {
     ...existingStats,
@@ -210,5 +218,6 @@ export function applyReviewToStats(
     fail_count: existingStats.fail_count + (reviewResult === "fail" ? 1 : 0),
     score: existingStats.score + scoreDelta,
     last_reviewed_at: nowIso,
+    consecutive_success_count: reviewResult === "success" ? consecutiveSuccessCount + 1 : 0,
   };
 }

@@ -10,6 +10,7 @@ import { HomePage } from "./pages/HomePage";
 import { KanjiLearningPage } from "./pages/KanjiLearningPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SeriesStartPage } from "./pages/SeriesStartPage";
+import { SrsPage } from "./pages/SrsPage";
 import { TrainPage } from "./pages/TrainPage";
 import { WordsPage } from "./pages/WordsPage";
 
@@ -33,7 +34,9 @@ export function App() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isSeriesPage =
-    location.pathname.startsWith("/series/") || location.pathname.startsWith("/train/tag/");
+    location.pathname.startsWith("/series/") ||
+    location.pathname.startsWith("/train/tag/") ||
+    location.pathname.startsWith("/train/srs/");
 
   useEffect(() => {
     let isMounted = true;
@@ -234,6 +237,13 @@ export function App() {
             </NavLink>
             <NavLink
               className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
+              to="/srs"
+            >
+              <span style={{ marginRight: "var(--space-2)" }}>🧠</span>
+              SRS
+            </NavLink>
+            <NavLink
+              className={({ isActive }) => `nav__link ${isActive ? "nav__link--active" : ""}`}
               to="/dictionary"
             >
               <span style={{ marginRight: "var(--space-2)" }}>📖</span>
@@ -300,9 +310,11 @@ export function App() {
             <Route path="/train/difficult" element={<Navigate to="/" replace />} />
             <Route
               path="/train/tag/:tagId"
-              element={
-                requireAuth(<TrainPage mode="tag" />)
-              }
+              element={requireAuth(<TrainPage mode="tag" />)}
+            />
+            <Route
+              path="/train/srs/:category"
+              element={requireAuth(<TrainPage mode="srs" />)}
             />
             <Route
               path="/difficult"
@@ -315,6 +327,10 @@ export function App() {
             <Route
               path="/kanji"
               element={requireAuth(<KanjiLearningPage />)}
+            />
+            <Route
+              path="/srs"
+              element={requireAuth(<SrsPage />)}
             />
             <Route
               path="/words"
