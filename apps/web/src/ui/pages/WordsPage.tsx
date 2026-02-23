@@ -257,6 +257,39 @@ export function WordsPage() {
     }
   }
 
+  async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setErrorMessage(null);
+    setJsonImportStatus(null);
+
+    // Reset the input so the same file can be selected again
+    event.target.value = "";
+
+    try {
+      const fileText = await file.text();
+      const parsed: unknown = JSON.parse(fileText);
+      const wordsToImport = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === "object" && parsed !== null && "words" in parsed
+          ? (parsed as { words: unknown }).words
+          : null;
+      if (!Array.isArray(wordsToImport)) {
+        setErrorMessage("Le fichier JSON doit contenir un tableau de mots ou un objet avec une propriété 'words'.");
+        return;
+      }
+      const result = await importWordsFromJson(wordsToImport);
+      await refreshWordsAndTags();
+      setJsonImportStatus(
+        `Import OK: ${result.importedWordsCount} mots, ${result.importedTagsCount} nouveaux tags.`,
+      );
+      setJsonImportText("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur lors de la lecture du fichier");
+    }
+  }
+
   return (
     <div>
       <div className="pageHeader">
@@ -500,21 +533,42 @@ export function WordsPage() {
 
         <div className="field">
           <label htmlFor={jsonImportTextareaId}>JSON à importer</label>
-          <textarea
-            id={jsonImportTextareaId}
-            className="textarea"
-            value={jsonImportText}
-            onChange={(event) => setJsonImportText(event.target.value)}
-            placeholder='Colle un JSON. Format: [{"french":"bonjour","romaji":"konnichiwa","kana":"こんにちは","kanji":"今日は","tags":["salutations"]}]. Pour une liste simple, clique "Copier un exemple", envoie-le avec ta liste à une IA, puis importe le JSON généré.'
-            style={{ minHeight: "120px" }}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+            <label
+              className="button"
+              style={{
+                cursor: "pointer",
+                display: "inline-block",
+                alignSelf: "flex-start",
+              }}
+            >
+              📁 Importer un fichier JSON
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={handleImportFile}
+                style={{ display: "none" }}
+              />
+            </label>
+            <div className="muted" style={{ fontSize: "14px" }}>
+              ou colle le JSON ci-dessous :
+            </div>
+            <textarea
+              id={jsonImportTextareaId}
+              className="textarea"
+              value={jsonImportText}
+              onChange={(event) => setJsonImportText(event.target.value)}
+              placeholder='Colle un JSON. Format: [{"french":"bonjour","romaji":"konnichiwa","kana":"こんにちは","kanji":"今日は","tags":["salutations"]}]. Pour une liste simple, clique "Copier un exemple", envoie-le avec ta liste à une IA, puis importe le JSON généré.'
+              style={{ minHeight: "120px" }}
+            />
+          </div>
         </div>
         <div
           className="row"
           style={{ marginTop: "var(--space-4)", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}
         >
-          <button className="button" type="button" onClick={() => void handleImportJson()}>
-            Importer
+          <button className="button" type="button" onClick={() => void handleImportJson()} disabled={!jsonImportText.trim()}>
+            Importer depuis le texte
           </button>
           <button
             className="button"
