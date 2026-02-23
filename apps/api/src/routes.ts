@@ -1,5 +1,8 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 
 import type { Request } from "express";
 
@@ -26,6 +29,16 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     ) => {
       handler(req, res, next).catch(next);
     };
+
+  function requireAdmin(req: Request): void {
+    const userId = getRequiredUserId(req);
+    const userRow = database
+      .prepare("SELECT COALESCE(is_admin, 0) as is_admin FROM users WHERE id = ?")
+      .get(userId) as { is_admin: number } | undefined;
+    if (!userRow || userRow.is_admin !== 1) {
+      throw new Error("Forbidden: Admin access required");
+    }
+  }
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
@@ -231,28 +244,37 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     "/api/auth/avatar",
     wrapAsync(async (req, res) => {
       const userId = getRequiredUserId(req);
-      const multer = await import("multer");
-      const path = await import("path");
-      const fs = await import("fs");
 
       const avatarsDir = path.join(process.cwd(), "data", "avatars");
       fs.mkdirSync(avatarsDir, { recursive: true });
 
-      const storage = multer.default.diskStorage({
-        destination: (_req, _file, callback) => {
+      const storage = multer.diskStorage({
+        destination: (
+          _req: import("express").Request,
+          _file: Express.Multer.File,
+          callback: (error: Error | null, destination: string) => void,
+        ) => {
           callback(null, avatarsDir);
         },
-        filename: (_req, file, callback) => {
+        filename: (
+          _req: import("express").Request,
+          file: Express.Multer.File,
+          callback: (error: Error | null, filename: string) => void,
+        ) => {
           const ext = path.extname(file.originalname);
           const filename = `${userId}-${Date.now()}${ext}`;
           callback(null, filename);
         },
       });
 
-      const upload = multer.default({
+      const upload = multer({
         storage,
         limits: { fileSize: 5 * 1024 * 1024 },
-        fileFilter: (_req, file, callback) => {
+        fileFilter: (
+          _req: import("express").Request,
+          file: Express.Multer.File,
+          callback: multer.FileFilterCallback,
+        ) => {
           const allowedMimes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
           if (allowedMimes.includes(file.mimetype)) {
             callback(null, true);
@@ -262,9 +284,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         },
       });
 
-      upload.single("avatar")(req, res, (err) => {
+      upload.single("avatar")(req, res, (err: unknown) => {
         if (err) {
-          res.status(400).json({ error: err.message });
+          res.status(400).json({ error: err instanceof Error ? err.message : "Upload failed" });
           return;
         }
         const file = (req as unknown as { file?: { filename: string } }).file;
@@ -1189,14 +1211,4 @@ function getRequiredUserId(req: Request): number {
     throw new Error("Unauthorized");
   }
   return userId;
-}
-
-function requireAdmin(req: Request): void {
-  const userId = getRequiredUserId(req);
-  const userRow = database
-    .prepare("SELECT COALESCE(is_admin, 0) as is_admin FROM users WHERE id = ?")
-    .get(userId) as { is_admin: number } | undefined;
-  if (!userRow || userRow.is_admin !== 1) {
-    throw new Error("Forbidden: Admin access required");
-  }
 }

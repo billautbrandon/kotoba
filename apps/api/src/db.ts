@@ -142,8 +142,7 @@ function ensureRootUser(database: Database.Database) {
 
   // Use bcryptjs hashSync for synchronous hashing
   try {
-    // With import * as bcrypt, hashSync is available as bcrypt.default.hashSync
-    const rootPasswordHash = (bcrypt as { default: { hashSync: (data: string, saltRounds: number) => string } }).default.hashSync("root", 12);
+    const rootPasswordHash = (bcrypt as unknown as { hashSync: (data: string, saltRounds: number) => string }).hashSync("root", 12);
     database
       .prepare("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)")
       .run("root", rootPasswordHash, 1);
