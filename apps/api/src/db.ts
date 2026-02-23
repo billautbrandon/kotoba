@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import bcrypt from "bcryptjs";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDirectoryPath = path.dirname(currentFilePath);
@@ -112,6 +113,10 @@ function ensureSchema(database: Database.Database) {
   ensureColumnExists(database, "words", "user_id", "INTEGER");
   ensureColumnExists(database, "tags", "user_id", "INTEGER");
   ensureColumnExists(database, "word_stats", "consecutive_success_count", "INTEGER DEFAULT 0");
+  ensureColumnExists(database, "users", "email", "TEXT");
+  ensureColumnExists(database, "users", "avatar_url", "TEXT");
+  ensureColumnExists(database, "users", "display_name", "TEXT");
+  ensureColumnExists(database, "users", "is_admin", "INTEGER DEFAULT 0");
 
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_words_user_id ON words(user_id);
@@ -119,7 +124,32 @@ function ensureSchema(database: Database.Database) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_user_id_name ON tags(user_id, name);
   `);
 
+  ensureRootUser(database);
   rebuildTagsAndWordTagsIfNeeded(database);
+}
+
+function ensureRootUser(database: Database.Database) {
+  const existingRoot = database
+    .prepare("SELECT id FROM users WHERE username = ?")
+    .get("root") as { id: number } | undefined;
+  if (existingRoot) {
+    // Ensure existing root user has admin privileges
+    database
+      .prepare("UPDATE users SET is_admin = 1 WHERE username = ?")
+      .run("root");
+    return;
+  }
+
+  // Use bcryptjs hashSync for synchronous hashing
+  try {
+    // With import * as bcrypt, hashSync is available as bcrypt.default.hashSync
+    const rootPasswordHash = (bcrypt as { default: { hashSync: (data: string, saltRounds: number) => string } }).default.hashSync("root", 12);
+    database
+      .prepare("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)")
+      .run("root", rootPasswordHash, 1);
+  } catch (error) {
+    console.error("[kotoba/db] Failed to create root user:", error);
+  }
 }
 
 function ensureColumnExists(
@@ -198,9 +228,9 @@ function rebuildTagsAndWordTagsIfNeeded(database: Database.Database) {
 }
 
 export function computeScoreDelta(reviewResult: ReviewResult): number {
-  if (reviewResult === "success") return 2;
-  if (reviewResult === "partial") return 1;
-  return -2;
+  if (reviewResult === "success") return 5;
+  if (reviewResult === "partial") return 3;
+  return 1;
 }
 
 export function applyReviewToStats(

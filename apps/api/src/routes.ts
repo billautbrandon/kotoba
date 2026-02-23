@@ -39,7 +39,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     }
 
     const userRow = database
-      .prepare("SELECT id, username, created_at FROM users WHERE id = ?")
+      .prepare(
+        "SELECT id, username, email, avatar_url, display_name, COALESCE(is_admin, 0) as is_admin, created_at FROM users WHERE id = ?",
+      )
       .get(userId) as PublicUser | undefined;
 
     if (!userRow) {
@@ -102,7 +104,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           return;
         }
         const createdUser = database
-          .prepare("SELECT id, username, created_at FROM users WHERE id = ?")
+          .prepare(
+            "SELECT id, username, email, avatar_url, display_name, COALESCE(is_admin, 0) as is_admin, created_at FROM users WHERE id = ?",
+          )
           .get(insertedUserId) as PublicUser;
 
         res.status(201).json({ user: createdUser });
@@ -122,7 +126,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       const username = body.username.trim().toLowerCase();
 
       const userRow = database
-        .prepare("SELECT id, username, password_hash, created_at FROM users WHERE username = ?")
+        .prepare(
+          "SELECT id, username, password_hash, email, avatar_url, display_name, COALESCE(is_admin, 0) as is_admin, created_at FROM users WHERE username = ?",
+        )
         .get(username) as (PublicUser & { password_hash: string }) | undefined;
 
       if (!userRow) {
@@ -194,6 +200,90 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         .run(newPasswordHash, userId);
 
       res.status(200).json({ success: true });
+    }),
+  );
+
+  app.put(
+    "/api/auth/profile",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const bodySchema = z.object({
+        email: z.string().email().optional().nullable(),
+        display_name: z.string().min(1).max(100).optional().nullable(),
+      });
+      const body = bodySchema.parse(req.body);
+
+      database
+        .prepare("UPDATE users SET email = ?, display_name = ? WHERE id = ?")
+        .run(body.email ?? null, body.display_name ?? null, userId);
+
+      const updatedUser = database
+        .prepare(
+          "SELECT id, username, email, avatar_url, display_name, COALESCE(is_admin, 0) as is_admin, created_at FROM users WHERE id = ?",
+        )
+        .get(userId) as PublicUser;
+
+      res.json({ user: updatedUser });
+    }),
+  );
+
+  app.post(
+    "/api/auth/avatar",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const multer = await import("multer");
+      const path = await import("path");
+      const fs = await import("fs");
+
+      const avatarsDir = path.join(process.cwd(), "data", "avatars");
+      fs.mkdirSync(avatarsDir, { recursive: true });
+
+      const storage = multer.default.diskStorage({
+        destination: (_req, _file, callback) => {
+          callback(null, avatarsDir);
+        },
+        filename: (_req, file, callback) => {
+          const ext = path.extname(file.originalname);
+          const filename = `${userId}-${Date.now()}${ext}`;
+          callback(null, filename);
+        },
+      });
+
+      const upload = multer.default({
+        storage,
+        limits: { fileSize: 5 * 1024 * 1024 },
+        fileFilter: (_req, file, callback) => {
+          const allowedMimes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+          if (allowedMimes.includes(file.mimetype)) {
+            callback(null, true);
+          } else {
+            callback(new Error("Invalid file type. Only images are allowed."));
+          }
+        },
+      });
+
+      upload.single("avatar")(req, res, (err) => {
+        if (err) {
+          res.status(400).json({ error: err.message });
+          return;
+        }
+        const file = (req as unknown as { file?: { filename: string } }).file;
+        if (!file) {
+          res.status(400).json({ error: "No file uploaded" });
+          return;
+        }
+
+        const avatarUrl = `/avatars/${file.filename}`;
+        database.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(avatarUrl, userId);
+
+        const updatedUser = database
+          .prepare(
+            "SELECT id, username, email, avatar_url, display_name, COALESCE(is_admin, 0) as is_admin, created_at FROM users WHERE id = ?",
+          )
+          .get(userId) as PublicUser;
+
+        res.json({ user: updatedUser });
+      });
     }),
   );
 
@@ -510,6 +600,27 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     res.status(204).send();
   });
 
+  app.post("/api/words/reset-scores", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const transaction = database.transaction(() => {
+      database
+        .prepare(
+          `
+        UPDATE word_stats
+        SET success_count = 0,
+            partial_count = 0,
+            fail_count = 0,
+            score = 0,
+            consecutive_success_count = 0
+        WHERE word_id IN (SELECT id FROM words WHERE user_id = ?)
+      `,
+        )
+        .run(userId);
+    });
+    transaction();
+    res.status(200).json({ success: true });
+  });
+
   app.post("/api/reviews", (req, res) => {
     const userId = getRequiredUserId(req);
     const bodySchema = z.object({
@@ -787,12 +898,26 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       )
       .all(userId);
 
+    const masteredRows = database
+      .prepare(
+        `
+        ${srsWordSelect}
+        WHERE w.user_id = ?
+        AND COALESCE(s.consecutive_success_count, 0) >= 10
+        ORDER BY COALESCE(s.score, 0) DESC, w.id DESC
+      `,
+      )
+      .all(userId);
+
+    const masteredWordIds = new Set((masteredRows as Array<{ id: number }>).map((row) => row.id));
+
     const easyRows = database
       .prepare(
         `
         ${srsWordSelect}
         WHERE w.user_id = ?
         AND COALESCE(s.consecutive_success_count, 0) >= 5
+        AND COALESCE(s.consecutive_success_count, 0) < 10
         ORDER BY COALESCE(s.score, 0) DESC, w.id DESC
       `,
       )
@@ -820,10 +945,15 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       )
       .all(userId);
 
+    const hardRowsFiltered = (hardRows as Array<{ id: number }>).filter(
+      (row) => !masteredWordIds.has(row.id),
+    );
+
     res.json({
-      hard: hardRows,
+      hard: hardRowsFiltered,
       medium: mediumRows,
       easy: easyRows,
+      mastered: masteredRows,
     });
   });
 
@@ -974,6 +1104,44 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       });
     }),
   );
+
+  app.get(
+    "/api/admin/users",
+    wrapAsync(async (req, res) => {
+      requireAdmin(req);
+      const users = database
+        .prepare(
+          "SELECT id, username, email, display_name, COALESCE(is_admin, 0) as is_admin, created_at FROM users ORDER BY id ASC",
+        )
+        .all() as PublicUser[];
+      res.json({ users });
+    }),
+  );
+
+  app.delete(
+    "/api/admin/users/:id",
+    wrapAsync(async (req, res) => {
+      requireAdmin(req);
+      const targetUserId = Number(req.params.id);
+      if (!Number.isFinite(targetUserId)) {
+        res.status(400).json({ error: "Invalid user id" });
+        return;
+      }
+
+      const currentUserId = getRequiredUserId(req);
+      if (targetUserId === currentUserId) {
+        res.status(400).json({ error: "Cannot delete your own account" });
+        return;
+      }
+
+      const deleteResult = database.prepare("DELETE FROM users WHERE id = ?").run(targetUserId);
+      if (deleteResult.changes === 0) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      res.status(204).send();
+    }),
+  );
 }
 
 function parseTagsConcat(value: unknown): Array<{ id: number; name: string }> {
@@ -1017,7 +1185,18 @@ function getSessionUserId(req: Request): number | null {
 
 function getRequiredUserId(req: Request): number {
   const userId = getSessionUserId(req);
-  // The /api auth middleware above guarantees this exists for protected routes.
-  // In case of misconfiguration, returning 0 scopes queries to nothing instead of crashing the server.
-  return userId ?? 0;
+  if (!userId || typeof userId !== "number") {
+    throw new Error("Unauthorized");
+  }
+  return userId;
+}
+
+function requireAdmin(req: Request): void {
+  const userId = getRequiredUserId(req);
+  const userRow = database
+    .prepare("SELECT COALESCE(is_admin, 0) as is_admin FROM users WHERE id = ?")
+    .get(userId) as { is_admin: number } | undefined;
+  if (!userRow || userRow.is_admin !== 1) {
+    throw new Error("Forbidden: Admin access required");
+  }
 }

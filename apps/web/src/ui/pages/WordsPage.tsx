@@ -12,6 +12,7 @@ import {
   fetchTags,
   fetchWordsWithTags,
   importWordsFromJson,
+  resetAllWordScores,
   updateWord,
 } from "../../api";
 import { AudioButton } from "../components/AudioButton";
@@ -471,6 +472,29 @@ export function WordsPage() {
             onClick={() => void handleExportBackup()}
           >
             Exporter backup
+          </button>
+          <button
+            className="button button--danger"
+            type="button"
+            onClick={async () => {
+              if (
+                !window.confirm(
+                  "Êtes-vous sûr de vouloir réinitialiser tous les scores ? Cette action est irréversible.",
+                )
+              )
+                return;
+              setErrorMessage(null);
+              try {
+                await resetAllWordScores();
+                await refreshWordsAndTags();
+                setErrorMessage("Tous les scores ont été réinitialisés.");
+                setTimeout(() => setErrorMessage(null), 3000);
+              } catch (error) {
+                setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+              }
+            }}
+          >
+            Réinitialiser tous les scores
           </button>
         </div>
 

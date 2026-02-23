@@ -32,8 +32,8 @@ export function TrainPage(props: { mode: TrainMode }) {
   const tagName = searchParams.get("name") ?? null;
   const sessionMode = (searchParams.get("mode") as SessionMode | null) ?? "manual";
   const timerSeconds = Number(searchParams.get("seconds") ?? 5);
-  const promptMode = (searchParams.get("prompt") as PromptMode | null) ?? "french";
-  const onlyDifficult = searchParams.get("difficult") === "1";
+  const basePromptMode = (searchParams.get("prompt") as PromptMode | null) ?? "french";
+  const shuffleMode = searchParams.get("shuffle") === "1";
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const [words, setWords] = useState<WordWithStats[] | null>(null);
@@ -89,15 +89,7 @@ export function TrainPage(props: { mode: TrainMode }) {
           loadedWords = await fetchSeriesWords(tagId);
         }
 
-        let filteredWords = loadedWords;
-        if (props.mode === "tag" && onlyDifficult) {
-          filteredWords = loadedWords.filter((word) => {
-            const failRate = computeFailRate(word);
-            return word.score < 0 || failRate > 0.5;
-          });
-        }
-
-        const shuffledWords = shuffleWords(filteredWords);
+        const shuffledWords = shuffleWords(loadedWords);
         if (!isCancelled) {
           setWords(shuffledWords);
         }
@@ -117,7 +109,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     return () => {
       isCancelled = true;
     };
-  }, [props.mode, tagId, srsCategory, onlyDifficult]);
+  }, [props.mode, tagId, srsCategory]);
 
   const currentWord = useMemo(() => {
     if (!words || words.length === 0) return null;
@@ -212,11 +204,15 @@ export function TrainPage(props: { mode: TrainMode }) {
   ]);
 
   useEffect(() => {
-    if (sessionMode !== "timer") return;
     if (isSessionFinished) return;
-    const intervalId = window.setInterval(() => setClockNowMs(Date.now()), 100);
+    const intervalId = window.setInterval(() => setClockNowMs(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
-  }, [isSessionFinished, sessionMode]);
+  }, [isSessionFinished]);
+
+  const elapsedTimeMs = useMemo(() => {
+    if (!sessionStartedAtMs) return 0;
+    return Math.max(0, clockNowMs - sessionStartedAtMs);
+  }, [sessionStartedAtMs, clockNowMs]);
 
   const handleRatingKey = useCallback(
     (rating: SessionRating) => {
@@ -331,25 +327,37 @@ export function TrainPage(props: { mode: TrainMode }) {
     };
   }, [clockNowMs, sessionMode, sessionStartedAtMs, timerSeconds, wordStartedAtMs, words]);
 
+  function getRandomPromptMode(seed: number): PromptMode {
+    const modes: PromptMode[] = ["french", "romaji", "kana", "kanji"];
+    return modes[seed % modes.length];
+  }
+
+  const actualPromptMode = useMemo(() => {
+    if (shuffleMode && words && words.length > 0 && currentIndex < words.length) {
+      return getRandomPromptMode(currentIndex);
+    }
+    return basePromptMode;
+  }, [shuffleMode, basePromptMode, currentIndex, words]);
+
   const promptLabel = useMemo(() => {
-    if (promptMode === "french") return "FR";
-    if (promptMode === "romaji") return "Rōmaji";
-    if (promptMode === "kana") return "Kana";
+    if (actualPromptMode === "french") return "FR";
+    if (actualPromptMode === "romaji") return "Rōmaji";
+    if (actualPromptMode === "kana") return "Kana";
     return "Kanji";
-  }, [promptMode]);
+  }, [actualPromptMode]);
 
   const promptText = useMemo(() => {
     if (!currentWord) return "";
     const value =
-      promptMode === "french"
+      actualPromptMode === "french"
         ? currentWord.french
-        : promptMode === "romaji"
+        : actualPromptMode === "romaji"
           ? currentWord.romaji
-          : promptMode === "kana"
+          : actualPromptMode === "kana"
             ? currentWord.kana
             : currentWord.kanji;
     return value ?? currentWord.french;
-  }, [currentWord, promptMode]);
+  }, [currentWord, actualPromptMode]);
 
   const revealFields = useMemo(() => {
     if (!currentWord) return [];
@@ -359,8 +367,8 @@ export function TrainPage(props: { mode: TrainMode }) {
       { key: "kana", label: "KANA", value: currentWord.kana },
       { key: "romaji", label: "RŌMAJI", value: currentWord.romaji },
     ];
-    return allFields.filter((field) => field.key !== promptMode);
-  }, [currentWord, promptMode]);
+    return allFields.filter((field) => field.key !== actualPromptMode);
+  }, [currentWord, actualPromptMode]);
 
   function setRating(wordId: number, rating: SessionRating) {
     setRatingsByWordId((previousValue) => ({ ...previousValue, [wordId]: rating }));
@@ -368,12 +376,19 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   async function submitRatings() {
     if (!words) return;
-    if (!isAllRated) return;
 
-    const reviews = words.map((word) => ({
-      wordId: word.id,
-      result: ratingsByWordId[word.id] as SessionRating,
-    }));
+    const reviews = words
+      .map((word) => {
+        const rating = ratingsByWordId[word.id];
+        if (!rating) return null;
+        return {
+          wordId: word.id,
+          result: rating as SessionRating,
+        };
+      })
+      .filter((review): review is { wordId: number; result: SessionRating } => review !== null);
+
+    if (reviews.length === 0) return;
 
     setIsSubmitting(true);
     try {
@@ -436,10 +451,17 @@ export function TrainPage(props: { mode: TrainMode }) {
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
+              flexWrap: "wrap",
+              gap: "var(--space-4)",
             }}
           >
-            <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-primary)" }}>
-              Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-6)" }}>
+              <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-primary)" }}>
+                Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
+              </div>
+              <div className="muted" style={{ fontSize: "16px" }}>
+                Temps: <strong>{formatMs(elapsedTimeMs)}</strong>
+              </div>
             </div>
             <button
               className="button"
@@ -534,7 +556,7 @@ export function TrainPage(props: { mode: TrainMode }) {
               }}
             >
               {promptText}
-              {promptMode === "kana" && <AudioButton text={promptText} size="large" />}
+              {actualPromptMode === "kana" && <AudioButton text={promptText} size="large" />}
             </div>
 
             {!isRevealed ? (
@@ -739,7 +761,7 @@ export function TrainPage(props: { mode: TrainMode }) {
               borderRadius: "var(--radius-md)",
             }}
           >
-            Mode <strong>{sessionMode === "manual" ? "manuel" : `timer ${timerSeconds}s`}</strong> —
+            Mode <strong>{sessionMode === "manual" ? (shuffleMode ? "manuel (aléatoire)" : "manuel") : `timer ${timerSeconds}s`}</strong> —
             Question: <strong>{promptLabel}</strong>
             {sessionMode === "manual" ? (
               <>
@@ -764,7 +786,8 @@ export function TrainPage(props: { mode: TrainMode }) {
           <div className="wordCard">
             <div style={{ fontWeight: 800, fontSize: 18 }}>Fin de série — récap & notation</div>
             <div className="muted" style={{ marginTop: 6 }}>
-              Note tous les mots ci-dessous. ✅ {recapCounts.successCount} / ⚠️{" "}
+              {recapCounts.successCount + recapCounts.partialCount + recapCounts.failCount} mot(s)
+              noté(s) sur {words.length}. ✅ {recapCounts.successCount} / ⚠️{" "}
               {recapCounts.partialCount} / ❌ {recapCounts.failCount}
             </div>
 
@@ -825,7 +848,7 @@ export function TrainPage(props: { mode: TrainMode }) {
                 className="button button--primary"
                 type="button"
                 onClick={() => submitRatings()}
-                disabled={!isAllRated || isSubmitting || isRatingsSubmitted}
+                disabled={isSubmitting || isRatingsSubmitted}
               >
                 {isRatingsSubmitted ? "Série enregistrée" : "Enregistrer la série"}
               </button>
@@ -873,9 +896,9 @@ function shuffleWords(words: WordWithStats[]): WordWithStats[] {
 }
 
 function computeSessionScoreDelta(rating: SessionRating): number {
-  if (rating === "success") return 2;
-  if (rating === "partial") return 1;
-  return -2;
+  if (rating === "success") return 5;
+  if (rating === "partial") return 3;
+  return 1;
 }
 
 function formatMs(milliseconds: number): string {

@@ -29,7 +29,7 @@ export function SeriesStartPage() {
   const [promptMode, setPromptMode] = useState<PromptMode>(() => {
     return loadSeriesSettingsFromStorage().promptMode;
   });
-  const [onlyDifficult, setOnlyDifficult] = useState<boolean>(false);
+  const [shuffleMode, setShuffleMode] = useState<boolean>(false);
 
   const tagLabel = useMemo(() => {
     if (tagNameFromQuery) return tagNameFromQuery;
@@ -43,14 +43,16 @@ export function SeriesStartPage() {
 
   function start() {
     if (!Number.isFinite(tagId)) return;
-    const difficultParam = onlyDifficult ? "&difficult=1" : "";
     const nameParam = tagNameFromQuery ? `&name=${encodeURIComponent(tagNameFromQuery)}` : "";
+    const shuffleParam = shuffleMode ? "&shuffle=1" : "";
     if (sessionMode === "manual") {
-      navigate(`/train/tag/${tagId}?mode=manual&prompt=${promptMode}${difficultParam}${nameParam}`);
+      navigate(
+        `/train/tag/${tagId}?mode=manual&prompt=${promptMode}${nameParam}${shuffleParam}`,
+      );
       return;
     }
     navigate(
-      `/train/tag/${tagId}?mode=timer&seconds=${timerSeconds}&prompt=${promptMode}${difficultParam}${nameParam}`,
+      `/train/tag/${tagId}?mode=timer&seconds=${timerSeconds}&prompt=${promptMode}${nameParam}${shuffleParam}`,
     );
   }
 
@@ -139,6 +141,28 @@ export function SeriesStartPage() {
                     </label>
                   </div>
 
+                  {sessionMode === "manual" && (
+                    <div style={{ marginTop: "var(--space-4)" }}>
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "var(--space-3)",
+                          cursor: "pointer",
+                          fontSize: "15px",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={shuffleMode}
+                          onChange={(e) => setShuffleMode(e.target.checked)}
+                          style={{ width: "18px", height: "18px", cursor: "pointer" }}
+                        />
+                        <span>Mode aléatoire (randomise la langue de la question à chaque mot)</span>
+                      </label>
+                    </div>
+                  )}
+
                   {sessionMode === "timer" && (
                     <div>
                       <div
@@ -172,7 +196,7 @@ export function SeriesStartPage() {
                   <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "var(--space-4)" }}>
                     Format de question
                   </h2>
-                  <div className="row" style={{ gap: "var(--space-3)" }}>
+                  <div className="row" style={{ gap: "var(--space-3)", flexWrap: "wrap" }}>
                     {(
                       [
                         ["french", "FR"],
@@ -183,39 +207,36 @@ export function SeriesStartPage() {
                     ).map(([mode, label]) => (
                       <button
                         key={mode}
-                        className={`button ${promptMode === mode ? "button--primary" : ""}`}
+                        className={`button ${promptMode === mode && !shuffleMode ? "button--primary" : ""}`}
                         type="button"
-                        onClick={() => setPromptMode(mode)}
+                        onClick={() => {
+                          setPromptMode(mode);
+                          setShuffleMode(false);
+                        }}
+                        disabled={shuffleMode}
                       >
                         {label}
                       </button>
                     ))}
+                    <button
+                      className={`button ${shuffleMode ? "button--primary" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        setShuffleMode(true);
+                      }}
+                      style={{
+                        border: shuffleMode ? undefined : "2px dashed var(--color-border)",
+                        fontWeight: shuffleMode ? undefined : 600,
+                      }}
+                    >
+                      🎲 Aléatoire
+                    </button>
                   </div>
-                </div>
-
-                <div
-                  style={{
-                    borderTop: "2px solid var(--color-border)",
-                    paddingTop: "var(--space-8)",
-                  }}
-                >
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "var(--space-3)",
-                      cursor: "pointer",
-                      fontSize: "16px",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={onlyDifficult}
-                      onChange={(e) => setOnlyDifficult(e.target.checked)}
-                      style={{ width: "20px", height: "20px", cursor: "pointer" }}
-                    />
-                    <span>Uniquement les mots difficiles</span>
-                  </label>
+                  {shuffleMode && (
+                    <div className="muted" style={{ marginTop: "var(--space-2)", fontSize: "14px" }}>
+                      La langue de la question sera randomisée à chaque mot
+                    </div>
+                  )}
                 </div>
 
                 <div

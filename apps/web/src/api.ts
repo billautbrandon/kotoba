@@ -1,6 +1,10 @@
 export type User = {
   id: number;
   username: string;
+  email: string | null;
+  avatar_url: string | null;
+  display_name: string | null;
+  is_admin: number;
   created_at: string;
 };
 
@@ -103,6 +107,41 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
 }
 
+export async function updateProfile(profile: {
+  email?: string | null;
+  display_name?: string | null;
+}): Promise<User> {
+  const response = await fetch("/api/auth/profile", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (!response.ok) {
+    const error = (await response.json()) as { error?: string };
+    throw new Error(error.error ?? "Failed to update profile");
+  }
+  const payload = (await response.json()) as { user: User };
+  return payload.user;
+}
+
+export async function uploadAvatar(file: File): Promise<User> {
+  const formData = new FormData();
+  formData.append("avatar", file);
+
+  const response = await fetch("/api/auth/avatar", {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (!response.ok) {
+    const error = (await response.json()) as { error?: string };
+    throw new Error(error.error ?? "Failed to upload avatar");
+  }
+  const payload = (await response.json()) as { user: User };
+  return payload.user;
+}
+
 export async function fetchWords(includeStats: boolean): Promise<WordWithStats[] | Word[]> {
   const response = await fetch(
     `/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=0`,
@@ -146,6 +185,7 @@ export type SrsWords = {
   hard: WordWithStats[];
   medium: WordWithStats[];
   easy: WordWithStats[];
+  mastered: WordWithStats[];
 };
 
 export async function fetchSrsWords(): Promise<SrsWords> {
@@ -260,6 +300,36 @@ export async function deleteWord(id: number): Promise<void> {
   const response = await fetch(`/api/words/${id}`, { method: "DELETE", credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to delete word");
+  }
+}
+
+export async function resetAllWordScores(): Promise<void> {
+  const response = await fetch("/api/words/reset-scores", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Failed to reset word scores");
+  }
+}
+
+export async function fetchAdminUsers(): Promise<User[]> {
+  const response = await fetch("/api/admin/users", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch users");
+  }
+  const payload = (await response.json()) as { users: User[] };
+  return payload.users;
+}
+
+export async function deleteAdminUser(userId: number): Promise<void> {
+  const response = await fetch(`/api/admin/users/${userId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const error = (await response.json()) as { error?: string };
+    throw new Error(error.error ?? "Failed to delete user");
   }
 }
 

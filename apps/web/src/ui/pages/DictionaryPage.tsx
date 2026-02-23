@@ -85,7 +85,7 @@ export function DictionaryPage() {
             }
           });
           Array.from(tagSet).forEach((tag) => {
-            initialCollapsed[tag] = false;
+            initialCollapsed[tag] = true;
           });
           setCollapsedTags(initialCollapsed);
         }
@@ -380,9 +380,7 @@ export function DictionaryPage() {
                         {tagWords.map((word) => {
                           const frontValue = getWordField(word, frontLanguage).trim();
                           const safeFrontValue = frontValue || "—";
-                          const tagsText = word.tags.map((t) => t.name).join(", ");
-
-                          return (
+                          const tagsText = word.tags.map((t) => t.name).join(", ");                          return (
                             <React.Fragment key={word.id}>
                               <tr>
                                 <td style={{ fontWeight: 600, fontSize: "18px" }}>

@@ -63,6 +63,9 @@ if (process.env.NODE_ENV === "production") {
 
 app.use(session(sessionConfig));
 
+// Serve avatar files
+app.use("/avatars", express.static("data/avatars"));
+
 // Debug middleware to log session creation and Set-Cookie headers
 if (process.env.NODE_ENV === "production") {
   app.use((req, res, next) => {

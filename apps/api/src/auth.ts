@@ -3,6 +3,10 @@ import bcrypt from "bcryptjs";
 export type PublicUser = {
   id: number;
   username: string;
+  email: string | null;
+  avatar_url: string | null;
+  display_name: string | null;
+  is_admin: number;
   created_at: string;
 };
 

@@ -5,18 +5,20 @@ import type { SrsWords, WordWithStats } from "../../api";
 import { fetchSrsWords } from "../../api";
 import { AudioButton } from "../components/AudioButton";
 
-type SrsCategory = "hard" | "medium" | "easy";
+type SrsCategory = "hard" | "medium" | "easy" | "mastered";
 
 const categoryLabels: Record<SrsCategory, string> = {
   hard: "Difficile",
   medium: "Moyen",
   easy: "Facile",
+  mastered: "Maîtrisé",
 };
 
 const categoryDescriptions: Record<SrsCategory, string> = {
   hard: "Mots avec score négatif ou fail rate > 50%",
   medium: "Mots avec une note acceptable mais pas encore 5 réussites de suite",
   easy: "Mots réussis 5 fois de suite",
+  mastered: "Mots réussis 10 fois de suite",
 };
 
 export function SrsPage() {
@@ -63,8 +65,8 @@ export function SrsPage() {
       <div className="pageHeader">
         <h1 className="pageTitle">SRS</h1>
         <p className="pageSubtitle">
-          Répartition des mots selon ton apprentissage : Difficile, Moyen, Facile. Entraîne-toi par
-          catégorie pour progresser efficacement.
+          Répartition des mots selon ton apprentissage : Difficile, Moyen, Facile, Maîtrisé.
+          Entraîne-toi par catégorie pour progresser efficacement.
         </p>
       </div>
 
@@ -89,7 +91,7 @@ export function SrsPage() {
             gap: "var(--space-10)",
           }}
         >
-          {(["hard", "medium", "easy"] as const).map((category) => {
+          {(["hard", "medium", "easy", "mastered"] as const).map((category) => {
             const words = srsWords[category];
             return (
               <SrsSection

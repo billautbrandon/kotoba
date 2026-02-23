@@ -9,6 +9,8 @@ import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { HomePage } from "./pages/HomePage";
 import { KanjiLearningPage } from "./pages/KanjiLearningPage";
 import { LoginPage } from "./pages/LoginPage";
+import { AdminPage } from "./pages/AdminPage";
+import { ProfilePage } from "./pages/ProfilePage";
 import { SeriesStartPage } from "./pages/SeriesStartPage";
 import { SrsPage } from "./pages/SrsPage";
 import { TrainPage } from "./pages/TrainPage";
@@ -143,8 +145,26 @@ export function App() {
           type="button"
           onClick={() => setIsDropdownOpen(!isDropdownOpen)}
           aria-label="Menu utilisateur"
+          style={{
+            background: currentUser.avatar_url ? "transparent" : undefined,
+            padding: currentUser.avatar_url ? 0 : undefined,
+            border: currentUser.avatar_url ? "2px solid var(--color-border)" : undefined,
+            overflow: "hidden",
+          }}
         >
-          {getInitials(currentUser.username)}
+          {currentUser.avatar_url ? (
+            <img
+              src={currentUser.avatar_url}
+              alt=""
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+            />
+          ) : (
+            getInitials(currentUser.display_name ?? currentUser.username)
+          )}
         </button>
         {isDropdownOpen && (
           <div className="topbarUser__dropdown">
@@ -153,10 +173,60 @@ export function App() {
               type="button"
               onClick={() => {
                 setIsDropdownOpen(false);
+                navigate("/profile");
+              }}
+              style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}
+            >
+              {currentUser.avatar_url ? (
+                <img
+                  src={currentUser.avatar_url}
+                  alt=""
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "50%",
+                    objectFit: "cover",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "50%",
+                    background: "var(--color-primary)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    color: "#fff",
+                  }}
+                >
+                  {getInitials(currentUser.display_name ?? currentUser.username)}
+                </div>
+              )}
+              <span>{currentUser.display_name ?? currentUser.username}</span>
+            </button>
+            <button
+              className="topbarUser__dropdownItem"
+              type="button"
+              onClick={() => {
+                setIsDropdownOpen(false);
+                navigate("/profile");
+              }}
+            >
+              Modifier le profil
+            </button>
+            <button
+              className="topbarUser__dropdownItem"
+              type="button"
+              onClick={() => {
+                setIsDropdownOpen(false);
                 navigate("/settings");
               }}
             >
-              {currentUser.username}
+              Changer le mot de passe
             </button>
             <button
               className="topbarUser__dropdownItem"
@@ -335,6 +405,14 @@ export function App() {
             <Route
               path="/words"
               element={requireAuth(<WordsPage />)}
+            />
+            <Route
+              path="/profile"
+              element={requireAuth(<ProfilePage />)}
+            />
+            <Route
+              path="/admin"
+              element={requireAuth(<AdminPage />)}
             />
             <Route
               path="/settings"

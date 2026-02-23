@@ -418,14 +418,17 @@ a {
 .linkButton {
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--color-primary);
   cursor: pointer;
   padding: 0;
+  text-decoration: underline;
+  font-size: inherit;
+  font-family: inherit;
   font-weight: 700;
 }
 
 .linkButton:hover {
-  text-decoration: underline;
+  color: var(--color-primary-dark);
 }
 
 .form {
