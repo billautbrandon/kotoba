@@ -663,7 +663,7 @@ function WordsGroupedByTag(props: {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+    <div style={{ display: "flex", flexDirection: "column" }}>
       {groups.map((group) => {
         const isCollapsed = collapsedByGroupKey[group.groupKey] ?? false;
         return (

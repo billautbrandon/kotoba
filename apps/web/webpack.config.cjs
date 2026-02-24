@@ -35,7 +35,7 @@ module.exports = {
     historyApiFallback: true,
     proxy: [
       {
-        context: ["/api"],
+        context: ["/api", "/avatars"],
         target: "http://localhost:3001",
         changeOrigin: true,
       },

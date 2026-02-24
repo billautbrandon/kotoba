@@ -227,9 +227,9 @@ function rebuildTagsAndWordTagsIfNeeded(database: Database.Database) {
 }
 
 export function computeScoreDelta(reviewResult: ReviewResult): number {
-  if (reviewResult === "success") return 5;
-  if (reviewResult === "partial") return 3;
-  return 1;
+  if (reviewResult === "success") return 3;
+  if (reviewResult === "partial") return -2;
+  return -5;
 }
 
 export function applyReviewToStats(

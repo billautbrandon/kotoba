@@ -58,6 +58,9 @@ export function HomePage() {
             Lance une session d'entraînement par tag. ({totalWords} mots au total, tags inclus)
           </p>
         </div>
+        <button className="button button--primary" type="button" onClick={() => navigate("/words")}>
+          + Ajouter du vocabulaire
+        </button>
       </div>
 
       {isLoading ? (
@@ -103,12 +106,12 @@ export function HomePage() {
                   className="tableRowLink"
                   tabIndex={0}
                   onClick={() =>
-                    navigate(`/series/${row.tagId}?name=${encodeURIComponent(row.tagName)}`)
+                    navigate(`/train/tag/${row.tagId}?name=${encodeURIComponent(row.tagName)}`)
                   }
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      navigate(`/series/${row.tagId}?name=${encodeURIComponent(row.tagName)}`);
+                      navigate(`/train/tag/${row.tagId}?name=${encodeURIComponent(row.tagName)}`);
                     }
                   }}
                 >

@@ -899,27 +899,6 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   app.get("/api/srs/words", (req, res) => {
     const userId = getRequiredUserId(req);
 
-    const hardRows = database
-      .prepare(
-        `
-        ${srsWordSelect}
-        WHERE w.user_id = ?
-        AND (
-          COALESCE(s.score, 0) < 0
-          OR (
-            (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) >= 5
-            AND (
-              CAST(COALESCE(s.fail_count, 0) AS REAL)
-              / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
-            ) > 0.5
-          )
-        )
-        AND COALESCE(s.consecutive_success_count, 0) < 5
-        ORDER BY COALESCE(s.score, 0) ASC, w.id DESC
-      `,
-      )
-      .all(userId);
-
     const masteredRows = database
       .prepare(
         `
@@ -933,12 +912,38 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
     const masteredWordIds = new Set((masteredRows as Array<{ id: number }>).map((row) => row.id));
 
+    /* success_rate = success_count / total_attempts
+       Hard: success_rate < 0.65  (below 65% success)
+       Medium: success_rate >= 0.65 AND < 0.80
+       Easy: success_rate >= 0.80
+       Mastered: 10 consecutive successes (handled above) */
+
+    const hardRows = database
+      .prepare(
+        `
+        ${srsWordSelect}
+        WHERE w.user_id = ?
+        AND (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) > 0
+        AND (
+          CAST(COALESCE(s.success_count, 0) AS REAL)
+          / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
+        ) < 0.65
+        AND COALESCE(s.consecutive_success_count, 0) < 10
+        ORDER BY COALESCE(s.score, 0) ASC, w.id DESC
+      `,
+      )
+      .all(userId);
+
     const easyRows = database
       .prepare(
         `
         ${srsWordSelect}
         WHERE w.user_id = ?
-        AND COALESCE(s.consecutive_success_count, 0) >= 5
+        AND (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) > 0
+        AND (
+          CAST(COALESCE(s.success_count, 0) AS REAL)
+          / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
+        ) >= 0.80
         AND COALESCE(s.consecutive_success_count, 0) < 10
         ORDER BY COALESCE(s.score, 0) DESC, w.id DESC
       `,
@@ -951,17 +956,15 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         ${srsWordSelect}
         WHERE w.user_id = ?
         AND (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) > 0
-        AND COALESCE(s.consecutive_success_count, 0) < 5
-        AND NOT (
-          COALESCE(s.score, 0) < 0
-          OR (
-            (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) >= 5
-            AND (
-              CAST(COALESCE(s.fail_count, 0) AS REAL)
-              / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
-            ) > 0.5
-          )
-        )
+        AND (
+          CAST(COALESCE(s.success_count, 0) AS REAL)
+          / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
+        ) >= 0.65
+        AND (
+          CAST(COALESCE(s.success_count, 0) AS REAL)
+          / NULLIF((COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)), 0)
+        ) < 0.80
+        AND COALESCE(s.consecutive_success_count, 0) < 10
         ORDER BY COALESCE(s.score, 0) ASC, w.id DESC
       `,
       )

@@ -193,6 +193,7 @@ export function DictionaryPage() {
                 border: "2px solid var(--color-border)",
                 borderRadius: "var(--radius-md)",
                 padding: "4px",
+                background: "#fff",
               }}
             >
               <button
@@ -276,49 +277,127 @@ export function DictionaryPage() {
         {wordsByTag.map(({ tag, words: tagWords }) => {
           const isCollapsed = collapsedTags[tag] ?? false;
           return (
-            <div key={tag} style={{ marginBottom: "var(--space-10)" }}>
+            <div key={tag} style={{ marginBottom: "var(--space-2)" }}>
               <button className="sectionHeader" type="button" onClick={() => toggleTag(tag)}>
                 <span className="sectionHeader__chevron">{isCollapsed ? "▸" : "▾"}</span>
                 <span className="sectionHeader__title">{tag}</span>
                 <span className="sectionHeader__meta muted">{tagWords.length} mot(s)</span>
               </button>
-              {!isCollapsed && (
-                <>
-                  {viewMode === "cards" ? (
-                    <div className="dictionaryGrid" style={{ marginTop: "var(--space-4)" }}>
+              {!isCollapsed &&
+                (viewMode === "cards" ? (
+                  <div className="dictionaryGrid" style={{ marginTop: "var(--space-4)" }}>
+                    {tagWords.map((word) => {
+                      const isFlipped = flippedWordIds.has(word.id);
+                      const frontValue = getWordField(word, frontLanguage).trim();
+                      const safeFrontValue = frontValue || "—";
+                      const tagsText = word.tags.map((t) => t.name).join(" · ");
+
+                      return (
+                        <button
+                          key={word.id}
+                          type="button"
+                          className="dictionaryCard"
+                          onClick={() => {
+                            setFlippedWordIds((previous) => {
+                              const next = new Set(previous);
+                              if (next.has(word.id)) {
+                                next.delete(word.id);
+                              } else {
+                                next.add(word.id);
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          {!isFlipped ? (
+                            <div className="dictionaryCard__face">
+                              <div className="dictionaryCard__lang">
+                                {dictionaryLanguageLabels[frontLanguage]}
+                              </div>
+                              <div
+                                className="dictionaryCard__main"
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: "6px",
+                                }}
+                              >
+                                {safeFrontValue}
+                                {frontLanguage === "kana" && (
+                                  <span onClick={(e) => e.stopPropagation()}>
+                                    <AudioButton text={safeFrontValue} size="small" />
+                                  </span>
+                                )}
+                              </div>
+                              <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
+                            </div>
+                          ) : (
+                            <div className="dictionaryCard__face dictionaryCard__face--back">
+                              <div className="dictionaryCard__backGrid">
+                                {otherLanguages.map((language) => {
+                                  const value = getWordField(word, language).trim() || "—";
+                                  return (
+                                    <div key={language} className="dictionaryCard__row">
+                                      <div className="dictionaryCard__rowLabel">
+                                        {dictionaryLanguageLabels[language]}
+                                      </div>
+                                      <div
+                                        className="dictionaryCard__rowValue"
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "4px",
+                                        }}
+                                      >
+                                        {value}
+                                        {language === "kana" && (
+                                          <span onClick={(e) => e.stopPropagation()}>
+                                            <AudioButton text={value} size="small" />
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {word.note ? (
+                                <div className="dictionaryCard__note">{word.note}</div>
+                              ) : null}
+                              <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>{dictionaryLanguageLabels[frontLanguage]}</th>
+                        {otherLanguages.map((lang) => (
+                          <th key={lang}>{dictionaryLanguageLabels[lang]}</th>
+                        ))}
+                        <th>Tags</th>
+                        <th>Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {tagWords.map((word) => {
-                        const isFlipped = flippedWordIds.has(word.id);
                         const frontValue = getWordField(word, frontLanguage).trim();
                         const safeFrontValue = frontValue || "—";
-                        const tagsText = word.tags.map((t) => t.name).join(" · ");
-
+                        const tagsText = word.tags.map((t) => t.name).join(", ");
                         return (
-                          <button
-                            key={word.id}
-                            type="button"
-                            className="dictionaryCard"
-                            onClick={() => {
-                              setFlippedWordIds((previous) => {
-                                const next = new Set(previous);
-                                if (next.has(word.id)) {
-                                  next.delete(word.id);
-                                } else {
-                                  next.add(word.id);
-                                }
-                                return next;
-                              });
-                            }}
-                          >
-                            <div
-                              className={`dictionaryCard__inner ${isFlipped ? "dictionaryCard__inner--flipped" : ""}`}
-                            >
-                              <div className="dictionaryCard__face dictionaryCard__face--front">
-                                <div className="dictionaryCard__lang">
-                                  {dictionaryLanguageLabels[frontLanguage]}
-                                </div>
-                                <div
-                                  className="dictionaryCard__main"
-                                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                          <React.Fragment key={word.id}>
+                            <tr>
+                              <td style={{ fontWeight: 600, fontSize: "18px" }}>
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                  }}
                                 >
                                   {safeFrontValue}
                                   {frontLanguage === "kana" && (
@@ -326,129 +405,68 @@ export function DictionaryPage() {
                                       <AudioButton text={safeFrontValue} size="small" />
                                     </span>
                                   )}
-                                </div>
-                                <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
-                              </div>
-
-                              <div className="dictionaryCard__face dictionaryCard__face--back">
-                                <div className="dictionaryCard__backGrid">
-                                  {otherLanguages.map((language) => {
-                                    const value = getWordField(word, language).trim() || "—";
-                                    return (
-                                      <div key={language} className="dictionaryCard__row">
-                                        <div className="dictionaryCard__rowLabel">
-                                          {dictionaryLanguageLabels[language]}
-                                        </div>
-                                        <div
-                                          className="dictionaryCard__rowValue"
-                                          style={{ display: "flex", alignItems: "center", gap: "4px" }}
-                                        >
-                                          {value}
-                                          {language === "kana" && (
-                                            <span onClick={(e) => e.stopPropagation()}>
-                                              <AudioButton text={value} size="small" />
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                                {word.note ? (
-                                  <div className="dictionaryCard__note">{word.note}</div>
-                                ) : null}
-                                <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>{dictionaryLanguageLabels[frontLanguage]}</th>
-                          {otherLanguages.map((lang) => (
-                            <th key={lang}>{dictionaryLanguageLabels[lang]}</th>
-                          ))}
-                          <th>Tags</th>
-                          <th>Note</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tagWords.map((word) => {
-                          const frontValue = getWordField(word, frontLanguage).trim();
-                          const safeFrontValue = frontValue || "—";
-                          const tagsText = word.tags.map((t) => t.name).join(", ");                          return (
-                            <React.Fragment key={word.id}>
-                              <tr>
-                                <td style={{ fontWeight: 600, fontSize: "18px" }}>
-                                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                    {safeFrontValue}
-                                    {frontLanguage === "kana" && (
-                                      <span onClick={(e) => e.stopPropagation()}>
-                                        <AudioButton text={safeFrontValue} size="small" />
-                                      </span>
-                                    )}
-                                  </span>
-                                </td>
-                                {otherLanguages.map((lang) => {
-                                  const value = getWordField(word, lang).trim() || "—";
-                                  return (
-                                    <td key={lang} className="muted" style={{ fontSize: "16px" }}>
-                                      <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                                        {value}
-                                        {lang === "kana" && (
-                                          <span onClick={(e) => e.stopPropagation()}>
-                                            <AudioButton text={value} size="small" />
-                                          </span>
-                                        )}
-                                      </span>
-                                    </td>
-                                  );
-                                })}
-                                <td className="muted">
-                                  {tagsText ? (
-                                    <div
+                                </span>
+                              </td>
+                              {otherLanguages.map((lang) => {
+                                const value = getWordField(word, lang).trim() || "—";
+                                return (
+                                  <td key={lang} className="muted" style={{ fontSize: "16px" }}>
+                                    <span
                                       style={{
-                                        display: "flex",
-                                        gap: "var(--space-2)",
-                                        flexWrap: "wrap",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: "4px",
                                       }}
                                     >
-                                      {word.tags.map((tag) => (
-                                        <span
-                                          key={tag.id}
-                                          style={{
-                                            padding: "4px 10px",
-                                            borderRadius: "var(--radius-md)",
-                                            background: "rgba(199, 62, 29, 0.08)",
-                                            color: "var(--color-primary)",
-                                            fontSize: "13px",
-                                            fontWeight: 600,
-                                          }}
-                                        >
-                                          {tag.name}
+                                      {value}
+                                      {lang === "kana" && (
+                                        <span onClick={(e) => e.stopPropagation()}>
+                                          <AudioButton text={value} size="small" />
                                         </span>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </td>
-                                <td className="muted" style={{ fontSize: "14px" }}>
-                                  {word.note || "—"}
-                                </td>
-                              </tr>
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-                </>
-              )}
+                                      )}
+                                    </span>
+                                  </td>
+                                );
+                              })}
+                              <td className="muted">
+                                {tagsText ? (
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: "var(--space-2)",
+                                      flexWrap: "wrap",
+                                    }}
+                                  >
+                                    {word.tags.map((tag) => (
+                                      <span
+                                        key={tag.id}
+                                        style={{
+                                          padding: "4px 10px",
+                                          borderRadius: "var(--radius-md)",
+                                          background: "rgba(199, 62, 29, 0.08)",
+                                          color: "var(--color-primary)",
+                                          fontSize: "13px",
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        {tag.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                              <td className="muted" style={{ fontSize: "14px" }}>
+                                {word.note || "—"}
+                              </td>
+                            </tr>
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ))}
             </div>
           );
         })}

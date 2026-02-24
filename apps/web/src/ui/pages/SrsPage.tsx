@@ -15,10 +15,10 @@ const categoryLabels: Record<SrsCategory, string> = {
 };
 
 const categoryDescriptions: Record<SrsCategory, string> = {
-  hard: "Mots avec score négatif ou fail rate > 50%",
-  medium: "Mots avec une note acceptable mais pas encore 5 réussites de suite",
-  easy: "Mots réussis 5 fois de suite",
-  mastered: "Mots réussis 10 fois de suite",
+  hard: "Taux de réussite inférieur à 65%",
+  medium: "Taux de réussite entre 65% et 80%",
+  easy: "Taux de réussite supérieur à 80%",
+  mastered: "10 réussites consécutives",
 };
 
 export function SrsPage() {
@@ -83,14 +83,7 @@ export function SrsPage() {
       ) : null}
 
       {!isLoading && srsWords ? (
-        <div
-          style={{
-            marginTop: "var(--space-8)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-10)",
-          }}
-        >
+        <div className="srsGrid">
           {(["hard", "medium", "easy", "mastered"] as const).map((category) => {
             const words = srsWords[category];
             return (
@@ -120,71 +113,57 @@ function SrsSection({
   const label = categoryLabels[category];
   const description = categoryDescriptions[category];
 
+  const successRate =
+    words.length > 0
+      ? Math.round(
+          (words.reduce((sum, word) => {
+            const total = word.success_count + word.partial_count + word.fail_count;
+            return sum + (total > 0 ? word.success_count / total : 0);
+          }, 0) /
+            words.length) *
+            100,
+        )
+      : 0;
+
   return (
-    <div
-      style={{
-        border: "2px solid var(--color-border)",
-        borderRadius: "var(--radius-lg)",
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          padding: "var(--space-5)",
-          background: "var(--color-panel-subtle)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "var(--space-4)",
-        }}
-      >
-        <div>
-          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>{label}</h2>
-          <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-            {description} — {words.length} mot(s)
-          </p>
+    <div className="srsCard">
+      <div className="srsCard__header">
+        <div className="srsCard__top">
+          <h2 className="srsCard__title">{label}</h2>
+          <span className="srsCard__count">{words.length}</span>
         </div>
+        <p className="srsCard__description">{description}</p>
+        {words.length > 0 && <div className="srsCard__rate">Taux moyen : {successRate}%</div>}
+      </div>
+      <div className="srsCard__body">
+        {words.length > 0 ? (
+          <div className="srsCard__list">
+            {words.slice(0, 5).map((word) => (
+              <div key={word.id} className="srsCard__word">
+                <span className="srsCard__wordFr">{word.french}</span>
+                <span className="srsCard__wordJp">
+                  {word.kanji ?? word.kana ?? word.romaji ?? "—"}
+                  {word.kana && <AudioButton text={word.kana} size="small" />}
+                </span>
+              </div>
+            ))}
+            {words.length > 5 && <div className="srsCard__more">+{words.length - 5} autres</div>}
+          </div>
+        ) : (
+          <div className="srsCard__empty">Aucun mot</div>
+        )}
+      </div>
+      <div className="srsCard__footer">
         <button
           className="button button--primary"
           type="button"
           onClick={onStartTraining}
           disabled={words.length === 0}
+          style={{ width: "100%" }}
         >
           Lancer l&apos;entraînement
         </button>
       </div>
-      {words.length > 0 ? (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Français</th>
-              <th>JP</th>
-              <th>Score</th>
-              <th>Réussites de suite</th>
-            </tr>
-          </thead>
-          <tbody>
-            {words.map((word) => (
-              <tr key={word.id}>
-                <td style={{ fontWeight: 600 }}>{word.french}</td>
-                <td className="muted">
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                    {word.kanji ?? word.kana ?? word.romaji ?? "—"}
-                    {word.kana && <AudioButton text={word.kana} size="small" />}
-                  </span>
-                </td>
-                <td className="muted">{word.score}</td>
-                <td className="muted">{word.consecutive_success_count ?? 0}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div style={{ padding: "var(--space-6)", textAlign: "center" }} className="muted">
-          Aucun mot dans cette catégorie pour le moment.
-        </div>
-      )}
     </div>
   );
 }
