@@ -681,6 +681,7 @@ function WordsGroupedByTag(props: {
             {isCollapsed ? null : (
               <div
                 style={{
+                  marginTop: "var(--space-3)",
                   border: "2px solid var(--color-border)",
                   borderRadius: "var(--radius-lg)",
                   overflow: "hidden",

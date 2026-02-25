@@ -35,7 +35,6 @@ export function TrainPage(props: { mode: TrainMode }) {
   const tagName = searchParams.get("name") ?? null;
 
   const [phase, setPhase] = useState<TrainPhase>(props.mode === "srs" ? "setup" : "setup");
-  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const [configSessionMode, setConfigSessionMode] = useState<SessionMode>(
     () => loadSettings().sessionMode,
@@ -99,7 +98,6 @@ export function TrainPage(props: { mode: TrainMode }) {
     setCurrentIndex(0);
     setRatingsByWordId({});
     setIsRatingsSubmitted(false);
-    setShowCancelConfirm(false);
     const nowMs = Date.now();
     setSessionStartedAtMs(nowMs);
     setWordStartedAtMs(nowMs);
@@ -280,13 +278,15 @@ export function TrainPage(props: { mode: TrainMode }) {
     let successCount = 0;
     let partialCount = 0;
     let failCount = 0;
+    let skippedCount = 0;
     for (const wordId of allSessionWordIds) {
       const rating = ratingsByWordId[wordId];
       if (rating === "success") successCount += 1;
       else if (rating === "partial") partialCount += 1;
       else if (rating === "fail") failCount += 1;
+      else skippedCount += 1;
     }
-    return { successCount, partialCount, failCount };
+    return { successCount, partialCount, failCount, skippedCount };
   }, [allSessionWordIds, ratingsByWordId]);
 
   const sessionScoreDelta = useMemo(() => {
@@ -389,11 +389,13 @@ export function TrainPage(props: { mode: TrainMode }) {
     setIsRevealed(false);
   }
 
+  function handleFinishSession() {
+    setPhase("finished");
+  }
+
   function handleCancelSession() {
-    if (showCancelConfirm) {
+    if (window.confirm("Annuler la serie ? Tes progres ne seront pas enregistres.")) {
       navigate(props.mode === "srs" ? "/srs" : "/");
-    } else {
-      setShowCancelConfirm(true);
     }
   }
 
@@ -480,7 +482,6 @@ export function TrainPage(props: { mode: TrainMode }) {
                   setConfigPromptMode(mode);
                   setConfigShuffleMode(false);
                 }}
-                disabled={configShuffleMode}
               >
                 {label}
               </button>
@@ -528,24 +529,25 @@ export function TrainPage(props: { mode: TrainMode }) {
             </span>
             <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
           </div>
-          <button
-            className="trainSession__cancelBtn"
-            type="button"
-            onClick={handleCancelSession}
-            disabled={isSubmitting}
-          >
-            {showCancelConfirm ? "Confirmer l'annulation" : "Annuler la serie"}
-          </button>
-        </div>
-
-        {showCancelConfirm && (
-          <div className="trainSession__cancelConfirm">
-            <span>Tes progres ne seront pas enregistres.</span>
-            <button className="button" type="button" onClick={() => setShowCancelConfirm(false)}>
-              Non, continuer
+          <div className="trainSession__topRight">
+            <button
+              className="trainSession__finishBtn"
+              type="button"
+              onClick={handleFinishSession}
+              disabled={isSubmitting}
+            >
+              Terminer la serie
+            </button>
+            <button
+              className="trainSession__cancelBtn"
+              type="button"
+              onClick={handleCancelSession}
+              disabled={isSubmitting}
+            >
+              Annuler
             </button>
           </div>
-        )}
+        </div>
 
         {isLoading && (
           <div className="muted" style={{ textAlign: "center", marginTop: "var(--space-8)" }}>
@@ -647,14 +649,24 @@ export function TrainPage(props: { mode: TrainMode }) {
               </div>
             )}
 
-            <button
-              className="trainSession__prevBtn"
-              type="button"
-              onClick={goToPreviousWord}
-              disabled={currentIndex === 0 || isSubmitting}
-            >
-              &larr; Precedent
-            </button>
+            <div className="trainSession__navRow">
+              <button
+                className="trainSession__navBtn"
+                type="button"
+                onClick={goToPreviousWord}
+                disabled={currentIndex === 0 || isSubmitting}
+              >
+                &larr; Precedent
+              </button>
+              <button
+                className="trainSession__navBtn"
+                type="button"
+                onClick={advanceToNextWord}
+                disabled={!words || currentIndex >= words.length - 1 || isSubmitting}
+              >
+                Suivant &rarr;
+              </button>
+            </div>
           </div>
         )}
 
@@ -709,6 +721,11 @@ export function TrainPage(props: { mode: TrainMode }) {
         <span className="trainRecap__stat trainRecap__stat--danger">
           &#x2717; {recapCounts.failCount}
         </span>
+        {recapCounts.skippedCount > 0 && (
+          <span className="trainRecap__stat trainRecap__stat--skipped">
+            &mdash; {recapCounts.skippedCount} non note(s)
+          </span>
+        )}
       </div>
 
       <div className="trainRecap__score">
@@ -726,37 +743,42 @@ export function TrainPage(props: { mode: TrainMode }) {
               </tr>
             </thead>
             <tbody>
-              {words.map((word) => (
-                <tr key={word.id}>
-                  <td>{word.french}</td>
-                  <td className="muted">{word.kanji ?? word.kana ?? word.romaji ?? "\u2014"}</td>
-                  <td>
-                    <div className="trainRecap__ratingGroup">
-                      <button
-                        className={`trainSession__ratingBtn trainSession__ratingBtn--success ${ratingsByWordId[word.id] === "success" ? "trainSession__ratingBtn--selected" : ""}`}
-                        type="button"
-                        onClick={() => setRating(word.id, "success")}
-                      >
-                        &#x2713;
-                      </button>
-                      <button
-                        className={`trainSession__ratingBtn trainSession__ratingBtn--warning ${ratingsByWordId[word.id] === "partial" ? "trainSession__ratingBtn--selected" : ""}`}
-                        type="button"
-                        onClick={() => setRating(word.id, "partial")}
-                      >
-                        &#x26A0;
-                      </button>
-                      <button
-                        className={`trainSession__ratingBtn trainSession__ratingBtn--danger ${ratingsByWordId[word.id] === "fail" ? "trainSession__ratingBtn--selected" : ""}`}
-                        type="button"
-                        onClick={() => setRating(word.id, "fail")}
-                      >
-                        &#x2717;
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {words.map((word) => {
+                const wordRating = ratingsByWordId[word.id] ?? null;
+                const isUnrated = wordRating === null;
+                return (
+                  <tr key={word.id} className={isUnrated ? "trainRecap__row--skipped" : ""}>
+                    <td>{word.french}</td>
+                    <td className="muted">{word.kanji ?? word.kana ?? word.romaji ?? "\u2014"}</td>
+                    <td>
+                      <div className="trainRecap__ratingGroup">
+                        <button
+                          className={`trainSession__ratingBtn trainSession__ratingBtn--success ${wordRating === "success" ? "trainSession__ratingBtn--selected" : ""}`}
+                          type="button"
+                          onClick={() => setRating(word.id, "success")}
+                        >
+                          &#x2713;
+                        </button>
+                        <button
+                          className={`trainSession__ratingBtn trainSession__ratingBtn--warning ${wordRating === "partial" ? "trainSession__ratingBtn--selected" : ""}`}
+                          type="button"
+                          onClick={() => setRating(word.id, "partial")}
+                        >
+                          &#x26A0;
+                        </button>
+                        <button
+                          className={`trainSession__ratingBtn trainSession__ratingBtn--danger ${wordRating === "fail" ? "trainSession__ratingBtn--selected" : ""}`}
+                          type="button"
+                          onClick={() => setRating(word.id, "fail")}
+                        >
+                          &#x2717;
+                        </button>
+                        {isUnrated && <span className="trainRecap__skippedLabel">Non note</span>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

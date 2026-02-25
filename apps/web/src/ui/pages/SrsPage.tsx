@@ -138,7 +138,7 @@ function SrsSection({
       <div className="srsCard__body">
         {words.length > 0 ? (
           <div className="srsCard__list">
-            {words.slice(0, 5).map((word) => (
+            {words.slice(0, 3).map((word) => (
               <div key={word.id} className="srsCard__word">
                 <span className="srsCard__wordFr">{word.french}</span>
                 <span className="srsCard__wordJp">
