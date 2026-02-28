@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
+import Database from "better-sqlite3";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDirectoryPath = path.dirname(currentFilePath);
@@ -108,6 +108,11 @@ function ensureSchema(database: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_word_tags_tag_id ON word_tags(tag_id);
     CREATE INDEX IF NOT EXISTS idx_word_tags_word_id ON word_tags(word_id);
+
+    CREATE TABLE IF NOT EXISTS gemini_usage (
+      usage_date TEXT PRIMARY KEY,
+      request_count INTEGER NOT NULL DEFAULT 0
+    );
   `);
 
   ensureColumnExists(database, "words", "user_id", "INTEGER");
@@ -129,20 +134,20 @@ function ensureSchema(database: Database.Database) {
 }
 
 function ensureRootUser(database: Database.Database) {
-  const existingRoot = database
-    .prepare("SELECT id FROM users WHERE username = ?")
-    .get("root") as { id: number } | undefined;
+  const existingRoot = database.prepare("SELECT id FROM users WHERE username = ?").get("root") as
+    | { id: number }
+    | undefined;
   if (existingRoot) {
     // Ensure existing root user has admin privileges
-    database
-      .prepare("UPDATE users SET is_admin = 1 WHERE username = ?")
-      .run("root");
+    database.prepare("UPDATE users SET is_admin = 1 WHERE username = ?").run("root");
     return;
   }
 
   // Use bcryptjs hashSync for synchronous hashing
   try {
-    const rootPasswordHash = (bcrypt as unknown as { hashSync: (data: string, saltRounds: number) => string }).hashSync("root", 12);
+    const rootPasswordHash = (
+      bcrypt as unknown as { hashSync: (data: string, saltRounds: number) => string }
+    ).hashSync("root", 12);
     database
       .prepare("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)")
       .run("root", rootPasswordHash, 1);
@@ -224,6 +229,52 @@ function rebuildTagsAndWordTagsIfNeeded(database: Database.Database) {
   } finally {
     database.exec("PRAGMA foreign_keys = ON;");
   }
+}
+
+// --- Gemini usage tracking ---
+
+const GEMINI_FREE_TIER_RPD = 250;
+
+function getPacificDateString(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+}
+
+function getPacificMidnightUtc(): string {
+  const pacificNow = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  const [year, month, day] = pacificNow.split("-").map(Number);
+  const nextDay = new Date(Date.UTC(year, month - 1, day + 1, 8, 0, 0));
+  return nextDay.toISOString();
+}
+
+export function incrementGeminiUsage(database: Database.Database): void {
+  const today = getPacificDateString();
+  database
+    .prepare(
+      `INSERT INTO gemini_usage (usage_date, request_count)
+       VALUES (?, 1)
+       ON CONFLICT(usage_date) DO UPDATE SET request_count = request_count + 1`,
+    )
+    .run(today);
+}
+
+export function getGeminiQuota(database: Database.Database): {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt: string;
+} {
+  const today = getPacificDateString();
+  const row = database
+    .prepare("SELECT request_count FROM gemini_usage WHERE usage_date = ?")
+    .get(today) as { request_count: number } | undefined;
+
+  const used = row?.request_count ?? 0;
+  return {
+    used,
+    limit: GEMINI_FREE_TIER_RPD,
+    remaining: Math.max(0, GEMINI_FREE_TIER_RPD - used),
+    resetsAt: getPacificMidnightUtc(),
+  };
 }
 
 export function computeScoreDelta(reviewResult: ReviewResult): number {

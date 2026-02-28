@@ -390,6 +390,79 @@ export async function importWordsFromJson(
   return (await response.json()) as { importedWordsCount: number; importedTagsCount: number };
 }
 
+// --- Phrases AI ---
+
+export type GeminiQuota = {
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt: string;
+};
+
+export async function fetchGeminiQuota(): Promise<GeminiQuota> {
+  const response = await fetch("/api/phrases/quota", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch quota");
+  }
+  return (await response.json()) as GeminiQuota;
+}
+
+export type PhraseConstraints = {
+  tagIds: number[];
+  particles: string[];
+  tense: "present" | "past" | "te-form";
+  polarity: "affirmative" | "negative";
+  politeness: "casual" | "polite";
+  count: number;
+};
+
+export type GeneratedPhrase = {
+  fr: string;
+  jp_kanji: string;
+  jp_kana: string;
+  explanation: string;
+  wordIds: number[];
+};
+
+export type PhraseEvaluation = {
+  isCorrect: boolean;
+  feedback: string | null;
+  errorType: "particle" | "conjugation" | "kanji" | "other" | null;
+};
+
+export async function generatePhrases(constraints: PhraseConstraints): Promise<GeneratedPhrase[]> {
+  const response = await fetch("/api/phrases/generate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(constraints),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la génération des phrases");
+  }
+  const payload = (await response.json()) as { phrases: GeneratedPhrase[] };
+  return payload.phrases;
+}
+
+export async function evaluatePhrase(
+  userAnswer: string,
+  expectedAnswer: string,
+  frenchSentence: string,
+): Promise<PhraseEvaluation> {
+  const response = await fetch("/api/phrases/evaluate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userAnswer, expectedAnswer, frenchSentence }),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation");
+  }
+  return (await response.json()) as PhraseEvaluation;
+}
+
 export function computeFailRate(word: WordWithStats): number {
   const attempts = word.success_count + word.partial_count + word.fail_count;
   if (attempts === 0) return 0;

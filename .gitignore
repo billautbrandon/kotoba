@@ -3,6 +3,7 @@ dist/
 .DS_Store
 .env
 .env.prod
+.env.prod.example
 apps/web/public/kanji/
 
 # SQLite

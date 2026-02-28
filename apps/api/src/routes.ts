@@ -1,17 +1,21 @@
+import fs from "node:fs";
+import path from "node:path";
 import type Database from "better-sqlite3";
-import { z } from "zod";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
+import { z } from "zod";
 
 import type { Request } from "express";
 
 import { type PublicUser, hashPassword, verifyPassword } from "./auth.js";
-import { type ReviewResult, type WordStatsRow, applyReviewToStats } from "./db.js";
 import {
-  downloadKanjiSvgsFromText,
-  downloadMissingKanjiSvgs,
-} from "./kanji-downloader.js";
+  type ReviewResult,
+  type WordStatsRow,
+  applyReviewToStats,
+  getGeminiQuota,
+  incrementGeminiUsage,
+} from "./db.js";
+import { GeminiApiError, GeminiQuotaError, callGeminiJson, isGeminiConfigured } from "./gemini.js";
+import { downloadKanjiSvgsFromText, downloadMissingKanjiSvgs } from "./kanji-downloader.js";
 
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
   const wrapAsync =
@@ -162,7 +166,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       }
 
       req.session.userId = userRow.id;
-      
+
       // Force session save to ensure cookie is set
       req.session.save((err) => {
         if (err) {
@@ -1115,11 +1119,11 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     "/api/kanji/download-missing",
     wrapAsync(async (_req, res) => {
       const userId = getRequiredUserId(_req);
-      
+
       // Vérifier que l'utilisateur est authentifié (déjà fait par getRequiredUserId)
       // Télécharger les kanji manquants
       const result = await downloadMissingKanjiSvgs(database);
-      
+
       res.json({
         success: true,
         total: result.total,
@@ -1165,6 +1169,222 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         return;
       }
       res.status(204).send();
+    }),
+  );
+
+  // --- Phrases AI endpoints ---
+
+  app.get("/api/phrases/quota", (_req, res) => {
+    getRequiredUserId(_req);
+    const quota = getGeminiQuota(database);
+    res.json(quota);
+  });
+
+  app.post(
+    "/api/phrases/generate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        tagIds: z.array(z.number().int().positive()).min(1),
+        particles: z.array(z.string()).min(1),
+        tense: z.enum(["present", "past", "te-form"]),
+        polarity: z.enum(["affirmative", "negative"]),
+        politeness: z.enum(["casual", "polite"]),
+        count: z.number().int().min(1).max(10),
+      });
+      const body = bodySchema.parse(req.body);
+
+      type VocabRow = { id: number; french: string; kana: string | null; kanji: string | null };
+      const placeholders = body.tagIds.map(() => "?").join(",");
+      const vocabularyRows = database
+        .prepare(
+          `
+          SELECT DISTINCT w.id, w.french, w.kana, w.kanji
+          FROM words w
+          INNER JOIN word_tags wt ON wt.word_id = w.id
+          WHERE wt.tag_id IN (${placeholders})
+            AND w.user_id = ?
+          ORDER BY RANDOM()
+          `,
+        )
+        .all(...body.tagIds, userId) as VocabRow[];
+
+      if (vocabularyRows.length === 0) {
+        res.status(400).json({ error: "Aucun mot trouvé pour les tags sélectionnés." });
+        return;
+      }
+
+      const vocabularyPool = vocabularyRows.map((row) => ({
+        id: row.id,
+        fr: row.french,
+        jp: row.kanji ?? row.kana ?? "",
+        kana: row.kana ?? "",
+      }));
+
+      const tenseLabels: Record<string, string> = {
+        present: "Présent",
+        past: "Passé",
+        "te-form": "Forme en -te",
+      };
+      const polarityLabels: Record<string, string> = {
+        affirmative: "Affirmatif",
+        negative: "Négatif",
+      };
+      const politenessLabels: Record<string, string> = {
+        casual: "Courant/Neutre (forme courte)",
+        polite: "Poli/Desu-Masu",
+      };
+
+      const prompt = `Tu es un professeur de japonais. En utilisant UNIQUEMENT le vocabulaire fourni ci-dessous (et des verbes de base courants si nécessaire comme ある、いる、する、行く、食べる、見る、飲む), génère exactement ${body.count} phrases uniques.
+
+Vocabulaire disponible (utilise au maximum ces mots) :
+${JSON.stringify(
+  vocabularyPool.map((v) => ({ fr: v.fr, jp: v.jp, kana: v.kana })),
+  null,
+  2,
+)}
+
+Contraintes strictes :
+- Particules à utiliser : ${body.particles.join(", ")}
+- Temps : ${tenseLabels[body.tense] ?? body.tense}
+- Polarité : ${polarityLabels[body.polarity] ?? body.polarity}
+- Style de politesse : ${politenessLabels[body.politeness] ?? body.politeness}
+- Utilise un japonais naturel, pas de phrases de manuels scolaires rigides.
+- Chaque phrase doit utiliser au moins un mot du vocabulaire fourni.
+- Chaque phrase doit utiliser au moins une des particules demandées.
+
+Réponds UNIQUEMENT au format JSON, un tableau d'objets avec cette structure exacte :
+[{"fr": "La phrase en français", "jp_kanji": "La phrase en japonais avec kanji", "jp_kana": "La phrase en japonais tout en hiragana/katakana", "explanation": "Brève explication grammaticale de la phrase", "used_words_fr": ["mot1_fr", "mot2_fr"]}]
+
+Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qui ont été utilisés dans chaque phrase.`;
+
+      type GeminiPhrase = {
+        fr: string;
+        jp_kanji: string;
+        jp_kana: string;
+        explanation: string;
+        used_words_fr?: string[];
+      };
+
+      let generatedPhrases: GeminiPhrase[];
+      try {
+        generatedPhrases = await callGeminiJson<GeminiPhrase[]>(prompt);
+        incrementGeminiUsage(database);
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Phrase generation failed:", message);
+        res.status(502).json({ error: `Erreur de génération IA : ${message}` });
+        return;
+      }
+
+      if (!Array.isArray(generatedPhrases) || generatedPhrases.length === 0) {
+        res.status(502).json({ error: "L'IA n'a pas retourné de phrases valides." });
+        return;
+      }
+
+      const vocabByFrench = new Map<string, number>();
+      for (const vocab of vocabularyPool) {
+        vocabByFrench.set(vocab.fr.toLowerCase(), vocab.id);
+      }
+
+      const phrases = generatedPhrases.map((phrase) => {
+        const wordIds: number[] = [];
+        const usedWordsFr = phrase.used_words_fr ?? [];
+        for (const frWord of usedWordsFr) {
+          const wordId = vocabByFrench.get(frWord.toLowerCase());
+          if (wordId !== undefined) {
+            wordIds.push(wordId);
+          }
+        }
+        return {
+          fr: phrase.fr ?? "",
+          jp_kanji: phrase.jp_kanji ?? "",
+          jp_kana: phrase.jp_kana ?? "",
+          explanation: phrase.explanation ?? "",
+          wordIds,
+        };
+      });
+
+      res.json({ phrases });
+    }),
+  );
+
+  app.post(
+    "/api/phrases/evaluate",
+    wrapAsync(async (req, res) => {
+      getRequiredUserId(req);
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        userAnswer: z.string().min(1),
+        expectedAnswer: z.string().min(1),
+        frenchSentence: z.string().min(1),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const normalizedUser = body.userAnswer.trim().normalize("NFKC");
+      const normalizedExpected = body.expectedAnswer.trim().normalize("NFKC");
+
+      if (normalizedUser === normalizedExpected) {
+        res.json({ isCorrect: true, feedback: null, errorType: null });
+        return;
+      }
+
+      const prompt = `Tu es un professeur de japonais bienveillant. Un élève devait traduire cette phrase française en japonais :
+
+Phrase française : "${body.frenchSentence}"
+Réponse attendue : "${body.expectedAnswer}"
+Réponse de l'élève : "${body.userAnswer}"
+
+Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cette structure exacte :
+{"isCorrect": false, "errorType": "particle|conjugation|kanji|other", "feedback": "Ton conseil pédagogique ici"}
+
+Règles :
+- Si la réponse est correcte ou acceptable (même si formulée différemment), mets isCorrect à true et errorType à null.
+- errorType doit être "particle" si l'erreur porte sur une particule, "conjugation" si c'est une erreur de conjugaison/temps, "kanji" si c'est uniquement un problème de kanji, "other" sinon.
+- Le feedback doit être en français, court (2-3 phrases max), pédagogique et encourageant. Explique la nuance ou l'erreur précise.`;
+
+      type EvalResult = {
+        isCorrect: boolean;
+        errorType: "particle" | "conjugation" | "kanji" | "other" | null;
+        feedback: string | null;
+      };
+
+      try {
+        const evaluation = await callGeminiJson<EvalResult>(prompt);
+        incrementGeminiUsage(database);
+        res.json({
+          isCorrect: evaluation.isCorrect ?? false,
+          feedback: evaluation.feedback ?? null,
+          errorType: evaluation.errorType ?? null,
+        });
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Phrase evaluation failed:", message);
+        res.status(502).json({ error: `Erreur d'évaluation IA : ${message}` });
+      }
     }),
   );
 }
