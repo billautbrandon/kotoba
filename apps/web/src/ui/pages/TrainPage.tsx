@@ -1,16 +1,28 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { type WordWithStats, fetchSeriesWords, fetchSrsWords, submitBulkReviews } from "../../api";
+import {
+  type GeminiQuota,
+  type KeyboardAnswer,
+  type KeyboardCorrection,
+  type WordWithStats,
+  correctKeyboardAnswers,
+  fetchGeminiQuota,
+  fetchSeriesWords,
+  fetchSrsWords,
+  submitBulkReviews,
+} from "../../api";
 import { extractKanji } from "../../utils/kanji";
 import { AudioButton } from "../components/AudioButton";
 import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
+import { QuotaBar } from "../components/QuotaBar";
 
 type TrainMode = "tag" | "srs";
 type SrsCategory = "hard" | "medium" | "easy";
-type SessionMode = "manual" | "timer";
+type SessionMode = "manual" | "timer" | "keyboard";
+type KeyboardDirection = "fr" | "jpn";
 type SessionRating = "success" | "partial" | "fail";
 type PromptMode = "french" | "romaji" | "kana" | "kanji";
-type TrainPhase = "setup" | "training" | "finished";
+type TrainPhase = "setup" | "training" | "correcting" | "finished";
 
 type PersistedSeriesSettings = {
   sessionMode: SessionMode;
@@ -46,11 +58,13 @@ export function TrainPage(props: { mode: TrainMode }) {
     () => loadSettings().promptMode,
   );
   const [configShuffleMode, setConfigShuffleMode] = useState<boolean>(false);
+  const [configKeyboardDirection, setConfigKeyboardDirection] = useState<KeyboardDirection>("fr");
 
   const sessionMode = useRef<SessionMode>("manual");
   const timerSeconds = useRef<number>(5);
   const basePromptMode = useRef<PromptMode>("french");
   const shuffleMode = useRef<boolean>(false);
+  const keyboardDirection = useRef<KeyboardDirection>("fr");
 
   const [words, setWords] = useState<WordWithStats[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -64,6 +78,14 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   const [ratingsByWordId, setRatingsByWordId] = useState<Record<number, SessionRating | null>>({});
   const [isRatingsSubmitted, setIsRatingsSubmitted] = useState<boolean>(false);
+  const [keyboardAnswers, setKeyboardAnswers] = useState<
+    Record<number, { answer1: string; answer2: string }>
+  >({});
+  const [keyboardCorrections, setKeyboardCorrections] = useState<
+    Record<number, KeyboardCorrection>
+  >({});
+  const [correctingError, setCorrectingError] = useState<string | null>(null);
+  const [geminiQuota, setGeminiQuota] = useState<GeminiQuota | null>(null);
   const timerHandleRef = useRef<number | null>(null);
   const [sessionStartedAtMs, setSessionStartedAtMs] = useState<number | null>(null);
   const [wordStartedAtMs, setWordStartedAtMs] = useState<number | null>(null);
@@ -78,6 +100,14 @@ export function TrainPage(props: { mode: TrainMode }) {
     });
   }, [configSessionMode, configTimerSeconds, configPromptMode]);
 
+  useEffect(() => {
+    if (configSessionMode === "keyboard") {
+      fetchGeminiQuota()
+        .then((quota) => setGeminiQuota(quota))
+        .catch(() => setGeminiQuota(null));
+    }
+  }, [configSessionMode]);
+
   const modeLabel = useMemo(() => {
     if (props.mode === "srs") return `SRS — ${srsCategoryLabels[srsCategory]}`;
     if (tagName) return tagName;
@@ -90,6 +120,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     timerSeconds.current = configTimerSeconds;
     basePromptMode.current = configPromptMode;
     shuffleMode.current = configShuffleMode;
+    keyboardDirection.current = configKeyboardDirection;
 
     setPhase("training");
     setIsLoading(true);
@@ -98,6 +129,9 @@ export function TrainPage(props: { mode: TrainMode }) {
     setCurrentIndex(0);
     setRatingsByWordId({});
     setIsRatingsSubmitted(false);
+    setKeyboardAnswers({});
+    setKeyboardCorrections({});
+    setCorrectingError(null);
     const nowMs = Date.now();
     setSessionStartedAtMs(nowMs);
     setWordStartedAtMs(nowMs);
@@ -150,6 +184,11 @@ export function TrainPage(props: { mode: TrainMode }) {
       if (!words || words.length === 0) return previousIndex;
       const nextIndex = previousIndex + 1;
       if (nextIndex >= words.length) {
+        if (sessionMode.current === "keyboard") {
+          setPhase("correcting");
+          setCorrectingError(null);
+          return previousIndex;
+        }
         setPhase("finished");
         return previousIndex;
       }
@@ -170,9 +209,23 @@ export function TrainPage(props: { mode: TrainMode }) {
     setPhase("training");
     setRatingsByWordId({});
     setIsRatingsSubmitted(false);
+    setKeyboardAnswers({});
+    setKeyboardCorrections({});
+    setCorrectingError(null);
     setSessionStartedAtMs(nowMs);
     setWordStartedAtMs(nowMs);
   }
+
+  const correctingTriggered = useRef(false);
+  useEffect(() => {
+    if (phase === "correcting" && !correctingTriggered.current) {
+      correctingTriggered.current = true;
+      submitKeyboardForCorrection();
+    }
+    if (phase !== "correcting") {
+      correctingTriggered.current = false;
+    }
+  }, [phase]);
 
   useEffect(() => {
     if (timerHandleRef.current) {
@@ -390,13 +443,81 @@ export function TrainPage(props: { mode: TrainMode }) {
   }
 
   function handleFinishSession() {
-    setPhase("finished");
+    if (sessionMode.current === "keyboard") {
+      handleFinishKeyboardSession();
+    } else {
+      setPhase("finished");
+    }
   }
 
   function handleCancelSession() {
     if (window.confirm("Annuler la serie ? Tes progres ne seront pas enregistres.")) {
       navigate(props.mode === "srs" ? "/srs" : "/");
     }
+  }
+
+  function handleFinishKeyboardSession() {
+    setPhase("correcting");
+    setCorrectingError(null);
+    submitKeyboardForCorrection();
+  }
+
+  async function submitKeyboardForCorrection() {
+    if (!words || words.length === 0) return;
+
+    const answers: KeyboardAnswer[] = words.map((word) => {
+      const typed = keyboardAnswers[word.id] ?? { answer1: "", answer2: "" };
+      let promptField: "french" | "kana" | "kanji" = "french";
+      if (keyboardDirection.current === "jpn") {
+        promptField = word.kanji ? "kanji" : "kana";
+      }
+      return {
+        wordId: word.id,
+        french: word.french,
+        kanji: word.kanji ?? null,
+        kana: word.kana ?? null,
+        userInput1: typed.answer1,
+        userInput2: typed.answer2,
+        direction: keyboardDirection.current,
+        promptField,
+      };
+    });
+
+    try {
+      const corrections = await correctKeyboardAnswers(answers);
+      const correctionsMap: Record<number, KeyboardCorrection> = {};
+      const ratingsMap: Record<number, SessionRating> = {};
+      for (const correction of corrections) {
+        correctionsMap[correction.wordId] = correction;
+        if (correction.rating === 1) ratingsMap[correction.wordId] = "success";
+        else if (correction.rating === 2) ratingsMap[correction.wordId] = "partial";
+        else ratingsMap[correction.wordId] = "fail";
+      }
+      setKeyboardCorrections(correctionsMap);
+      setRatingsByWordId(ratingsMap);
+      setPhase("finished");
+    } catch (error) {
+      setCorrectingError(error instanceof Error ? error.message : "Erreur inconnue");
+    }
+  }
+
+  function getKeyboardPromptField(word: WordWithStats): "french" | "kana" | "kanji" {
+    if (keyboardDirection.current === "fr") return "french";
+    return word.kanji ? "kanji" : "kana";
+  }
+
+  function getKeyboardPromptText(word: WordWithStats): string {
+    const field = getKeyboardPromptField(word);
+    if (field === "french") return word.french;
+    if (field === "kanji") return word.kanji ?? word.kana ?? "";
+    return word.kana ?? "";
+  }
+
+  function getKeyboardInputLabels(word: WordWithStats): [string, string] {
+    if (keyboardDirection.current === "fr") return ["Kanji", "Kana"];
+    const promptField = getKeyboardPromptField(word);
+    if (promptField === "kanji") return ["Francais", "Kana"];
+    return ["Francais", "Kanji"];
   }
 
   const progressPercent = words && words.length > 0 ? (currentIndex / words.length) * 100 : 0;
@@ -424,8 +545,8 @@ export function TrainPage(props: { mode: TrainMode }) {
               <div>
                 <div className="trainSetup__optionLabel">Manuel</div>
                 <div className="trainSetup__optionHint">
-                  Avance avec <strong>→</strong> / <strong>Entree</strong>, reviens avec{" "}
-                  <strong>←</strong>
+                  Avance avec <strong>&rarr;</strong> / <strong>Entree</strong>, reviens avec{" "}
+                  <strong>&larr;</strong>
                 </div>
               </div>
             </label>
@@ -440,6 +561,21 @@ export function TrainPage(props: { mode: TrainMode }) {
               <div>
                 <div className="trainSetup__optionLabel">Chrono</div>
                 <div className="trainSetup__optionHint">Passage automatique apres un delai</div>
+              </div>
+            </label>
+            <label
+              className={`trainSetup__option ${configSessionMode === "keyboard" ? "trainSetup__option--active" : ""}`}
+            >
+              <input
+                type="radio"
+                checked={configSessionMode === "keyboard"}
+                onChange={() => setConfigSessionMode("keyboard")}
+              />
+              <div>
+                <div className="trainSetup__optionLabel">Clavier</div>
+                <div className="trainSetup__optionHint">
+                  Tape tes reponses au clavier, correction par IA a la fin
+                </div>
               </div>
             </label>
           </div>
@@ -463,44 +599,73 @@ export function TrainPage(props: { mode: TrainMode }) {
           )}
         </div>
 
-        <div className="trainSetup__section">
-          <h2 className="trainSetup__sectionTitle">Question</h2>
-          <div className="trainSetup__promptButtons">
-            {(
-              [
-                ["french", "FR"],
-                ["romaji", "Romaji"],
-                ["kana", "Kana"],
-                ["kanji", "Kanji"],
-              ] as Array<[PromptMode, string]>
-            ).map(([mode, label]) => (
+        {configSessionMode === "keyboard" ? (
+          <div className="trainSetup__section">
+            <h2 className="trainSetup__sectionTitle">Direction</h2>
+            <div className="trainSetup__promptButtons">
               <button
-                key={mode}
-                className={`button ${configPromptMode === mode && !configShuffleMode ? "button--primary" : ""}`}
+                className={`button ${configKeyboardDirection === "fr" ? "button--primary" : ""}`}
                 type="button"
-                onClick={() => {
-                  setConfigPromptMode(mode);
-                  setConfigShuffleMode(false);
-                }}
+                onClick={() => setConfigKeyboardDirection("fr")}
               >
-                {label}
+                FR &rarr; JPN
               </button>
-            ))}
-            <button
-              className={`button ${configShuffleMode ? "button--primary" : ""}`}
-              type="button"
-              onClick={() => setConfigShuffleMode(true)}
-              style={configShuffleMode ? undefined : { border: "2px dashed var(--color-border)" }}
-            >
-              Aleatoire
-            </button>
-          </div>
-          {configShuffleMode && (
+              <button
+                className={`button ${configKeyboardDirection === "jpn" ? "button--primary" : ""}`}
+                type="button"
+                onClick={() => setConfigKeyboardDirection("jpn")}
+              >
+                JPN &rarr; FR
+              </button>
+            </div>
             <p className="trainSetup__optionHint" style={{ marginTop: "var(--space-3)" }}>
-              La langue sera choisie au hasard pour chaque mot.
+              {configKeyboardDirection === "fr"
+                ? "Le mot francais est affiche, tu tapes le kanji et le kana."
+                : "Le mot japonais est affiche, tu tapes le francais et l'autre forme japonaise."}
             </p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="trainSetup__section">
+            <h2 className="trainSetup__sectionTitle">Question</h2>
+            <div className="trainSetup__promptButtons">
+              {(
+                [
+                  ["french", "FR"],
+                  ["romaji", "Romaji"],
+                  ["kana", "Kana"],
+                  ["kanji", "Kanji"],
+                ] as Array<[PromptMode, string]>
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  className={`button ${configPromptMode === mode && !configShuffleMode ? "button--primary" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setConfigPromptMode(mode);
+                    setConfigShuffleMode(false);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                className={`button ${configShuffleMode ? "button--primary" : ""}`}
+                type="button"
+                onClick={() => setConfigShuffleMode(true)}
+                style={configShuffleMode ? undefined : { border: "2px dashed var(--color-border)" }}
+              >
+                Aleatoire
+              </button>
+            </div>
+            {configShuffleMode && (
+              <p className="trainSetup__optionHint" style={{ marginTop: "var(--space-3)" }}>
+                La langue sera choisie au hasard pour chaque mot.
+              </p>
+            )}
+          </div>
+        )}
+
+        {configSessionMode === "keyboard" && geminiQuota && <QuotaBar quota={geminiQuota} />}
 
         <div className="trainSetup__actions">
           <button className="button button--primary" type="button" onClick={startSession}>
@@ -514,7 +679,151 @@ export function TrainPage(props: { mode: TrainMode }) {
     );
   }
 
-  // --- TRAINING PHASE ---
+  // --- TRAINING PHASE (keyboard mode) ---
+  if (phase === "training" && sessionMode.current === "keyboard") {
+    const kbWord = currentWord;
+    const kbAnswers = kbWord ? (keyboardAnswers[kbWord.id] ?? { answer1: "", answer2: "" }) : null;
+    const kbLabels = kbWord ? getKeyboardInputLabels(kbWord) : ["", ""];
+    const kbPrompt = kbWord ? getKeyboardPromptText(kbWord) : "";
+    const kbPromptField = kbWord ? getKeyboardPromptField(kbWord) : "french";
+
+    function updateKeyboardAnswer(field: "answer1" | "answer2", value: string) {
+      if (!kbWord) return;
+      setKeyboardAnswers((prev) => ({
+        ...prev,
+        [kbWord.id]: {
+          ...prev[kbWord.id],
+          answer1: prev[kbWord.id]?.answer1 ?? "",
+          answer2: prev[kbWord.id]?.answer2 ?? "",
+          [field]: value,
+        },
+      }));
+    }
+
+    function handleKeyboardNext() {
+      advanceToNextWord();
+    }
+
+    return (
+      <div className="trainSession">
+        <div className="trainSession__progressBar">
+          <div className="trainSession__progressFill" style={{ width: `${progressPercent}%` }} />
+        </div>
+
+        <div className="trainSession__topBar">
+          <div className="trainSession__topLeft">
+            <span className="trainSession__counter">
+              Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
+            </span>
+            <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
+          </div>
+          <div className="trainSession__topRight">
+            <button className="trainSession__finishBtn" type="button" onClick={handleFinishSession}>
+              Terminer la serie
+            </button>
+            <button className="trainSession__cancelBtn" type="button" onClick={handleCancelSession}>
+              Annuler
+            </button>
+          </div>
+        </div>
+
+        {isLoading && (
+          <div className="muted" style={{ textAlign: "center", marginTop: "var(--space-8)" }}>
+            Chargement...
+          </div>
+        )}
+        {errorMessage && (
+          <div className="formError" style={{ marginTop: "var(--space-6)" }}>
+            Erreur: {errorMessage}
+          </div>
+        )}
+        {!isLoading && words && words.length === 0 && (
+          <div className="muted" style={{ textAlign: "center", marginTop: "var(--space-8)" }}>
+            Aucun mot a entrainer.
+          </div>
+        )}
+
+        {kbWord && kbAnswers && (
+          <div className="trainSession__card">
+            <div className="trainSession__prompt">
+              {kbPrompt}
+              {(kbPromptField === "kana" || kbPromptField === "kanji") && (
+                <AudioButton text={kbPrompt} size="large" />
+              )}
+            </div>
+
+            <div className="trainKeyboard__inputs">
+              <div className="trainKeyboard__field">
+                <label className="trainKeyboard__label" htmlFor="kb-input-1">
+                  {kbLabels[0]}
+                </label>
+                <input
+                  id="kb-input-1"
+                  className="trainKeyboard__input"
+                  type="text"
+                  value={kbAnswers.answer1}
+                  onChange={(event) => updateKeyboardAnswer("answer1", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      const nextInput = document.getElementById("kb-input-2");
+                      if (nextInput) nextInput.focus();
+                    }
+                  }}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="trainKeyboard__field">
+                <label className="trainKeyboard__label" htmlFor="kb-input-2">
+                  {kbLabels[1]}
+                </label>
+                <input
+                  id="kb-input-2"
+                  className="trainKeyboard__input"
+                  type="text"
+                  value={kbAnswers.answer2}
+                  onChange={(event) => updateKeyboardAnswer("answer2", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleKeyboardNext();
+                    }
+                  }}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div className="trainSession__navRow">
+              <button
+                className="trainSession__navBtn"
+                type="button"
+                onClick={goToPreviousWord}
+                disabled={currentIndex === 0}
+              >
+                &larr; Precedent
+              </button>
+              <button
+                className="trainSession__navBtn trainSession__navBtn--primary"
+                type="button"
+                onClick={handleKeyboardNext}
+              >
+                {words && currentIndex >= words.length - 1 ? "Corriger" : "Suivant \u2192"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="trainSession__footer">
+          Mode <strong>clavier</strong> &mdash; Direction:{" "}
+          <strong>{keyboardDirection.current === "fr" ? "FR \u2192 JPN" : "JPN \u2192 FR"}</strong>{" "}
+          &mdash; <strong>Entree</strong> pour avancer
+        </div>
+      </div>
+    );
+  }
+
+  // --- TRAINING PHASE (normal: manual / timer) ---
   if (phase === "training") {
     return (
       <div className="trainSession">
@@ -705,6 +1014,58 @@ export function TrainPage(props: { mode: TrainMode }) {
     );
   }
 
+  // --- CORRECTING PHASE ---
+  if (phase === "correcting") {
+    return (
+      <div className="trainCorrecting">
+        <div className="trainCorrecting__card">
+          {!correctingError ? (
+            <>
+              <div className="trainCorrecting__spinner" />
+              <h2 className="trainCorrecting__title">Correction par IA en cours...</h2>
+              <p className="muted">
+                Gemini analyse tes {words?.length ?? 0} reponses. Cela peut prendre quelques
+                secondes.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="trainCorrecting__title">Erreur de correction</h2>
+              <div className="formError" style={{ marginBottom: "var(--space-5)" }}>
+                {correctingError}
+              </div>
+              <div className="trainCorrecting__actions">
+                <button
+                  className="button button--primary"
+                  type="button"
+                  onClick={() => {
+                    setCorrectingError(null);
+                    correctingTriggered.current = false;
+                    setPhase("correcting");
+                  }}
+                >
+                  Reessayer
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => {
+                    setPhase("finished");
+                  }}
+                >
+                  Voir les resultats sans correction
+                </button>
+                <Link className="button" to={props.mode === "srs" ? "/srs" : "/"}>
+                  Annuler
+                </Link>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // --- FINISHED PHASE ---
   return (
     <div className="trainRecap">
@@ -739,6 +1100,8 @@ export function TrainPage(props: { mode: TrainMode }) {
               <tr>
                 <th>Francais</th>
                 <th>JP</th>
+                {sessionMode.current === "keyboard" && <th>Tes reponses</th>}
+                {sessionMode.current === "keyboard" && <th>Correction</th>}
                 <th>Note</th>
               </tr>
             </thead>
@@ -746,10 +1109,30 @@ export function TrainPage(props: { mode: TrainMode }) {
               {words.map((word) => {
                 const wordRating = ratingsByWordId[word.id] ?? null;
                 const isUnrated = wordRating === null;
+                const typedAnswers = keyboardAnswers[word.id];
+                const correction = keyboardCorrections[word.id];
                 return (
                   <tr key={word.id} className={isUnrated ? "trainRecap__row--skipped" : ""}>
                     <td>{word.french}</td>
                     <td className="muted">{word.kanji ?? word.kana ?? word.romaji ?? "\u2014"}</td>
+                    {sessionMode.current === "keyboard" && (
+                      <td className="trainRecap__typed">
+                        {typedAnswers ? (
+                          <>
+                            <span>{typedAnswers.answer1 || "\u2014"}</span>
+                            <span className="muted"> / </span>
+                            <span>{typedAnswers.answer2 || "\u2014"}</span>
+                          </>
+                        ) : (
+                          "\u2014"
+                        )}
+                      </td>
+                    )}
+                    {sessionMode.current === "keyboard" && (
+                      <td className="trainRecap__correction">
+                        {correction?.correction ?? "\u2014"}
+                      </td>
+                    )}
                     <td>
                       <div className="trainRecap__ratingGroup">
                         <button

@@ -1387,6 +1387,97 @@ Règles :
       }
     }),
   );
+
+  // --- Keyboard mode batch correction ---
+
+  app.post(
+    "/api/series/keyboard/correct",
+    wrapAsync(async (req, res) => {
+      getRequiredUserId(req);
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const answerSchema = z.object({
+        wordId: z.number().int().positive(),
+        french: z.string(),
+        kanji: z.string().nullable(),
+        kana: z.string().nullable(),
+        userInput1: z.string(),
+        userInput2: z.string(),
+        direction: z.enum(["fr", "jpn"]),
+        promptField: z.enum(["french", "kana", "kanji"]),
+      });
+      const bodySchema = z.object({
+        answers: z.array(answerSchema).min(1).max(200),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const wordLines = body.answers.map((answer, index) => {
+        if (answer.direction === "fr") {
+          return `Mot ${index + 1} (wordId: ${answer.wordId}):
+  Français affiché : "${answer.french}"
+  Kanji attendu : "${answer.kanji ?? "(aucun)"}"
+  Kana attendu : "${answer.kana ?? "(aucun)"}"
+  Réponse Kanji de l'élève : "${answer.userInput1}"
+  Réponse Kana de l'élève : "${answer.userInput2}"`;
+        }
+        const shownField = answer.promptField === "kanji" ? "Kanji" : "Kana";
+        const shownValue = answer.promptField === "kanji" ? answer.kanji : answer.kana;
+        const otherJpField = answer.promptField === "kanji" ? "Kana" : "Kanji";
+        const otherJpExpected = answer.promptField === "kanji" ? answer.kana : answer.kanji;
+        return `Mot ${index + 1} (wordId: ${answer.wordId}):
+  ${shownField} affiché : "${shownValue ?? ""}"
+  Français attendu : "${answer.french}"
+  ${otherJpField} attendu : "${otherJpExpected ?? "(aucun)"}"
+  Réponse Français de l'élève : "${answer.userInput1}"
+  Réponse ${otherJpField} de l'élève : "${answer.userInput2}"`;
+      });
+
+      const prompt = `Tu es un professeur de japonais strict mais juste. Un élève a passé un test de vocabulaire. Pour chaque mot, évalue ses réponses.
+
+${wordLines.join("\n\n")}
+
+Pour chaque mot, attribue une note :
+- 1 = Correct (toutes les réponses sont justes ou acceptables, petites variations d'écriture tolérées)
+- 2 = Partiellement correct (une des réponses est bonne, ou il y a de petites erreurs)
+- 3 = Incorrect (les réponses sont fausses ou vides)
+
+Réponds UNIQUEMENT avec un tableau JSON de cette forme exacte :
+[{"wordId": <id>, "rating": <1|2|3>, "correction": "<explication courte en français>"}]
+
+Règles :
+- Retourne exactement ${body.answers.length} éléments, un par mot, dans le même ordre.
+- La correction doit être courte (1-2 phrases), en français, expliquant ce qui est juste ou faux.
+- Si tout est correct, la correction peut être "Parfait !" ou similaire.
+- Sois tolérant sur les espaces, la ponctuation et les variations mineures de kana.
+- Si l'élève n'a rien écrit (chaîne vide), note 3.`;
+
+      type CorrectionResult = {
+        wordId: number;
+        rating: 1 | 2 | 3;
+        correction: string;
+      };
+
+      try {
+        const corrections = await callGeminiJson<CorrectionResult[]>(prompt);
+        incrementGeminiUsage(database);
+        res.json(corrections);
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Keyboard correction failed:", message);
+        res.status(502).json({ error: `Erreur de correction IA : ${message}` });
+      }
+    }),
+  );
 }
 
 function parseTagsConcat(value: unknown): Array<{ id: number; name: string }> {

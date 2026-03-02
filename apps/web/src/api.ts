@@ -463,6 +463,41 @@ export async function evaluatePhrase(
   return (await response.json()) as PhraseEvaluation;
 }
 
+// --- Keyboard mode batch correction ---
+
+export type KeyboardAnswer = {
+  wordId: number;
+  french: string;
+  kanji: string | null;
+  kana: string | null;
+  userInput1: string;
+  userInput2: string;
+  direction: "fr" | "jpn";
+  promptField: "french" | "kana" | "kanji";
+};
+
+export type KeyboardCorrection = {
+  wordId: number;
+  rating: 1 | 2 | 3;
+  correction: string;
+};
+
+export async function correctKeyboardAnswers(
+  answers: KeyboardAnswer[],
+): Promise<KeyboardCorrection[]> {
+  const response = await fetch("/api/series/keyboard/correct", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la correction");
+  }
+  return (await response.json()) as KeyboardCorrection[];
+}
+
 export function computeFailRate(word: WordWithStats): number {
   const attempts = word.success_count + word.partial_count + word.fail_count;
   if (attempts === 0) return 0;
