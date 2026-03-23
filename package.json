@@ -1,7 +1,9 @@
 {
   "name": "kotoba",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @kotoba/api\" \"npm run dev -w @kotoba/web\"",
     "build": "npm run build -w @kotoba/api && npm run build -w @kotoba/web",
@@ -12,5 +14,8 @@
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
     "concurrently": "9.1.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0"
   }
 }

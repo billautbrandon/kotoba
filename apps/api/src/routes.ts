@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Readable } from "node:stream";
 import type Database from "better-sqlite3";
-import { MsEdgeTTS, OUTPUT_FORMAT } from "edge-tts-node";
+import { EdgeTTS } from "edge-tts-universal";
 import multer from "multer";
 import { z } from "zod";
 
@@ -1525,44 +1524,30 @@ Règles :
         return;
       }
 
-      const frenchTts = new MsEdgeTTS({});
-      await frenchTts.setMetadata(
-        "fr-FR-DeniseNeural",
-        OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
-      );
-
-      const japaneseTts = new MsEdgeTTS({});
-      await japaneseTts.setMetadata(
-        "ja-JP-NanamiNeural",
-        OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
-      );
-
       const audioChunks: Buffer[] = [];
-      const silenceMs = 800;
-      const silenceBytes = Math.floor((48000 / 8) * (silenceMs / 1000));
-      const silenceBuffer = Buffer.alloc(silenceBytes, 0);
 
       for (const word of wordRows) {
         const frenchText = word.french;
         const japaneseText = word.kana || "";
 
         if (frenchText) {
-          const frenchAudio = await streamToBuffer(frenchTts.toStream(frenchText, { rate: 0.9 }));
-          audioChunks.push(frenchAudio);
-          audioChunks.push(silenceBuffer);
+          const frenchTts = new EdgeTTS(frenchText, "fr-FR-DeniseNeural", {
+            rate: "-10%",
+          });
+          const frenchResult = await frenchTts.synthesize();
+          const frenchBuffer = Buffer.from(await frenchResult.audio.arrayBuffer());
+          audioChunks.push(frenchBuffer);
         }
 
         if (japaneseText) {
-          const japaneseAudio = await streamToBuffer(
-            japaneseTts.toStream(japaneseText, { rate: 0.85 }),
-          );
-          audioChunks.push(japaneseAudio);
-          audioChunks.push(silenceBuffer);
+          const japaneseTts = new EdgeTTS(japaneseText, "ja-JP-NanamiNeural", {
+            rate: "-15%",
+          });
+          const japaneseResult = await japaneseTts.synthesize();
+          const japaneseBuffer = Buffer.from(await japaneseResult.audio.arrayBuffer());
+          audioChunks.push(japaneseBuffer);
         }
       }
-
-      frenchTts.close();
-      japaneseTts.close();
 
       const fullAudio = Buffer.concat(audioChunks);
       const safeTagName = tag.name.replace(/[^a-zA-Z0-9\u00C0-\u024F\u3000-\u9FFF_-]/g, "_");
@@ -1572,14 +1557,6 @@ Règles :
       res.send(fullAudio);
     }),
   );
-}
-
-async function streamToBuffer(readable: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of readable) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
 }
 
 function parseTagsConcat(value: unknown): Array<{ id: number; name: string }> {
