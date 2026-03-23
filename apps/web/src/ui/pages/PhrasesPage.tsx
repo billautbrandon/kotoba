@@ -50,6 +50,7 @@ export function PhrasesPage() {
   const [polarity, setPolarity] = useState<PhraseConstraints["polarity"]>("affirmative");
   const [politeness, setPoliteness] = useState<PhraseConstraints["politeness"]>("casual");
   const [phraseCount, setPhraseCount] = useState<number>(3);
+  const [customContext, setCustomContext] = useState<string>("");
 
   const [phrases, setPhrases] = useState<GeneratedPhrase[]>([]);
   const [currentPhraseIndex, setCurrentPhraseIndex] = useState(0);
@@ -119,6 +120,7 @@ export function PhrasesPage() {
         polarity,
         politeness,
         count: phraseCount,
+        customContext: customContext.trim() || undefined,
       });
       setPhrases(generatedPhrases);
       setCurrentPhraseIndex(0);
@@ -424,6 +426,30 @@ export function PhrasesPage() {
                 {count}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Custom context */}
+        <div className="phrasesSetup__section">
+          <h2 className="phrasesSetup__sectionTitle">Contexte personnalisé (optionnel)</h2>
+          <textarea
+            placeholder="Ex : Je prépare le JLPT N5, utilise des phrases simples du quotidien…"
+            value={customContext}
+            onChange={(event) => setCustomContext(event.target.value)}
+            maxLength={500}
+            rows={3}
+            style={{
+              width: "100%",
+              padding: "10px 14px",
+              fontSize: "15px",
+              border: "2px solid var(--color-border)",
+              borderRadius: "var(--radius-md)",
+              resize: "vertical",
+              fontFamily: "inherit",
+            }}
+          />
+          <div className="muted" style={{ fontSize: "13px", marginTop: "var(--space-2)" }}>
+            {customContext.length}/500
           </div>
         </div>
 

@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import type Database from "better-sqlite3";
+import { MsEdgeTTS, OUTPUT_FORMAT } from "edge-tts-node";
 import multer from "multer";
 import { z } from "zod";
 
@@ -769,6 +771,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       tag_name: string;
       words_count: number;
       total_score: number;
+      last_reviewed_at: string | null;
     };
 
     const seriesRows = database
@@ -778,7 +781,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           t.id AS tag_id,
           t.name AS tag_name,
           COUNT(DISTINCT w.id) AS words_count,
-          COALESCE(SUM(s.score), 0) AS total_score
+          COALESCE(SUM(s.score), 0) AS total_score,
+          MAX(s.last_reviewed_at) AS last_reviewed_at
         FROM tags t
         LEFT JOIN word_tags wt ON wt.tag_id = t.id
         LEFT JOIN words w ON w.id = wt.word_id AND w.user_id = ?
@@ -786,7 +790,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         WHERE t.user_id = ?
         GROUP BY t.id
         HAVING COUNT(DISTINCT w.id) > 0
-        ORDER BY t.name ASC
+        ORDER BY last_reviewed_at DESC NULLS LAST, t.name ASC
       `,
       )
       .all(userId, userId) as SeriesRow[];
@@ -797,6 +801,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         tagName: row.tag_name,
         wordsCount: row.words_count,
         totalScore: row.total_score,
+        lastReviewedAt: row.last_reviewed_at,
       })),
     });
   });
@@ -1199,6 +1204,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         polarity: z.enum(["affirmative", "negative"]),
         politeness: z.enum(["casual", "polite"]),
         count: z.number().int().min(1).max(10),
+        customContext: z.string().max(500).optional(),
       });
       const body = bodySchema.parse(req.body);
 
@@ -1260,7 +1266,8 @@ Contraintes strictes :
 - Utilise un japonais naturel, pas de phrases de manuels scolaires rigides.
 - Chaque phrase doit utiliser au moins un mot du vocabulaire fourni.
 - Chaque phrase doit utiliser au moins une des particules demandées.
-
+- L'élève apprend les kanji, donc écrire en kana est acceptable.
+${body.customContext ? `\nContexte additionnel de l'élève : ${body.customContext}\n` : ""}
 Réponds UNIQUEMENT au format JSON, un tableau d'objets avec cette structure exacte :
 [{"fr": "La phrase en français", "jp_kanji": "La phrase en japonais avec kanji", "jp_kana": "La phrase en japonais tout en hiragana/katakana", "explanation": "Brève explication grammaticale de la phrase", "used_words_fr": ["mot1_fr", "mot2_fr"]}]
 
@@ -1359,6 +1366,7 @@ Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cett
 
 Règles :
 - Si la réponse est correcte ou acceptable (même si formulée différemment), mets isCorrect à true et errorType à null.
+- L'élève apprend les kanji. Si la réponse est écrite en kana au lieu des kanji mais est autrement correcte, considère-la comme correcte.
 - errorType doit être "particle" si l'erreur porte sur une particule, "conjugation" si c'est une erreur de conjugaison/temps, "kanji" si c'est uniquement un problème de kanji, "other" sinon.
 - Le feedback doit être en français, court (2-3 phrases max), pédagogique et encourageant. Explique la nuance ou l'erreur précise.`;
 
@@ -1478,6 +1486,100 @@ Règles :
       }
     }),
   );
+
+  // --- Tag audio download (TTS) ---
+
+  app.get(
+    "/api/tags/:tagId/audio",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const tagId = Number(req.params.tagId);
+      if (!Number.isFinite(tagId)) {
+        res.status(400).json({ error: "Invalid tag id" });
+        return;
+      }
+
+      const tag = database
+        .prepare("SELECT id, name FROM tags WHERE id = ? AND user_id = ?")
+        .get(tagId, userId) as { id: number; name: string } | undefined;
+      if (!tag) {
+        res.status(404).json({ error: "Tag not found" });
+        return;
+      }
+
+      type WordRow = { french: string; kana: string | null };
+      const wordRows = database
+        .prepare(
+          `
+          SELECT w.french, w.kana
+          FROM words w
+          INNER JOIN word_tags wt ON wt.word_id = w.id
+          WHERE wt.tag_id = ? AND w.user_id = ?
+          ORDER BY w.id ASC
+        `,
+        )
+        .all(tagId, userId) as WordRow[];
+
+      if (wordRows.length === 0) {
+        res.status(404).json({ error: "No words found for this tag" });
+        return;
+      }
+
+      const frenchTts = new MsEdgeTTS({});
+      await frenchTts.setMetadata(
+        "fr-FR-DeniseNeural",
+        OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
+      );
+
+      const japaneseTts = new MsEdgeTTS({});
+      await japaneseTts.setMetadata(
+        "ja-JP-NanamiNeural",
+        OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
+      );
+
+      const audioChunks: Buffer[] = [];
+      const silenceMs = 800;
+      const silenceBytes = Math.floor((48000 / 8) * (silenceMs / 1000));
+      const silenceBuffer = Buffer.alloc(silenceBytes, 0);
+
+      for (const word of wordRows) {
+        const frenchText = word.french;
+        const japaneseText = word.kana || "";
+
+        if (frenchText) {
+          const frenchAudio = await streamToBuffer(frenchTts.toStream(frenchText, { rate: 0.9 }));
+          audioChunks.push(frenchAudio);
+          audioChunks.push(silenceBuffer);
+        }
+
+        if (japaneseText) {
+          const japaneseAudio = await streamToBuffer(
+            japaneseTts.toStream(japaneseText, { rate: 0.85 }),
+          );
+          audioChunks.push(japaneseAudio);
+          audioChunks.push(silenceBuffer);
+        }
+      }
+
+      frenchTts.close();
+      japaneseTts.close();
+
+      const fullAudio = Buffer.concat(audioChunks);
+      const safeTagName = tag.name.replace(/[^a-zA-Z0-9\u00C0-\u024F\u3000-\u9FFF_-]/g, "_");
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeTagName}.mp3"`);
+      res.setHeader("Content-Length", fullAudio.length);
+      res.send(fullAudio);
+    }),
+  );
+}
+
+async function streamToBuffer(readable: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of readable) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 function parseTagsConcat(value: unknown): Array<{ id: number; name: string }> {

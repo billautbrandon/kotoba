@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 import type { WordWithTags } from "../../api";
-import { fetchWordsWithTags } from "../../api";
+import { downloadTagAudio, fetchWordsWithTags } from "../../api";
 import { AudioButton } from "../components/AudioButton";
 
 type DictionaryLanguage = "fr" | "romaji" | "kana" | "kanji";
@@ -57,6 +57,8 @@ export function DictionaryPage() {
   const [flippedWordIds, setFlippedWordIds] = useState<Set<number>>(() => new Set());
   const [collapsedTags, setCollapsedTags] = useState<Record<string, boolean>>(() => ({}));
   const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode());
+  const [searchQuery, setSearchQuery] = useState("");
+  const [downloadingTagId, setDownloadingTagId] = useState<number | null>(null);
 
   useEffect(() => {
     saveDictionaryLanguage(frontLanguage);
@@ -107,23 +109,34 @@ export function DictionaryPage() {
 
   const otherLanguages = useMemo(() => getOtherLanguages(frontLanguage), [frontLanguage]);
 
-  const allWordIds = useMemo(() => new Set(words.map((word) => word.id)), [words]);
+  const filteredWords = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return words;
+    return words.filter((word) => {
+      const fields = [word.french, word.romaji, word.kana, word.kanji, word.note];
+      return fields.some((field) => field?.toLowerCase().includes(query));
+    });
+  }, [words, searchQuery]);
+
+  const isSearchActive = searchQuery.trim().length > 0;
+
+  const allWordIds = useMemo(() => new Set(filteredWords.map((word) => word.id)), [filteredWords]);
   const allFlipped = useMemo(
     () => allWordIds.size > 0 && Array.from(allWordIds).every((id) => flippedWordIds.has(id)),
     [allWordIds, flippedWordIds],
   );
 
   const wordsByTag = useMemo(() => {
-    const grouped = new Map<string, WordWithTags[]>();
-    words.forEach((word) => {
+    const grouped = new Map<string, { tagId: number | null; words: WordWithTags[] }>();
+    filteredWords.forEach((word) => {
       if (word.tags.length === 0) {
-        const existing = grouped.get("Sans tag") ?? [];
-        existing.push(word);
+        const existing = grouped.get("Sans tag") ?? { tagId: null, words: [] };
+        existing.words.push(word);
         grouped.set("Sans tag", existing);
       } else {
         word.tags.forEach((tag) => {
-          const existing = grouped.get(tag.name) ?? [];
-          existing.push(word);
+          const existing = grouped.get(tag.name) ?? { tagId: tag.id, words: [] };
+          existing.words.push(word);
           grouped.set(tag.name, existing);
         });
       }
@@ -133,14 +146,30 @@ export function DictionaryPage() {
       if (b === "Sans tag") return -1;
       return a.localeCompare(b);
     });
-    return sortedTags.map((tag) => ({ tag, words: grouped.get(tag) ?? [] }));
-  }, [words]);
+    return sortedTags.map((tagName) => {
+      const group = grouped.get(tagName);
+      return { tag: tagName, tagId: group?.tagId ?? null, words: group?.words ?? [] };
+    });
+  }, [filteredWords]);
 
   function toggleTag(tag: string) {
     setCollapsedTags((prev) => ({
       ...prev,
       [tag]: !(prev[tag] ?? false),
     }));
+  }
+
+  async function handleDownloadAudio(tagId: number, tagName: string) {
+    setDownloadingTagId(tagId);
+    try {
+      await downloadTagAudio(tagId, tagName);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Erreur lors du téléchargement audio",
+      );
+    } finally {
+      setDownloadingTagId(null);
+    }
   }
 
   return (
@@ -270,19 +299,111 @@ export function DictionaryPage() {
         </div>
       </div>
 
+      {!isLoading && words.length > 0 && (
+        <div style={{ marginTop: "var(--space-6)" }}>
+          <input
+            type="text"
+            placeholder="Rechercher un mot (français, kana, kanji, romaji, note)…"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            style={{
+              width: "100%",
+              maxWidth: "480px",
+              padding: "10px 14px",
+              fontSize: "15px",
+              border: "2px solid var(--color-border)",
+              borderRadius: "var(--radius-md)",
+              outline: "none",
+              transition: "border-color 0.2s ease",
+            }}
+            onFocus={(event) => {
+              event.target.style.borderColor = "var(--color-primary)";
+            }}
+            onBlur={(event) => {
+              event.target.style.borderColor = "var(--color-border)";
+            }}
+          />
+        </div>
+      )}
+
       {isLoading ? <div className="muted">Chargement…</div> : null}
       {errorMessage ? <div className="formError">{errorMessage}</div> : null}
 
       <div style={{ marginTop: "var(--space-8)" }}>
-        {wordsByTag.map(({ tag, words: tagWords }) => {
-          const isCollapsed = collapsedTags[tag] ?? false;
+        {wordsByTag.map(({ tag, tagId, words: tagWords }) => {
+          const isCollapsed = isSearchActive ? false : (collapsedTags[tag] ?? false);
           return (
             <div key={tag} style={{ marginBottom: "var(--space-2)" }}>
-              <button className="sectionHeader" type="button" onClick={() => toggleTag(tag)}>
-                <span className="sectionHeader__chevron">{isCollapsed ? "▸" : "▾"}</span>
-                <span className="sectionHeader__title">{tag}</span>
-                <span className="sectionHeader__meta muted">{tagWords.length} mot(s)</span>
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                <button
+                  className="sectionHeader"
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  style={{ flex: 1 }}
+                >
+                  <span className="sectionHeader__chevron">{isCollapsed ? "▸" : "▾"}</span>
+                  <span className="sectionHeader__title">{tag}</span>
+                  <span className="sectionHeader__meta muted">{tagWords.length} mot(s)</span>
+                </button>
+                {tagId !== null && (
+                  <button
+                    type="button"
+                    title={`Télécharger MP3 — ${tag}`}
+                    disabled={downloadingTagId !== null}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDownloadAudio(tagId, tag);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "transparent",
+                      border: "none",
+                      cursor: downloadingTagId !== null ? "wait" : "pointer",
+                      opacity: downloadingTagId === tagId ? 0.5 : 0.7,
+                      padding: "6px",
+                      borderRadius: "var(--radius-md)",
+                      transition: "opacity 0.2s ease",
+                      color: "var(--color-text-soft)",
+                    }}
+                  >
+                    {downloadingTagId === tagId ? (
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        role="img"
+                        aria-label="Chargement"
+                      >
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                      </svg>
+                    ) : (
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        role="img"
+                        aria-label="Télécharger MP3"
+                      >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+              </div>
               {!isCollapsed &&
                 (viewMode === "cards" ? (
                   <div className="dictionaryGrid" style={{ marginTop: "var(--space-4)" }}>

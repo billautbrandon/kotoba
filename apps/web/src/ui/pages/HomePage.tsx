@@ -8,7 +8,23 @@ type SeriesRow = {
   tagName: string;
   wordsCount: number;
   totalScore: number;
+  lastReviewedAt: string | null;
 };
+
+function formatRelativeDate(isoDate: string): string {
+  const date = new Date(isoDate);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+  const diffDays = Math.floor(diffMs / 86_400_000);
+
+  if (diffMinutes < 1) return "À l'instant";
+  if (diffMinutes < 60) return `Il y a ${diffMinutes} min`;
+  if (diffHours < 24) return `Il y a ${diffHours}h`;
+  if (diffDays < 7) return `Il y a ${diffDays}j`;
+  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -96,6 +112,7 @@ export function HomePage() {
                 <th>Tag</th>
                 <th>Mots</th>
                 <th>Score (cumul)</th>
+                <th>Dernière session</th>
                 <th />
               </tr>
             </thead>
@@ -118,6 +135,9 @@ export function HomePage() {
                   <td style={{ fontWeight: 600 }}>{row.tagName}</td>
                   <td className="muted">{row.wordsCount}</td>
                   <td className="muted">{row.totalScore}</td>
+                  <td className="muted" style={{ fontSize: "13px" }}>
+                    {row.lastReviewedAt ? formatRelativeDate(row.lastReviewedAt) : "—"}
+                  </td>
                   <td className="muted" style={{ textAlign: "right" }}>
                     →
                   </td>

@@ -197,14 +197,26 @@ export async function fetchSrsWords(): Promise<SrsWords> {
 }
 
 export async function fetchSeries(): Promise<
-  Array<{ tagId: number; tagName: string; wordsCount: number; totalScore: number }>
+  Array<{
+    tagId: number;
+    tagName: string;
+    wordsCount: number;
+    totalScore: number;
+    lastReviewedAt: string | null;
+  }>
 > {
   const response = await fetch("/api/series", { credentials: "include" });
   if (!response.ok) {
     throw new Error("Failed to fetch series");
   }
   const payload = (await response.json()) as {
-    series: Array<{ tagId: number; tagName: string; wordsCount: number; totalScore: number }>;
+    series: Array<{
+      tagId: number;
+      tagName: string;
+      wordsCount: number;
+      totalScore: number;
+      lastReviewedAt: string | null;
+    }>;
   };
   return payload.series;
 }
@@ -414,6 +426,7 @@ export type PhraseConstraints = {
   polarity: "affirmative" | "negative";
   politeness: "casual" | "polite";
   count: number;
+  customContext?: string;
 };
 
 export type GeneratedPhrase = {
@@ -525,4 +538,21 @@ export async function downloadMissingKanjiSvgs(): Promise<{
     failed: number;
     missingCount: number;
   };
+}
+
+export async function downloadTagAudio(tagId: number, tagName: string): Promise<void> {
+  const response = await fetch(`/api/tags/${tagId}/audio`, { credentials: "include" });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la génération audio");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${tagName}.mp3`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
 }
