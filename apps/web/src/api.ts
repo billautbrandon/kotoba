@@ -427,6 +427,10 @@ export type PhraseConstraints = {
   politeness: "casual" | "polite";
   count: number;
   customContext?: string;
+  direction?: "fr-to-jp" | "jp-to-fr";
+  contentType?: "phrases" | "paragraph";
+  withKanji?: boolean;
+  paragraphLength?: "short" | "medium" | "long";
 };
 
 export type GeneratedPhrase = {
@@ -462,16 +466,68 @@ export async function evaluatePhrase(
   userAnswer: string,
   expectedAnswer: string,
   frenchSentence: string,
+  direction: "fr-to-jp" | "jp-to-fr" = "fr-to-jp",
 ): Promise<PhraseEvaluation> {
   const response = await fetch("/api/phrases/evaluate", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userAnswer, expectedAnswer, frenchSentence }),
+    body: JSON.stringify({ userAnswer, expectedAnswer, frenchSentence, direction }),
   });
   if (!response.ok) {
     const errorPayload = (await response.json()) as { error?: string };
     throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation");
+  }
+  return (await response.json()) as PhraseEvaluation;
+}
+
+// --- JLPT exercises ---
+
+export type JlptConstraints = {
+  exerciseType: "words" | "phrases" | "paragraph";
+  direction: "fr-to-jp" | "jp-to-fr";
+  withKanji: boolean;
+  count: number;
+  paragraphLength?: "short" | "medium" | "long";
+};
+
+export type JlptExercise = {
+  prompt: string;
+  answer: string;
+  answerAlt?: string;
+  explanation: string;
+};
+
+export async function generateJlptExercises(constraints: JlptConstraints): Promise<JlptExercise[]> {
+  const response = await fetch("/api/jlpt/generate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(constraints),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la génération JLPT");
+  }
+  const payload = (await response.json()) as { exercises: JlptExercise[] };
+  return payload.exercises;
+}
+
+export async function evaluateJlptAnswer(
+  userAnswer: string,
+  expectedAnswer: string,
+  prompt: string,
+  direction: "fr-to-jp" | "jp-to-fr",
+): Promise<PhraseEvaluation> {
+  const response = await fetch("/api/jlpt/evaluate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userAnswer, expectedAnswer, prompt, direction }),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation JLPT");
   }
   return (await response.json()) as PhraseEvaluation;
 }

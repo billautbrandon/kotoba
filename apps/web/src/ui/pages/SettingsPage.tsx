@@ -5,7 +5,18 @@ import type { User } from "../../api";
 import { changePassword, fetchMe, updateProfile, uploadAvatar } from "../../api";
 import { WordsPage } from "./WordsPage";
 
-type SettingsTab = "profile" | "password" | "vocabulary";
+type SettingsTab = "profile" | "password" | "vocabulary" | "appearance";
+
+function loadTheme(): "light" | "dark" {
+  const saved = window.localStorage.getItem("kotoba.theme");
+  if (saved === "dark") return "dark";
+  return "light";
+}
+
+function applyTheme(theme: "light" | "dark") {
+  document.documentElement.setAttribute("data-theme", theme);
+  window.localStorage.setItem("kotoba.theme", theme);
+}
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
@@ -39,11 +50,19 @@ export function SettingsPage() {
         >
           Vocabulaire
         </button>
+        <button
+          className={`settingsTabs__tab ${activeTab === "appearance" ? "settingsTabs__tab--active" : ""}`}
+          type="button"
+          onClick={() => setActiveTab("appearance")}
+        >
+          Apparence
+        </button>
       </div>
 
       {activeTab === "profile" && <ProfileSection />}
       {activeTab === "password" && <PasswordSection />}
       {activeTab === "vocabulary" && <WordsPage />}
+      {activeTab === "appearance" && <AppearanceSection />}
     </div>
   );
 }
@@ -295,5 +314,46 @@ function PasswordSection() {
         </button>
       </div>
     </form>
+  );
+}
+
+function AppearanceSection() {
+  const [theme, setTheme] = useState<"light" | "dark">(loadTheme);
+
+  function handleThemeChange(newTheme: "light" | "dark") {
+    setTheme(newTheme);
+    applyTheme(newTheme);
+  }
+
+  return (
+    <div className="settingsSection">
+      <div className="field">
+        <div className="field__label">Theme</div>
+        <div className="phrasesSetup__optionRow">
+          <label
+            className={`phrasesSetup__radioOption ${theme === "light" ? "phrasesSetup__radioOption--active" : ""}`}
+          >
+            <input
+              type="radio"
+              name="theme"
+              checked={theme === "light"}
+              onChange={() => handleThemeChange("light")}
+            />
+            Clair
+          </label>
+          <label
+            className={`phrasesSetup__radioOption ${theme === "dark" ? "phrasesSetup__radioOption--active" : ""}`}
+          >
+            <input
+              type="radio"
+              name="theme"
+              checked={theme === "dark"}
+              onChange={() => handleThemeChange("dark")}
+            />
+            Sombre
+          </label>
+        </div>
+      </div>
+    </div>
   );
 }

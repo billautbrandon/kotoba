@@ -18,7 +18,7 @@ import { QuotaBar } from "../components/QuotaBar";
 
 type TrainMode = "tag" | "srs";
 type SrsCategory = "hard" | "medium" | "easy";
-type SessionMode = "manual" | "timer" | "keyboard";
+type SessionMode = "manual" | "keyboard";
 type KeyboardDirection = "fr" | "jpn";
 type SessionRating = "success" | "partial" | "fail";
 type PromptMode = "french" | "romaji" | "kana" | "kanji";
@@ -26,7 +26,6 @@ type TrainPhase = "setup" | "training" | "correcting" | "finished";
 
 type PersistedSeriesSettings = {
   sessionMode: SessionMode;
-  timerSeconds: number;
   promptMode: PromptMode;
 };
 
@@ -51,9 +50,6 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [configSessionMode, setConfigSessionMode] = useState<SessionMode>(
     () => loadSettings().sessionMode,
   );
-  const [configTimerSeconds, setConfigTimerSeconds] = useState<number>(
-    () => loadSettings().timerSeconds,
-  );
   const [configPromptMode, setConfigPromptMode] = useState<PromptMode>(
     () => loadSettings().promptMode,
   );
@@ -61,7 +57,6 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [configKeyboardDirection, setConfigKeyboardDirection] = useState<KeyboardDirection>("fr");
 
   const sessionMode = useRef<SessionMode>("manual");
-  const timerSeconds = useRef<number>(5);
   const basePromptMode = useRef<PromptMode>("french");
   const shuffleMode = useRef<boolean>(false);
   const keyboardDirection = useRef<KeyboardDirection>("fr");
@@ -86,19 +81,16 @@ export function TrainPage(props: { mode: TrainMode }) {
   >({});
   const [correctingError, setCorrectingError] = useState<string | null>(null);
   const [geminiQuota, setGeminiQuota] = useState<GeminiQuota | null>(null);
-  const timerHandleRef = useRef<number | null>(null);
   const [sessionStartedAtMs, setSessionStartedAtMs] = useState<number | null>(null);
-  const [wordStartedAtMs, setWordStartedAtMs] = useState<number | null>(null);
   const [clockNowMs, setClockNowMs] = useState<number>(() => Date.now());
   const [randomPromptModes, setRandomPromptModes] = useState<PromptMode[]>([]);
 
   useEffect(() => {
     saveSettings({
       sessionMode: configSessionMode,
-      timerSeconds: configTimerSeconds,
       promptMode: configPromptMode,
     });
-  }, [configSessionMode, configTimerSeconds, configPromptMode]);
+  }, [configSessionMode, configPromptMode]);
 
   useEffect(() => {
     if (configSessionMode === "keyboard") {
@@ -117,7 +109,6 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   async function startSession() {
     sessionMode.current = configSessionMode;
-    timerSeconds.current = configTimerSeconds;
     basePromptMode.current = configPromptMode;
     shuffleMode.current = configShuffleMode;
     keyboardDirection.current = configKeyboardDirection;
@@ -132,9 +123,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     setKeyboardAnswers({});
     setKeyboardCorrections({});
     setCorrectingError(null);
-    const nowMs = Date.now();
-    setSessionStartedAtMs(nowMs);
-    setWordStartedAtMs(nowMs);
+    setSessionStartedAtMs(Date.now());
 
     try {
       let loadedWords: WordWithStats[];
@@ -192,7 +181,6 @@ export function TrainPage(props: { mode: TrainMode }) {
         setPhase("finished");
         return previousIndex;
       }
-      setWordStartedAtMs(Date.now());
       setIsRevealed(false);
       return nextIndex;
     });
@@ -200,7 +188,6 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   function restartSession() {
     if (!words) return;
-    const nowMs = Date.now();
     const reshuffled = shuffleWords(words);
     setWords(reshuffled);
     setRandomPromptModes(generateRandomPromptModes(reshuffled.length));
@@ -212,8 +199,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     setKeyboardAnswers({});
     setKeyboardCorrections({});
     setCorrectingError(null);
-    setSessionStartedAtMs(nowMs);
-    setWordStartedAtMs(nowMs);
+    setSessionStartedAtMs(Date.now());
   }
 
   const correctingTriggered = useRef(false);
@@ -226,33 +212,6 @@ export function TrainPage(props: { mode: TrainMode }) {
       correctingTriggered.current = false;
     }
   }, [phase]);
-
-  useEffect(() => {
-    if (timerHandleRef.current) {
-      window.clearTimeout(timerHandleRef.current);
-      timerHandleRef.current = null;
-    }
-
-    if (!words || words.length === 0) return;
-    if (phase !== "training") return;
-    if (sessionMode.current !== "timer") return;
-    if (!Number.isFinite(timerSeconds.current) || timerSeconds.current <= 0) return;
-    if (!wordStartedAtMs) return;
-    if (!currentWordId) return;
-
-    const elapsedInWordMs = Date.now() - wordStartedAtMs;
-    const remainingMs = Math.max(0, timerSeconds.current * 1000 - elapsedInWordMs);
-    timerHandleRef.current = window.setTimeout(() => {
-      advanceToNextWord();
-    }, remainingMs);
-
-    return () => {
-      if (timerHandleRef.current) {
-        window.clearTimeout(timerHandleRef.current);
-        timerHandleRef.current = null;
-      }
-    };
-  }, [advanceToNextWord, currentWordId, phase, wordStartedAtMs, words]);
 
   useEffect(() => {
     if (phase !== "training") return;
@@ -351,23 +310,6 @@ export function TrainPage(props: { mode: TrainMode }) {
     }
     return delta;
   }, [allSessionWordIds, ratingsByWordId]);
-
-  const timerUi = useMemo(() => {
-    if (!words || words.length === 0) return null;
-    if (sessionMode.current !== "timer") return null;
-    if (!sessionStartedAtMs || !wordStartedAtMs) return null;
-
-    const totalMs = words.length * timerSeconds.current * 1000;
-    const elapsedSessionMs = Math.min(totalMs, Math.max(0, clockNowMs - sessionStartedAtMs));
-    const elapsedWordMs = Math.min(
-      timerSeconds.current * 1000,
-      Math.max(0, clockNowMs - wordStartedAtMs),
-    );
-    const remainingWordMs = Math.max(0, timerSeconds.current * 1000 - elapsedWordMs);
-    const progressPercent = totalMs > 0 ? Math.round((elapsedSessionMs / totalMs) * 100) : 0;
-
-    return { totalMs, elapsedSessionMs, remainingWordMs, progressPercent };
-  }, [clockNowMs, sessionStartedAtMs, wordStartedAtMs, words]);
 
   const actualPromptMode = useMemo(() => {
     if (
@@ -551,19 +493,6 @@ export function TrainPage(props: { mode: TrainMode }) {
               </div>
             </label>
             <label
-              className={`trainSetup__option ${configSessionMode === "timer" ? "trainSetup__option--active" : ""}`}
-            >
-              <input
-                type="radio"
-                checked={configSessionMode === "timer"}
-                onChange={() => setConfigSessionMode("timer")}
-              />
-              <div>
-                <div className="trainSetup__optionLabel">Chrono</div>
-                <div className="trainSetup__optionHint">Passage automatique apres un delai</div>
-              </div>
-            </label>
-            <label
               className={`trainSetup__option ${configSessionMode === "keyboard" ? "trainSetup__option--active" : ""}`}
             >
               <input
@@ -579,24 +508,6 @@ export function TrainPage(props: { mode: TrainMode }) {
               </div>
             </label>
           </div>
-
-          {configSessionMode === "timer" && (
-            <div className="trainSetup__timerPicker">
-              <span className="trainSetup__optionHint">Duree par mot :</span>
-              <div className="trainSetup__timerButtons">
-                {[3, 5, 8].map((seconds) => (
-                  <button
-                    key={seconds}
-                    className={`button ${configTimerSeconds === seconds ? "button--primary" : ""}`}
-                    type="button"
-                    onClick={() => setConfigTimerSeconds(seconds)}
-                  >
-                    {seconds}s
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {configSessionMode === "keyboard" ? (
@@ -823,7 +734,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     );
   }
 
-  // --- TRAINING PHASE (normal: manual / timer) ---
+  // --- TRAINING PHASE (manual) ---
   if (phase === "training") {
     return (
       <div className="trainSession">
@@ -876,18 +787,6 @@ export function TrainPage(props: { mode: TrainMode }) {
 
         {currentWord && (
           <div className="trainSession__card">
-            {timerUi && (
-              <div className="trainSession__timerInfo">
-                <span className="muted">{formatMs(timerUi.remainingWordMs)} restant</span>
-                <div className="trainProgress">
-                  <div
-                    className="trainProgress__bar"
-                    style={{ width: `${timerUi.progressPercent}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
             <div className="trainSession__prompt">
               {promptText}
               {actualPromptMode === "kana" && <AudioButton text={promptText} size="large" />}
@@ -980,23 +879,10 @@ export function TrainPage(props: { mode: TrainMode }) {
         )}
 
         <div className="trainSession__footer">
-          Mode{" "}
-          <strong>
-            {sessionMode.current === "manual"
-              ? shuffleMode.current
-                ? "manuel (aleatoire)"
-                : "manuel"
-              : `chrono ${timerSeconds.current}s`}
-          </strong>{" "}
-          &mdash; Question: <strong>{promptLabel}</strong>
-          {sessionMode.current === "manual" && (
-            <>
-              {" "}
-              &mdash; Clique ou <strong>1</strong> &#x2713; <strong>2</strong> &#x26A0;{" "}
-              <strong>3</strong> &#x2717; pour noter, <strong>&rarr;</strong>/
-              <strong>Entree</strong> avancer, <strong>&larr;</strong> revenir
-            </>
-          )}
+          Mode <strong>{shuffleMode.current ? "manuel (aleatoire)" : "manuel"}</strong> &mdash;
+          Question: <strong>{promptLabel}</strong> &mdash; Clique ou <strong>1</strong> &#x2713;{" "}
+          <strong>2</strong> &#x26A0; <strong>3</strong> &#x2717; pour noter,{" "}
+          <strong>&rarr;</strong>/<strong>Entree</strong> avancer, <strong>&larr;</strong> revenir
         </div>
 
         {showKanjiViewer && selectedKanjiForViewer && (
@@ -1226,10 +1112,10 @@ function formatMs(milliseconds: number): string {
 function loadSettings(): PersistedSeriesSettings {
   try {
     const rawValue = window.localStorage.getItem(SETTINGS_KEY);
-    if (!rawValue) return { sessionMode: "manual", timerSeconds: 5, promptMode: "french" };
+    if (!rawValue) return { sessionMode: "manual", promptMode: "french" };
     const parsed = JSON.parse(rawValue) as Partial<PersistedSeriesSettings>;
     const sessionMode: SessionMode =
-      parsed.sessionMode === "timer" || parsed.sessionMode === "manual"
+      parsed.sessionMode === "manual" || parsed.sessionMode === "keyboard"
         ? parsed.sessionMode
         : "manual";
     const promptMode: PromptMode = (["french", "romaji", "kana", "kanji"] as PromptMode[]).includes(
@@ -1237,12 +1123,9 @@ function loadSettings(): PersistedSeriesSettings {
     )
       ? (parsed.promptMode as PromptMode)
       : "french";
-    const timerSeconds = Number.isFinite(Number(parsed.timerSeconds))
-      ? Number(parsed.timerSeconds)
-      : 5;
-    return { sessionMode, timerSeconds, promptMode };
+    return { sessionMode, promptMode };
   } catch {
-    return { sessionMode: "manual", timerSeconds: 5, promptMode: "french" };
+    return { sessionMode: "manual", promptMode: "french" };
   }
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   type GeminiQuota,
@@ -13,6 +13,7 @@ import {
   submitBulkReviews,
 } from "../../api";
 import { QuotaBar } from "../components/QuotaBar";
+import { VoiceButton } from "../components/VoiceButton";
 
 type PhrasesPhase = "setup" | "training" | "recap";
 
@@ -51,6 +52,10 @@ export function PhrasesPage() {
   const [politeness, setPoliteness] = useState<PhraseConstraints["politeness"]>("casual");
   const [phraseCount, setPhraseCount] = useState<number>(3);
   const [customContext, setCustomContext] = useState<string>("");
+  const [direction, setDirection] = useState<"fr-to-jp" | "jp-to-fr">("fr-to-jp");
+  const [contentType, setContentType] = useState<"phrases" | "paragraph">("phrases");
+  const [withKanji, setWithKanji] = useState(true);
+  const [paragraphLength, setParagraphLength] = useState<"short" | "medium" | "long">("medium");
 
   const [phrases, setPhrases] = useState<GeneratedPhrase[]>([]);
   const [currentPhraseIndex, setCurrentPhraseIndex] = useState(0);
@@ -119,8 +124,12 @@ export function PhrasesPage() {
         tense,
         polarity,
         politeness,
-        count: phraseCount,
+        count: contentType === "paragraph" ? 1 : phraseCount,
         customContext: customContext.trim() || undefined,
+        direction,
+        contentType,
+        withKanji: contentType === "paragraph" ? withKanji : undefined,
+        paragraphLength: contentType === "paragraph" ? paragraphLength : undefined,
       });
       setPhrases(generatedPhrases);
       setCurrentPhraseIndex(0);
@@ -146,10 +155,19 @@ export function PhrasesPage() {
     setErrorMessage(null);
 
     try {
+      const expectedForEval =
+        direction === "jp-to-fr"
+          ? currentPhrase.fr
+          : currentPhrase.jp_kanji || currentPhrase.jp_kana;
+      const promptForEval =
+        direction === "jp-to-fr"
+          ? currentPhrase.jp_kanji || currentPhrase.jp_kana
+          : currentPhrase.fr;
       const evaluation = await evaluatePhrase(
         userAnswer.trim(),
-        currentPhrase.jp_kanji || currentPhrase.jp_kana,
-        currentPhrase.fr,
+        expectedForEval,
+        promptForEval,
+        direction,
       );
       setCurrentEvaluation(evaluation);
       setHasCheckedCurrent(true);
@@ -279,6 +297,35 @@ export function PhrasesPage() {
     setReviewsSubmitted(false);
   }
 
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setUserAnswer((previous) => (previous ? `${previous} ${text}` : text));
+  }, []);
+
+  const handleCheckRef = useRef(handleCheck);
+  const handleNextPhraseRef = useRef(handleNextPhrase);
+  const handleRestartRef = useRef(handleRestart);
+  handleCheckRef.current = handleCheck;
+  handleNextPhraseRef.current = handleNextPhrase;
+  handleRestartRef.current = handleRestart;
+
+  useEffect(() => {
+    if (phase !== "training") return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.ctrlKey && event.key === "Enter" && !hasCheckedCurrent && userAnswer.trim()) {
+        event.preventDefault();
+        handleCheckRef.current();
+      } else if (event.ctrlKey && event.key === "ArrowRight" && hasCheckedCurrent) {
+        event.preventDefault();
+        handleNextPhraseRef.current();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        handleRestartRef.current();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [phase, hasCheckedCurrent, userAnswer]);
+
   // --- SETUP PHASE ---
   if (phase === "setup") {
     return (
@@ -292,6 +339,123 @@ export function PhrasesPage() {
         </div>
 
         {quota && <QuotaBar quota={quota} />}
+
+        {/* Direction */}
+        <div className="phrasesSetup__section">
+          <h2 className="phrasesSetup__sectionTitle">Direction</h2>
+          <div className="phrasesSetup__optionRow">
+            <label
+              className={`phrasesSetup__radioOption ${direction === "fr-to-jp" ? "phrasesSetup__radioOption--active" : ""}`}
+            >
+              <input
+                type="radio"
+                name="direction"
+                checked={direction === "fr-to-jp"}
+                onChange={() => setDirection("fr-to-jp")}
+              />
+              Français → Japonais
+            </label>
+            <label
+              className={`phrasesSetup__radioOption ${direction === "jp-to-fr" ? "phrasesSetup__radioOption--active" : ""}`}
+            >
+              <input
+                type="radio"
+                name="direction"
+                checked={direction === "jp-to-fr"}
+                onChange={() => setDirection("jp-to-fr")}
+              />
+              Japonais → Français
+            </label>
+          </div>
+        </div>
+
+        {/* Content type */}
+        <div className="phrasesSetup__section">
+          <h2 className="phrasesSetup__sectionTitle">Type de contenu</h2>
+          <div className="phrasesSetup__optionRow">
+            <label
+              className={`phrasesSetup__radioOption ${contentType === "phrases" ? "phrasesSetup__radioOption--active" : ""}`}
+            >
+              <input
+                type="radio"
+                name="contentType"
+                checked={contentType === "phrases"}
+                onChange={() => setContentType("phrases")}
+              />
+              Phrases
+            </label>
+            <label
+              className={`phrasesSetup__radioOption ${contentType === "paragraph" ? "phrasesSetup__radioOption--active" : ""}`}
+            >
+              <input
+                type="radio"
+                name="contentType"
+                checked={contentType === "paragraph"}
+                onChange={() => setContentType("paragraph")}
+              />
+              Paragraphe
+            </label>
+          </div>
+        </div>
+
+        {/* Paragraph options */}
+        {contentType === "paragraph" && (
+          <>
+            <div className="phrasesSetup__section">
+              <h2 className="phrasesSetup__sectionTitle">Kanji</h2>
+              <div className="phrasesSetup__optionRow">
+                <label
+                  className={`phrasesSetup__radioOption ${withKanji ? "phrasesSetup__radioOption--active" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="withKanji"
+                    checked={withKanji}
+                    onChange={() => setWithKanji(true)}
+                  />
+                  Avec kanji
+                </label>
+                <label
+                  className={`phrasesSetup__radioOption ${!withKanji ? "phrasesSetup__radioOption--active" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="withKanji"
+                    checked={!withKanji}
+                    onChange={() => setWithKanji(false)}
+                  />
+                  Sans kanji (espaces après particules)
+                </label>
+              </div>
+            </div>
+            <div className="phrasesSetup__section">
+              <h2 className="phrasesSetup__sectionTitle">Longueur du paragraphe</h2>
+              <div className="phrasesSetup__optionRow">
+                {(["short", "medium", "long"] as const).map((length) => {
+                  const lengthLabels = {
+                    short: "Court (2-3 phrases)",
+                    medium: "Moyen (4-5 phrases)",
+                    long: "Long (6-8 phrases)",
+                  };
+                  return (
+                    <label
+                      key={length}
+                      className={`phrasesSetup__radioOption ${paragraphLength === length ? "phrasesSetup__radioOption--active" : ""}`}
+                    >
+                      <input
+                        type="radio"
+                        name="paragraphLength"
+                        checked={paragraphLength === length}
+                        onChange={() => setParagraphLength(length)}
+                      />
+                      {lengthLabels[length]}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Tag selection */}
         <div className="phrasesSetup__section">
@@ -412,22 +576,24 @@ export function PhrasesPage() {
           </div>
         </div>
 
-        {/* Count */}
-        <div className="phrasesSetup__section">
-          <h2 className="phrasesSetup__sectionTitle">Nombre de phrases</h2>
-          <div className="phrasesSetup__optionRow">
-            {[1, 3, 5, 8, 10].map((count) => (
-              <button
-                key={count}
-                type="button"
-                className={`button ${phraseCount === count ? "button--primary" : ""}`}
-                onClick={() => setPhraseCount(count)}
-              >
-                {count}
-              </button>
-            ))}
+        {/* Count (hidden in paragraph mode) */}
+        {contentType === "phrases" && (
+          <div className="phrasesSetup__section">
+            <h2 className="phrasesSetup__sectionTitle">Nombre de phrases</h2>
+            <div className="phrasesSetup__optionRow">
+              {[1, 3, 5, 8, 10].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  className={`button ${phraseCount === count ? "button--primary" : ""}`}
+                  onClick={() => setPhraseCount(count)}
+                >
+                  {count}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Custom context */}
         <div className="phrasesSetup__section">
@@ -509,23 +675,41 @@ export function PhrasesPage() {
         </div>
 
         <div className="phrasesTraining__card">
-          <div className="phrasesTraining__prompt">{currentPhrase.fr}</div>
+          <div className="phrasesTraining__prompt">
+            {direction === "jp-to-fr"
+              ? currentPhrase.jp_kanji || currentPhrase.jp_kana
+              : currentPhrase.fr}
+          </div>
+          {direction === "jp-to-fr" && currentPhrase.jp_kana && currentPhrase.jp_kanji && (
+            <div className="phrasesTraining__promptKana">{currentPhrase.jp_kana}</div>
+          )}
 
           <div className="phrasesTraining__inputArea">
-            <textarea
-              className="phrasesTraining__textarea"
-              placeholder="Écris ta réponse en japonais..."
-              value={userAnswer}
-              onChange={(event) => setUserAnswer(event.target.value)}
-              disabled={hasCheckedCurrent}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey && !hasCheckedCurrent) {
-                  event.preventDefault();
-                  handleCheck();
+            <div className="phrasesTraining__inputRow">
+              <textarea
+                className="phrasesTraining__textarea"
+                placeholder={
+                  direction === "jp-to-fr"
+                    ? "Écris ta réponse en français..."
+                    : "Écris ta réponse en japonais..."
                 }
-              }}
-              rows={2}
-            />
+                value={userAnswer}
+                onChange={(event) => setUserAnswer(event.target.value)}
+                disabled={hasCheckedCurrent}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey && !hasCheckedCurrent) {
+                    event.preventDefault();
+                    handleCheck();
+                  }
+                }}
+                rows={contentType === "paragraph" ? 5 : 2}
+              />
+              <VoiceButton
+                onTranscript={handleVoiceTranscript}
+                lang={direction === "jp-to-fr" ? "fr-FR" : "ja-JP"}
+                disabled={hasCheckedCurrent}
+              />
+            </div>
           </div>
 
           {!hasCheckedCurrent && (
@@ -537,6 +721,7 @@ export function PhrasesPage() {
                 disabled={!userAnswer.trim() || isEvaluating}
               >
                 {isEvaluating ? "Vérification..." : "Vérifier"}
+                <kbd className="kbdHint">Ctrl+↵</kbd>
               </button>
               <button className="button" type="button" onClick={handleSkipPhrase}>
                 Passer
@@ -560,8 +745,14 @@ export function PhrasesPage() {
 
               <div className="phrasesTraining__expectedAnswer">
                 <div className="phrasesTraining__expectedLabel">Réponse attendue</div>
-                <div className="phrasesTraining__expectedKanji">{currentPhrase.jp_kanji}</div>
-                <div className="phrasesTraining__expectedKana">{currentPhrase.jp_kana}</div>
+                {direction === "jp-to-fr" ? (
+                  <div className="phrasesTraining__expectedKanji">{currentPhrase.fr}</div>
+                ) : (
+                  <>
+                    <div className="phrasesTraining__expectedKanji">{currentPhrase.jp_kanji}</div>
+                    <div className="phrasesTraining__expectedKana">{currentPhrase.jp_kana}</div>
+                  </>
+                )}
               </div>
 
               {currentEvaluation.feedback && (
@@ -584,6 +775,7 @@ export function PhrasesPage() {
                 {currentPhraseIndex + 1 >= phrases.length
                   ? "Voir le récapitulatif"
                   : "Phrase suivante →"}
+                <kbd className="kbdHint">Ctrl+→</kbd>
               </button>
             </div>
           )}

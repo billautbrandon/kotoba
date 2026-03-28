@@ -47,6 +47,18 @@ function saveViewMode(mode: ViewMode) {
   window.localStorage.setItem("kotoba.dictionary.viewMode", mode);
 }
 
+function renderWithFurigana(kanji: string, kana: string | null | undefined): React.ReactNode {
+  if (!kana || !kanji || kanji === kana) return kanji;
+  return (
+    <ruby>
+      {kanji}
+      <rp>(</rp>
+      <rt>{kana}</rt>
+      <rp>)</rp>
+    </ruby>
+  );
+}
+
 export function DictionaryPage() {
   const [words, setWords] = useState<WordWithTags[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -59,6 +71,7 @@ export function DictionaryPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode());
   const [searchQuery, setSearchQuery] = useState("");
   const [downloadingTagId, setDownloadingTagId] = useState<number | null>(null);
+  const [showFurigana, setShowFurigana] = useState(false);
 
   useEffect(() => {
     saveDictionaryLanguage(frontLanguage);
@@ -278,6 +291,19 @@ export function DictionaryPage() {
             </div>
           </div>
 
+          {words.length > 0 && (
+            <div className="field field--inline">
+              <button
+                className={`button ${showFurigana ? "button--primary" : ""}`}
+                type="button"
+                onClick={() => setShowFurigana((previous) => !previous)}
+                style={{ whiteSpace: "nowrap" }}
+              >
+                {showFurigana ? "Masquer furigana" : "Furigana"}
+              </button>
+            </div>
+          )}
+
           {viewMode === "cards" && words.length > 0 && (
             <div className="field field--inline">
               <button
@@ -300,29 +326,61 @@ export function DictionaryPage() {
       </div>
 
       {!isLoading && words.length > 0 && (
-        <div style={{ marginTop: "var(--space-6)" }}>
+        <div className="dictionarySearch">
+          <svg
+            className="dictionarySearch__icon"
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            role="img"
+            aria-label="Rechercher"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
           <input
+            className="dictionarySearch__input"
             type="text"
             placeholder="Rechercher un mot (français, kana, kanji, romaji, note)…"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            style={{
-              width: "100%",
-              maxWidth: "480px",
-              padding: "10px 14px",
-              fontSize: "15px",
-              border: "2px solid var(--color-border)",
-              borderRadius: "var(--radius-md)",
-              outline: "none",
-              transition: "border-color 0.2s ease",
-            }}
-            onFocus={(event) => {
-              event.target.style.borderColor = "var(--color-primary)";
-            }}
-            onBlur={(event) => {
-              event.target.style.borderColor = "var(--color-border)";
-            }}
           />
+          {searchQuery && (
+            <button
+              type="button"
+              className="dictionarySearch__clear"
+              onClick={() => setSearchQuery("")}
+              aria-label="Effacer la recherche"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                role="img"
+                aria-label="Effacer"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+          {isSearchActive && (
+            <span className="dictionarySearch__count">
+              {filteredWords.length} résultat{filteredWords.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
       )}
 
@@ -444,10 +502,15 @@ export function DictionaryPage() {
                                   gap: "6px",
                                 }}
                               >
-                                {safeFrontValue}
-                                {frontLanguage === "kana" && (
-                                  <span onClick={(e) => e.stopPropagation()}>
-                                    <AudioButton text={safeFrontValue} size="small" />
+                                {showFurigana && frontLanguage === "kanji"
+                                  ? renderWithFurigana(safeFrontValue, word.kana)
+                                  : safeFrontValue}
+                                {word.kana && (
+                                  <span
+                                    onClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => e.stopPropagation()}
+                                  >
+                                    <AudioButton text={word.kana} size="small" />
                                   </span>
                                 )}
                               </div>
@@ -458,6 +521,10 @@ export function DictionaryPage() {
                               <div className="dictionaryCard__backGrid">
                                 {otherLanguages.map((language) => {
                                   const value = getWordField(word, language).trim() || "—";
+                                  const displayValue =
+                                    showFurigana && language === "kanji"
+                                      ? renderWithFurigana(value, word.kana)
+                                      : value;
                                   return (
                                     <div key={language} className="dictionaryCard__row">
                                       <div className="dictionaryCard__rowLabel">
@@ -471,9 +538,12 @@ export function DictionaryPage() {
                                           gap: "4px",
                                         }}
                                       >
-                                        {value}
+                                        {displayValue}
                                         {language === "kana" && (
-                                          <span onClick={(e) => e.stopPropagation()}>
+                                          <span
+                                            onClick={(e) => e.stopPropagation()}
+                                            onKeyDown={(e) => e.stopPropagation()}
+                                          >
                                             <AudioButton text={value} size="small" />
                                           </span>
                                         )}
@@ -520,16 +590,25 @@ export function DictionaryPage() {
                                     gap: "6px",
                                   }}
                                 >
-                                  {safeFrontValue}
-                                  {frontLanguage === "kana" && (
-                                    <span onClick={(e) => e.stopPropagation()}>
-                                      <AudioButton text={safeFrontValue} size="small" />
+                                  {showFurigana && frontLanguage === "kanji"
+                                    ? renderWithFurigana(safeFrontValue, word.kana)
+                                    : safeFrontValue}
+                                  {word.kana && (
+                                    <span
+                                      onClick={(e) => e.stopPropagation()}
+                                      onKeyDown={(e) => e.stopPropagation()}
+                                    >
+                                      <AudioButton text={word.kana} size="small" />
                                     </span>
                                   )}
                                 </span>
                               </td>
                               {otherLanguages.map((lang) => {
                                 const value = getWordField(word, lang).trim() || "—";
+                                const tableDisplayValue =
+                                  showFurigana && lang === "kanji"
+                                    ? renderWithFurigana(value, word.kana)
+                                    : value;
                                 return (
                                   <td key={lang} className="muted" style={{ fontSize: "16px" }}>
                                     <span
@@ -539,9 +618,12 @@ export function DictionaryPage() {
                                         gap: "4px",
                                       }}
                                     >
-                                      {value}
+                                      {tableDisplayValue}
                                       {lang === "kana" && (
-                                        <span onClick={(e) => e.stopPropagation()}>
+                                        <span
+                                          onClick={(e) => e.stopPropagation()}
+                                          onKeyDown={(e) => e.stopPropagation()}
+                                        >
                                           <AudioButton text={value} size="small" />
                                         </span>
                                       )}

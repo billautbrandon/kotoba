@@ -57,3 +57,33 @@
   --font-serif: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "YuMincho",
     "Noto Serif CJK JP", "MS PMincho", serif;
 }
+
+[data-theme="dark"] {
+  --color-bg: #1a1a1e;
+  --color-panel: #242428;
+  --color-panel-subtle: #2a2a30;
+
+  --color-text: #e8e4de;
+  --color-text-soft: #ccc8c0;
+  --color-muted: #8a8680;
+  --color-muted-light: #6a665f;
+
+  --color-primary: #e05a3a;
+  --color-primary-light: #eb6c4e;
+  --color-primary-dark: #c73e1d;
+
+  --color-secondary: #3a7080;
+  --color-secondary-light: #448a9a;
+
+  --color-accent: #d4b86a;
+  --color-accent-light: #e0c878;
+
+  --color-danger: #e05a3a;
+  --color-warning: #d4b86a;
+  --color-success: #3a7080;
+
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-border-strong: rgba(255, 255, 255, 0.2);
+  --color-shadow: rgba(0, 0, 0, 0.25);
+  --color-shadow-strong: rgba(0, 0, 0, 0.4);
+}

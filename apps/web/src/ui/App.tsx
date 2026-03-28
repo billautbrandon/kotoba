@@ -8,6 +8,7 @@ import { AdminPage } from "./pages/AdminPage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { HomePage } from "./pages/HomePage";
+import { JlptPage } from "./pages/JlptPage";
 import { KanjiLearningPage } from "./pages/KanjiLearningPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PhrasesPage } from "./pages/PhrasesPage";
@@ -34,6 +35,13 @@ export function App() {
   const [hasSeries, setHasSeries] = useState<boolean>(false);
   const [isDownloadingKanji, setIsDownloadingKanji] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem("kotoba.theme");
+    if (savedTheme === "dark") {
+      document.documentElement.setAttribute("data-theme", "dark");
+    }
+  }, []);
 
   const isSeriesPage =
     location.pathname.startsWith("/series/") ||
@@ -132,6 +140,14 @@ export function App() {
               to="/phrases"
             >
               Phrases
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
+              }
+              to="/jlpt"
+            >
+              JLPT
             </NavLink>
             <NavLink
               className={({ isActive }) =>
@@ -269,6 +285,7 @@ export function App() {
           <Route path="/kanji" element={requireAuth(<KanjiLearningPage />)} />
           <Route path="/srs" element={requireAuth(<SrsPage />)} />
           <Route path="/phrases" element={requireAuth(<PhrasesPage />)} />
+          <Route path="/jlpt" element={requireAuth(<JlptPage />)} />
           <Route path="/words" element={requireAuth(<WordsPage />)} />
           <Route path="/profile" element={<Navigate to="/settings" replace />} />
           <Route path="/admin" element={requireAuth(<AdminPage />)} />
