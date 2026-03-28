@@ -72,6 +72,7 @@ export function DictionaryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [downloadingTagId, setDownloadingTagId] = useState<number | null>(null);
   const [showFurigana, setShowFurigana] = useState(false);
+  const [expandedWord, setExpandedWord] = useState<WordWithTags | null>(null);
 
   useEffect(() => {
     saveDictionaryLanguage(frontLanguage);
@@ -235,7 +236,7 @@ export function DictionaryPage() {
                 border: "2px solid var(--color-border)",
                 borderRadius: "var(--radius-md)",
                 padding: "4px",
-                background: "#fff",
+                background: "var(--color-panel)",
               }}
             >
               <button
@@ -475,7 +476,7 @@ export function DictionaryPage() {
                         <button
                           key={word.id}
                           type="button"
-                          className="dictionaryCard"
+                          className={`dictionaryCard ${isFlipped ? "dictionaryCard--flipped" : ""}`}
                           onClick={() => {
                             setFlippedWordIds((previous) => {
                               const next = new Set(previous);
@@ -488,8 +489,35 @@ export function DictionaryPage() {
                             });
                           }}
                         >
-                          {!isFlipped ? (
+                          <div className="dictionaryCard__inner">
                             <div className="dictionaryCard__face">
+                              <span
+                                className="dictionaryCard__expand"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedWord(word);
+                                }}
+                                onKeyDown={(e) => e.stopPropagation()}
+                                title="Voir en grand"
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  role="img"
+                                  aria-label="Agrandir"
+                                >
+                                  <polyline points="15 3 21 3 21 9" />
+                                  <polyline points="9 21 3 21 3 15" />
+                                  <line x1="21" y1="3" x2="14" y2="10" />
+                                  <line x1="3" y1="21" x2="10" y2="14" />
+                                </svg>
+                              </span>
                               <div className="dictionaryCard__lang">
                                 {dictionaryLanguageLabels[frontLanguage]}
                               </div>
@@ -516,8 +544,34 @@ export function DictionaryPage() {
                               </div>
                               <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
                             </div>
-                          ) : (
                             <div className="dictionaryCard__face dictionaryCard__face--back">
+                              <span
+                                className="dictionaryCard__expand"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedWord(word);
+                                }}
+                                onKeyDown={(e) => e.stopPropagation()}
+                                title="Voir en grand"
+                              >
+                                <svg
+                                  width="14"
+                                  height="14"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  role="img"
+                                  aria-label="Agrandir"
+                                >
+                                  <polyline points="15 3 21 3 21 9" />
+                                  <polyline points="9 21 3 21 3 15" />
+                                  <line x1="21" y1="3" x2="14" y2="10" />
+                                  <line x1="3" y1="21" x2="10" y2="14" />
+                                </svg>
+                              </span>
                               <div className="dictionaryCard__backGrid">
                                 {otherLanguages.map((language) => {
                                   const value = getWordField(word, language).trim() || "—";
@@ -557,7 +611,7 @@ export function DictionaryPage() {
                               ) : null}
                               <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
                             </div>
-                          )}
+                          </div>
                         </button>
                       );
                     })}
@@ -581,7 +635,13 @@ export function DictionaryPage() {
                         const tagsText = word.tags.map((t) => t.name).join(", ");
                         return (
                           <React.Fragment key={word.id}>
-                            <tr>
+                            <tr
+                              style={{ cursor: "pointer" }}
+                              onClick={() => setExpandedWord(word)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") setExpandedWord(word);
+                              }}
+                            >
                               <td style={{ fontWeight: 600, fontSize: "18px" }}>
                                 <span
                                   style={{
@@ -673,6 +733,111 @@ export function DictionaryPage() {
             </div>
           );
         })}
+      </div>
+
+      {expandedWord && (
+        <WordDetailModal
+          word={expandedWord}
+          onClose={() => setExpandedWord(null)}
+          renderWithFurigana={renderWithFurigana}
+        />
+      )}
+    </div>
+  );
+}
+
+function WordDetailModal({
+  word,
+  onClose,
+  renderWithFurigana,
+}: {
+  word: WordWithTags;
+  onClose: () => void;
+  renderWithFurigana: (kanji: string, kana: string | null) => React.ReactNode;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const kanjiValue = word.kanji ?? "";
+  const kanaValue = word.kana ?? "";
+  const romajiValue = word.romaji ?? "";
+  const frenchValue = word.french;
+  const tagsText = word.tags.map((tag) => tag.name).join(" · ");
+
+  return (
+    <div
+      className="wordDetailOverlay"
+      onClick={onClose}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
+      <div
+        className="wordDetailModal"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="wordDetailModal__close"
+          onClick={onClose}
+          aria-label="Fermer"
+        >
+          ✕
+        </button>
+
+        {kanjiValue && (
+          <div className="wordDetailModal__section">
+            <div className="wordDetailModal__label">Kanji</div>
+            <div className="wordDetailModal__kanji">
+              {renderWithFurigana(kanjiValue, kanaValue)}
+            </div>
+          </div>
+        )}
+
+        {kanaValue && (
+          <div className="wordDetailModal__section">
+            <div className="wordDetailModal__label">Kana</div>
+            <div className="wordDetailModal__kana">
+              {kanaValue}
+              <AudioButton text={kanaValue} />
+            </div>
+          </div>
+        )}
+
+        {romajiValue && (
+          <div className="wordDetailModal__section">
+            <div className="wordDetailModal__label">Rōmaji</div>
+            <div className="wordDetailModal__romaji">{romajiValue}</div>
+          </div>
+        )}
+
+        <div className="wordDetailModal__section">
+          <div className="wordDetailModal__label">Français</div>
+          <div className="wordDetailModal__french">{frenchValue}</div>
+        </div>
+
+        {word.note && (
+          <div className="wordDetailModal__section">
+            <div className="wordDetailModal__label">Note</div>
+            <div className="wordDetailModal__note">{word.note}</div>
+          </div>
+        )}
+
+        {tagsText && (
+          <div className="wordDetailModal__tags">
+            {word.tags.map((tag) => (
+              <span key={tag.id} className="wordDetailModal__tag">
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

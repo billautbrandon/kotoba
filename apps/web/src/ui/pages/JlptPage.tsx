@@ -5,8 +5,11 @@ import {
   type JlptConstraints,
   type JlptExercise,
   type PhraseEvaluation,
+  createTag,
+  createWord,
   evaluateJlptAnswer,
   fetchGeminiQuota,
+  fetchTags,
   generateJlptExercises,
 } from "../../api";
 import { QuotaBar } from "../components/QuotaBar";
@@ -40,6 +43,8 @@ export function JlptPage() {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [quota, setQuota] = useState<GeminiQuota | null>(null);
+  const [addedToVocab, setAddedToVocab] = useState<Set<number>>(new Set());
+  const [isAddingAll, setIsAddingAll] = useState(false);
 
   function refreshQuota() {
     fetchGeminiQuota()
@@ -527,6 +532,7 @@ export function JlptPage() {
                 <th>Ta réponse</th>
                 <th>Réponse attendue</th>
                 <th>Résultat</th>
+                <th>Vocab</th>
               </tr>
             </thead>
             <tbody>
@@ -545,6 +551,37 @@ export function JlptPage() {
                       <span style={{ color: "var(--color-danger)" }}>✗</span>
                     )}
                   </td>
+                  <td>
+                    {addedToVocab.has(index) ? (
+                      <span className="muted">✓</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="button"
+                        style={{ padding: "2px 8px", fontSize: 12 }}
+                        onClick={async () => {
+                          try {
+                            const tags = await fetchTags();
+                            let jlptTag = tags.find((tag) => tag.name === "JLPT N5");
+                            if (!jlptTag) jlptTag = await createTag("JLPT N5");
+                            const isJpToFr = direction === "jp-to-fr";
+                            const japanese = isJpToFr
+                              ? result.exercise.prompt
+                              : result.exercise.answer;
+                            const french = isJpToFr
+                              ? result.exercise.answer
+                              : result.exercise.prompt;
+                            await createWord({ french, kana: japanese, tagIds: [jlptTag.id] });
+                            setAddedToVocab((previous) => new Set(previous).add(index));
+                          } catch {
+                            setErrorMessage("Erreur lors de l'ajout");
+                          }
+                        }}
+                      >
+                        + Ajouter
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -555,6 +592,46 @@ export function JlptPage() {
       {errorMessage && <div className="formError">{errorMessage}</div>}
 
       <div className="phrasesRecap__actions">
+        <button
+          className="button"
+          type="button"
+          disabled={isAddingAll || addedToVocab.size === results.length}
+          onClick={async () => {
+            setIsAddingAll(true);
+            try {
+              const tags = await fetchTags();
+              let jlptTag = tags.find((tag) => tag.name === "JLPT N5");
+              if (!jlptTag) {
+                jlptTag = await createTag("JLPT N5");
+              }
+              const newAdded = new Set(addedToVocab);
+              for (let i = 0; i < results.length; i++) {
+                if (newAdded.has(i)) continue;
+                const result = results[i];
+                const isJpToFr = direction === "jp-to-fr";
+                const japanese = isJpToFr ? result.exercise.prompt : result.exercise.answer;
+                const french = isJpToFr ? result.exercise.answer : result.exercise.prompt;
+                await createWord({
+                  french,
+                  kana: japanese,
+                  tagIds: [jlptTag.id],
+                });
+                newAdded.add(i);
+              }
+              setAddedToVocab(newAdded);
+            } catch {
+              setErrorMessage("Erreur lors de l'ajout au vocabulaire");
+            } finally {
+              setIsAddingAll(false);
+            }
+          }}
+        >
+          {addedToVocab.size === results.length
+            ? "Tous ajoutés ✓"
+            : isAddingAll
+              ? "Ajout en cours…"
+              : "Ajouter tout au vocabulaire"}
+        </button>
         <button className="button button--primary" type="button" onClick={handleRestart}>
           Recommencer
         </button>

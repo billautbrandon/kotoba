@@ -32,6 +32,10 @@ export type WordStatsRow = {
   score: number;
   last_reviewed_at: string | null;
   consecutive_success_count: number;
+  srs_interval: number;
+  srs_ease_factor: number;
+  srs_next_review_at: string | null;
+  srs_step: number;
 };
 
 export type WordWithStatsRow = WordRow & {
@@ -41,6 +45,10 @@ export type WordWithStatsRow = WordRow & {
   score: number;
   last_reviewed_at: string | null;
   consecutive_success_count: number;
+  srs_interval: number;
+  srs_ease_factor: number;
+  srs_next_review_at: string | null;
+  srs_step: number;
 };
 
 export type TagRow = {
@@ -118,10 +126,25 @@ function ensureSchema(database: Database.Database) {
   ensureColumnExists(database, "words", "user_id", "INTEGER");
   ensureColumnExists(database, "tags", "user_id", "INTEGER");
   ensureColumnExists(database, "word_stats", "consecutive_success_count", "INTEGER DEFAULT 0");
+  ensureColumnExists(database, "word_stats", "srs_interval", "INTEGER DEFAULT 0");
+  ensureColumnExists(database, "word_stats", "srs_ease_factor", "REAL DEFAULT 2.5");
+  ensureColumnExists(database, "word_stats", "srs_next_review_at", "TEXT");
+  ensureColumnExists(database, "word_stats", "srs_step", "INTEGER DEFAULT 0");
   ensureColumnExists(database, "users", "email", "TEXT");
   ensureColumnExists(database, "users", "avatar_url", "TEXT");
   ensureColumnExists(database, "users", "display_name", "TEXT");
   ensureColumnExists(database, "users", "is_admin", "INTEGER DEFAULT 0");
+  ensureColumnExists(database, "users", "daily_goal", "INTEGER DEFAULT 20");
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS daily_activity (
+      user_id INTEGER NOT NULL,
+      activity_date TEXT NOT NULL,
+      reviews_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, activity_date),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
 
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_words_user_id ON words(user_id);
@@ -283,6 +306,48 @@ export function computeScoreDelta(reviewResult: ReviewResult): number {
   return -5;
 }
 
+function computeSrsSchedule(
+  currentStep: number,
+  currentInterval: number,
+  currentEaseFactor: number,
+  reviewResult: ReviewResult,
+): { srs_step: number; srs_interval: number; srs_ease_factor: number; srs_next_review_at: string } {
+  let step = currentStep;
+  let interval = currentInterval;
+  let easeFactor = currentEaseFactor || 2.5;
+
+  if (reviewResult === "success") {
+    step += 1;
+    if (step === 1) {
+      interval = 1;
+    } else if (step === 2) {
+      interval = 3;
+    } else {
+      interval = Math.round(interval * easeFactor);
+    }
+    easeFactor = Math.max(1.3, easeFactor + 0.1);
+  } else if (reviewResult === "partial") {
+    easeFactor = Math.max(1.3, easeFactor - 0.15);
+    interval = Math.max(1, Math.round(interval * 0.5));
+    step = Math.max(1, step);
+  } else {
+    easeFactor = Math.max(1.3, easeFactor - 0.2);
+    interval = 1;
+    step = 0;
+  }
+
+  const nextReviewDate = new Date();
+  nextReviewDate.setDate(nextReviewDate.getDate() + interval);
+  const srsNextReviewAt = nextReviewDate.toISOString();
+
+  return {
+    srs_step: step,
+    srs_interval: interval,
+    srs_ease_factor: easeFactor,
+    srs_next_review_at: srsNextReviewAt,
+  };
+}
+
 export function applyReviewToStats(
   existingStats: WordStatsRow,
   reviewResult: ReviewResult,
@@ -290,6 +355,13 @@ export function applyReviewToStats(
   const scoreDelta = computeScoreDelta(reviewResult);
   const nowIso = new Date().toISOString();
   const consecutiveSuccessCount = existingStats.consecutive_success_count ?? 0;
+
+  const srsResult = computeSrsSchedule(
+    existingStats.srs_step ?? 0,
+    existingStats.srs_interval ?? 0,
+    existingStats.srs_ease_factor ?? 2.5,
+    reviewResult,
+  );
 
   return {
     ...existingStats,
@@ -299,5 +371,6 @@ export function applyReviewToStats(
     score: existingStats.score + scoreDelta,
     last_reviewed_at: nowIso,
     consecutive_success_count: reviewResult === "success" ? consecutiveSuccessCount + 1 : 0,
+    ...srsResult,
   };
 }

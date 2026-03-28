@@ -276,7 +276,9 @@ export function WordsPage() {
           ? (parsed as { words: unknown }).words
           : null;
       if (!Array.isArray(wordsToImport)) {
-        setErrorMessage("Le fichier JSON doit contenir un tableau de mots ou un objet avec une propriété 'words'.");
+        setErrorMessage(
+          "Le fichier JSON doit contenir un tableau de mots ou un objet avec une propriété 'words'.",
+        );
         return;
       }
       const result = await importWordsFromJson(wordsToImport);
@@ -286,7 +288,9 @@ export function WordsPage() {
       );
       setJsonImportText("");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erreur lors de la lecture du fichier");
+      setErrorMessage(
+        error instanceof Error ? error.message : "Erreur lors de la lecture du fichier",
+      );
     }
   }
 
@@ -405,7 +409,7 @@ export function WordsPage() {
                         padding: "6px 12px 6px 14px",
                         borderRadius: "var(--radius-md)",
                         border: `2px solid ${isSelected ? "var(--color-primary)" : "var(--color-border)"}`,
-                        background: isSelected ? "rgba(199, 62, 29, 0.1)" : "#fff",
+                        background: isSelected ? "rgba(199, 62, 29, 0.1)" : "var(--color-panel)",
                       }}
                     >
                       <label
@@ -565,9 +569,19 @@ export function WordsPage() {
         </div>
         <div
           className="row"
-          style={{ marginTop: "var(--space-4)", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}
+          style={{
+            marginTop: "var(--space-4)",
+            gap: "var(--space-3)",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
         >
-          <button className="button" type="button" onClick={() => void handleImportJson()} disabled={!jsonImportText.trim()}>
+          <button
+            className="button"
+            type="button"
+            onClick={() => void handleImportJson()}
+            disabled={!jsonImportText.trim()}
+          >
             Importer depuis le texte
           </button>
           <button
@@ -702,7 +716,9 @@ function WordsGroupedByTag(props: {
                       <tr key={word.id}>
                         <td style={{ fontWeight: 600 }}>{word.french}</td>
                         <td className="muted">
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                          <span
+                            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          >
                             {word.kanji ?? word.kana ?? "—"}
                             {word.kana && <AudioButton text={word.kana} size="small" />}
                           </span>

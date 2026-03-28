@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import type { SrsWords, WordWithStats } from "../../api";
-import { fetchSrsWords } from "../../api";
+import type { SrsSummary, SrsWords, WordWithStats } from "../../api";
+import { fetchSrsSummary, fetchSrsWords } from "../../api";
 import { AudioButton } from "../components/AudioButton";
 
 type SrsCategory = "hard" | "medium" | "easy" | "mastered";
@@ -24,6 +24,7 @@ const categoryDescriptions: Record<SrsCategory, string> = {
 export function SrsPage() {
   const navigate = useNavigate();
   const [srsWords, setSrsWords] = useState<SrsWords | null>(null);
+  const [srsSummary, setSrsSummary] = useState<SrsSummary | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -34,9 +35,10 @@ export function SrsPage() {
       setIsLoading(true);
       setErrorMessage(null);
       try {
-        const loaded = await fetchSrsWords();
+        const [loaded, summary] = await Promise.all([fetchSrsWords(), fetchSrsSummary()]);
         if (!isCancelled) {
           setSrsWords(loaded);
+          setSrsSummary(summary);
         }
       } catch (error) {
         if (!isCancelled) {
@@ -65,8 +67,7 @@ export function SrsPage() {
       <div className="pageHeader">
         <h1 className="pageTitle">SRS</h1>
         <p className="pageSubtitle">
-          Répartition des mots selon ton apprentissage : Difficile, Moyen, Facile, Maîtrisé.
-          Entraîne-toi par catégorie pour progresser efficacement.
+          Révision espacée : les mots reviennent au bon moment pour une mémorisation durable.
         </p>
       </div>
 
@@ -81,6 +82,51 @@ export function SrsPage() {
           <div className="muted">Erreur: {errorMessage}</div>
         </div>
       ) : null}
+
+      {!isLoading && srsSummary && srsSummary.dueCount > 0 && (
+        <div className="srsDueCard">
+          <div className="srsDueCard__info">
+            <div className="srsDueCard__count">{srsSummary.dueCount}</div>
+            <div className="srsDueCard__label">mots à réviser</div>
+            <div className="srsDueCard__detail">
+              {srsSummary.newCount > 0 && <span>{srsSummary.newCount} nouveaux</span>}
+              {srsSummary.newCount > 0 && srsSummary.dueCount - srsSummary.newCount > 0 && " · "}
+              {srsSummary.dueCount - srsSummary.newCount > 0 && (
+                <span>{srsSummary.dueCount - srsSummary.newCount} à revoir</span>
+              )}
+            </div>
+          </div>
+          <button
+            className="button button--primary"
+            type="button"
+            onClick={() => navigate("/train/srs/due")}
+            style={{ padding: "var(--space-3) var(--space-6)", fontSize: "16px" }}
+          >
+            Commencer la révision
+          </button>
+        </div>
+      )}
+
+      {!isLoading && srsSummary && (
+        <div className="srsSummaryBar">
+          <div className="srsSummaryBar__item">
+            <span className="srsSummaryBar__value">{srsSummary.newCount}</span>
+            <span className="srsSummaryBar__label">Nouveaux</span>
+          </div>
+          <div className="srsSummaryBar__item">
+            <span className="srsSummaryBar__value">{srsSummary.learningCount}</span>
+            <span className="srsSummaryBar__label">En cours</span>
+          </div>
+          <div className="srsSummaryBar__item">
+            <span className="srsSummaryBar__value">{srsSummary.graduatedCount}</span>
+            <span className="srsSummaryBar__label">Gradués</span>
+          </div>
+          <div className="srsSummaryBar__item">
+            <span className="srsSummaryBar__value">{srsSummary.masteredCount}</span>
+            <span className="srsSummaryBar__label">Maîtrisés</span>
+          </div>
+        </div>
+      )}
 
       {!isLoading && srsWords ? (
         <div className="srsGrid">

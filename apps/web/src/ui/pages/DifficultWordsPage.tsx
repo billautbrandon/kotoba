@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { type WordWithStats, computeFailRate, fetchDifficultWords } from "../../api";
 import { AudioButton } from "../components/AudioButton";
 
 export function DifficultWordsPage() {
+  const navigate = useNavigate();
   const [words, setWords] = useState<WordWithStats[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -47,9 +49,13 @@ export function DifficultWordsPage() {
           </div>
         </div>
         <div className="row">
-          <a className="button button--primary" href="/train/difficult">
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => navigate("/train/difficult")}
+          >
             Entraîner ces mots
-          </a>
+          </button>
         </div>
       </div>
 

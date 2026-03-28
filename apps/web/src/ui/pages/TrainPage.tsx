@@ -6,6 +6,8 @@ import {
   type KeyboardCorrection,
   type WordWithStats,
   correctKeyboardAnswers,
+  fetchDifficultWords,
+  fetchDueWords,
   fetchGeminiQuota,
   fetchSeriesWords,
   fetchSrsWords,
@@ -16,8 +18,8 @@ import { AudioButton } from "../components/AudioButton";
 import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
 import { QuotaBar } from "../components/QuotaBar";
 
-type TrainMode = "tag" | "srs";
-type SrsCategory = "hard" | "medium" | "easy";
+type TrainMode = "tag" | "srs" | "difficult";
+type SrsCategory = "hard" | "medium" | "easy" | "due";
 type SessionMode = "manual" | "keyboard";
 type KeyboardDirection = "fr" | "jpn";
 type SessionRating = "success" | "partial" | "fail";
@@ -35,6 +37,7 @@ const srsCategoryLabels: Record<SrsCategory, string> = {
   hard: "Difficile",
   medium: "Moyen",
   easy: "Facile",
+  due: "À réviser",
 };
 
 export function TrainPage(props: { mode: TrainMode }) {
@@ -101,6 +104,7 @@ export function TrainPage(props: { mode: TrainMode }) {
   }, [configSessionMode]);
 
   const modeLabel = useMemo(() => {
+    if (props.mode === "difficult") return "Mots difficiles";
     if (props.mode === "srs") return `SRS — ${srsCategoryLabels[srsCategory]}`;
     if (tagName) return tagName;
     if (tagId) return `Tag ${tagId}`;
@@ -128,9 +132,15 @@ export function TrainPage(props: { mode: TrainMode }) {
     try {
       let loadedWords: WordWithStats[];
 
-      if (props.mode === "srs") {
+      if (props.mode === "difficult") {
+        loadedWords = await fetchDifficultWords();
+      } else if (props.mode === "srs" && srsCategory === "due") {
+        const dueData = await fetchDueWords();
+        loadedWords = dueData.words;
+      } else if (props.mode === "srs") {
         const srsData = await fetchSrsWords();
-        loadedWords = srsData[srsCategory] ?? [];
+        const bucketCategory = srsCategory as "hard" | "medium" | "easy";
+        loadedWords = srsData[bucketCategory] ?? [];
       } else {
         if (!tagId || !Number.isFinite(tagId)) {
           throw new Error("Tag invalide");
@@ -394,7 +404,7 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   function handleCancelSession() {
     if (window.confirm("Annuler la serie ? Tes progres ne seront pas enregistres.")) {
-      navigate(props.mode === "srs" ? "/srs" : "/");
+      navigate(props.mode === "srs" ? "/srs" : props.mode === "difficult" ? "/difficult" : "/");
     }
   }
 

@@ -45,6 +45,15 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     }
   }
 
+  function trackDailyActivity(db: Database.Database, userId: number, count: number) {
+    const today = new Date().toISOString().slice(0, 10);
+    db.prepare(
+      `INSERT INTO daily_activity (user_id, activity_date, reviews_count)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id, activity_date) DO UPDATE SET reviews_count = reviews_count + ?`,
+    ).run(userId, today, count, count);
+  }
+
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
@@ -668,7 +677,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
     const existingStats = database
       .prepare(
-        "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count FROM word_stats WHERE word_id = ?",
+        "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step FROM word_stats WHERE word_id = ?",
       )
       .get(body.wordId) as WordStatsRow | undefined;
 
@@ -680,11 +689,10 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     const updatedStats = applyReviewToStats(existingStats, body.result as ReviewResult);
     database
       .prepare(
-        `
-        UPDATE word_stats
-        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?, consecutive_success_count = ?
-        WHERE word_id = ?
-      `,
+        `UPDATE word_stats
+         SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?,
+             consecutive_success_count = ?, srs_interval = ?, srs_ease_factor = ?, srs_next_review_at = ?, srs_step = ?
+         WHERE word_id = ?`,
       )
       .run(
         updatedStats.success_count,
@@ -693,8 +701,14 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         updatedStats.score,
         updatedStats.last_reviewed_at,
         updatedStats.consecutive_success_count,
+        updatedStats.srs_interval,
+        updatedStats.srs_ease_factor,
+        updatedStats.srs_next_review_at,
+        updatedStats.srs_step,
         updatedStats.word_id,
       );
+
+    trackDailyActivity(database, userId, 1);
 
     res.json({ stats: updatedStats });
   });
@@ -715,17 +729,16 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       "SELECT 1 FROM words WHERE id = ? AND user_id = ?",
     );
     const selectStatsStatement = database.prepare(
-      "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count FROM word_stats WHERE word_id = ?",
+      "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step FROM word_stats WHERE word_id = ?",
     );
     const upsertStatsStatement = database.prepare(
       "INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)",
     );
     const updateStatsStatement = database.prepare(
-      `
-        UPDATE word_stats
-        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?, consecutive_success_count = ?
-        WHERE word_id = ?
-      `,
+      `UPDATE word_stats
+       SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?,
+           consecutive_success_count = ?, srs_interval = ?, srs_ease_factor = ?, srs_next_review_at = ?, srs_step = ?
+       WHERE word_id = ?`,
     );
 
     let appliedCount = 0;
@@ -752,6 +765,10 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           updatedStats.score,
           updatedStats.last_reviewed_at,
           updatedStats.consecutive_success_count,
+          updatedStats.srs_interval,
+          updatedStats.srs_ease_factor,
+          updatedStats.srs_next_review_at,
+          updatedStats.srs_step,
           updatedStats.word_id,
         );
         appliedCount += 1;
@@ -759,6 +776,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     });
 
     transaction();
+
+    trackDailyActivity(database, userId, appliedCount);
 
     res.status(201).json({ appliedCount });
   });
@@ -988,6 +1007,199 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       easy: easyRows,
       mastered: masteredRows,
     });
+  });
+
+  app.get("/api/srs/due", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const nowIso = new Date().toISOString();
+
+    const dueWords = database
+      .prepare(
+        `${srsWordSelect}
+           WHERE w.user_id = ?
+             AND s.srs_next_review_at IS NOT NULL
+             AND s.srs_next_review_at <= ?
+           ORDER BY s.srs_next_review_at ASC
+           LIMIT 100`,
+      )
+      .all(userId, nowIso);
+
+    const newWords = database
+      .prepare(
+        `${srsWordSelect}
+           WHERE w.user_id = ?
+             AND (s.word_id IS NULL OR (COALESCE(s.srs_step, 0) = 0 AND s.srs_next_review_at IS NULL))
+           ORDER BY w.id ASC
+           LIMIT 20`,
+      )
+      .all(userId);
+
+    const allDueWords = [...dueWords, ...newWords];
+    res.json({ words: allDueWords, dueCount: allDueWords.length });
+  });
+
+  app.get("/api/srs/summary", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const nowIso = new Date().toISOString();
+
+    const dueRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM words w
+           LEFT JOIN word_stats s ON s.word_id = w.id
+           WHERE w.user_id = ?
+             AND s.srs_next_review_at IS NOT NULL
+             AND s.srs_next_review_at <= ?`,
+      )
+      .get(userId, nowIso) as { count: number };
+
+    const newRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM words w
+           LEFT JOIN word_stats s ON s.word_id = w.id
+           WHERE w.user_id = ?
+             AND (s.word_id IS NULL OR (COALESCE(s.srs_step, 0) = 0 AND s.srs_next_review_at IS NULL))`,
+      )
+      .get(userId) as { count: number };
+
+    const learningRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM words w
+           INNER JOIN word_stats s ON s.word_id = w.id
+           WHERE w.user_id = ? AND s.srs_step >= 1 AND s.srs_step < 3 AND COALESCE(s.consecutive_success_count, 0) < 10`,
+      )
+      .get(userId) as { count: number };
+
+    const graduatedRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM words w
+           INNER JOIN word_stats s ON s.word_id = w.id
+           WHERE w.user_id = ? AND s.srs_step >= 3 AND COALESCE(s.consecutive_success_count, 0) < 10`,
+      )
+      .get(userId) as { count: number };
+
+    const masteredRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM words w
+           INNER JOIN word_stats s ON s.word_id = w.id
+           WHERE w.user_id = ? AND COALESCE(s.consecutive_success_count, 0) >= 10`,
+      )
+      .get(userId) as { count: number };
+
+    res.json({
+      dueCount: dueRow.count + newRow.count,
+      newCount: newRow.count,
+      learningCount: learningRow.count,
+      graduatedCount: graduatedRow.count,
+      masteredCount: masteredRow.count,
+    });
+  });
+
+  app.get("/api/stats/streak", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const today = new Date().toISOString().slice(0, 10);
+
+    const userRow = database
+      .prepare("SELECT COALESCE(daily_goal, 20) AS daily_goal FROM users WHERE id = ?")
+      .get(userId) as { daily_goal: number } | undefined;
+    const dailyGoal = userRow?.daily_goal ?? 20;
+
+    const todayRow = database
+      .prepare("SELECT reviews_count FROM daily_activity WHERE user_id = ? AND activity_date = ?")
+      .get(userId, today) as { reviews_count: number } | undefined;
+    const todayReviews = todayRow?.reviews_count ?? 0;
+
+    const activityRows = database
+      .prepare(
+        "SELECT activity_date, reviews_count FROM daily_activity WHERE user_id = ? ORDER BY activity_date DESC LIMIT 365",
+      )
+      .all(userId) as { activity_date: string; reviews_count: number }[];
+
+    let currentStreak = 0;
+    const checkDate = new Date();
+    if (todayReviews < dailyGoal) {
+      checkDate.setDate(checkDate.getDate() - 1);
+    }
+
+    const activityByDate = new Map(
+      activityRows.map((row) => [row.activity_date, row.reviews_count]),
+    );
+
+    for (let i = 0; i < 365; i++) {
+      const dateStr = checkDate.toISOString().slice(0, 10);
+      const reviews = activityByDate.get(dateStr) ?? 0;
+      if (reviews >= dailyGoal) {
+        currentStreak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    if (todayReviews >= dailyGoal) {
+      currentStreak = Math.max(currentStreak, 1);
+    }
+
+    res.json({ currentStreak, todayReviews, dailyGoal });
+  });
+
+  app.put("/api/settings/daily-goal", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const bodySchema = z.object({ dailyGoal: z.number().int().min(1).max(200) });
+    const body = bodySchema.parse(req.body);
+    database.prepare("UPDATE users SET daily_goal = ? WHERE id = ?").run(body.dailyGoal, userId);
+    res.json({ dailyGoal: body.dailyGoal });
+  });
+
+  app.get("/api/stats/overview", (req, res) => {
+    const userId = getRequiredUserId(req);
+
+    const totalRow = database
+      .prepare("SELECT COUNT(*) AS count FROM words WHERE user_id = ?")
+      .get(userId) as { count: number };
+
+    const masteredRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM words w
+           INNER JOIN word_stats s ON s.word_id = w.id
+           WHERE w.user_id = ? AND COALESCE(s.consecutive_success_count, 0) >= 10`,
+      )
+      .get(userId) as { count: number };
+
+    const reviewedRow = database
+      .prepare(
+        `SELECT
+            COALESCE(SUM(s.success_count + s.partial_count + s.fail_count), 0) AS total_reviews,
+            CASE WHEN COUNT(CASE WHEN (s.success_count + s.partial_count + s.fail_count) > 0 THEN 1 END) > 0
+              THEN ROUND(CAST(SUM(s.success_count) AS REAL) / SUM(s.success_count + s.partial_count + s.fail_count) * 100, 1)
+              ELSE 0
+            END AS avg_success_rate
+          FROM words w
+          INNER JOIN word_stats s ON s.word_id = w.id
+          WHERE w.user_id = ?`,
+      )
+      .get(userId) as { total_reviews: number; avg_success_rate: number };
+
+    const activeSinceRow = database
+      .prepare("SELECT MIN(activity_date) AS first_date FROM daily_activity WHERE user_id = ?")
+      .get(userId) as { first_date: string | null };
+
+    res.json({
+      totalWords: totalRow.count,
+      masteredCount: masteredRow.count,
+      totalReviews: reviewedRow.total_reviews,
+      avgSuccessRate: reviewedRow.avg_success_rate,
+      activeSince: activeSinceRow.first_date,
+    });
+  });
+
+  app.get("/api/stats/activity", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const rows = database
+      .prepare(
+        "SELECT activity_date, reviews_count FROM daily_activity WHERE user_id = ? ORDER BY activity_date DESC LIMIT 365",
+      )
+      .all(userId) as { activity_date: string; reviews_count: number }[];
+    res.json({ activity: rows });
   });
 
   app.get("/api/export", (_req, res) => {
@@ -1283,13 +1495,13 @@ ${JSON.stringify(
 )}
 
 Contraintes strictes :
-- Particules à utiliser : ${body.particles.join(", ")}
+- Particules autorisées : UNIQUEMENT ${body.particles.join(", ")}. Tu ne dois utiliser AUCUNE autre particule que celles listées ici.
 - Temps : ${tenseLabels[body.tense] ?? body.tense}
 - Polarité : ${polarityLabels[body.polarity] ?? body.polarity}
 - Style de politesse : ${politenessLabels[body.politeness] ?? body.politeness}
 - Utilise un japonais naturel, pas de phrases de manuels scolaires rigides.
 - ${isParagraph ? "Le paragraphe" : "Chaque phrase"} doit utiliser au moins un mot du vocabulaire fourni.
-- ${isParagraph ? "Le paragraphe" : "Chaque phrase"} doit utiliser au moins une des particules demandées.
+- ${isParagraph ? "Le paragraphe" : "Chaque phrase"} doit utiliser au moins une des particules autorisées.
 - L'élève apprend les kanji, donc écrire en kana est acceptable.${kanjiInstruction}${directionInstruction}
 ${body.customContext ? `\nContexte additionnel de l'élève : ${body.customContext}\n` : ""}
 Réponds UNIQUEMENT au format JSON, un tableau d'objets avec cette structure exacte :
@@ -1458,6 +1670,7 @@ Règles :
         withKanji: z.boolean(),
         count: z.number().int().min(1).max(15),
         paragraphLength: z.enum(["short", "medium", "long"]).optional().default("medium"),
+        customContext: z.string().max(500).optional(),
       });
       const body = bodySchema.parse(req.body);
 
@@ -1497,7 +1710,7 @@ Règles :
 Réponds UNIQUEMENT au format JSON, un tableau d'objets :
 [{"prompt": "${isFrToJp ? "Le texte en français" : "Le texte en japonais"}", "answer": "${isFrToJp ? "La traduction en japonais" : "La traduction en français"}", "answer_alt": "${isFrToJp ? "Version alternative en kana si applicable" : ""}", "explanation": "Brève explication grammaticale ou de vocabulaire"}]
 
-${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le answer contient des kanji), sinon une chaîne vide "".' : 'Le champ answer_alt peut contenir une traduction alternative acceptable, sinon une chaîne vide "".'}`;
+${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le answer contient des kanji), sinon une chaîne vide "".' : 'Le champ answer_alt peut contenir une traduction alternative acceptable, sinon une chaîne vide "".'}${body.customContext ? `\n\nContexte additionnel de l'élève : ${body.customContext}` : ""}`;
 
       type GeminiExercise = {
         prompt: string;
@@ -1775,6 +1988,105 @@ Règles :
       res.setHeader("Content-Disposition", `attachment; filename="${safeTagName}.mp3"`);
       res.setHeader("Content-Length", fullAudio.length);
       res.send(fullAudio);
+    }),
+  );
+
+  // --- Conjugation practice ---
+
+  app.post(
+    "/api/conjugation/generate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      if (!isGeminiConfigured()) {
+        res.status(503).json({ error: "Gemini not configured" });
+        return;
+      }
+
+      const bodySchema = z.object({
+        words: z
+          .array(
+            z.object({
+              french: z.string(),
+              kana: z.string().optional(),
+              kanji: z.string().optional(),
+            }),
+          )
+          .min(1)
+          .max(20),
+        forms: z.array(z.string()).min(1),
+        count: z.number().int().min(1).max(20).default(10),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const quota = getGeminiQuota(database);
+      if (quota.remaining <= 0) {
+        res.status(429).json({ error: "Gemini quota exceeded", quota });
+        return;
+      }
+
+      const wordsList = body.words
+        .map((word) => `${word.kanji ?? word.kana ?? ""} (${word.french})`)
+        .join(", ");
+
+      const prompt = `Tu es un professeur de japonais. Génère ${body.count} exercices de conjugaison à partir de ces verbes : ${wordsList}.
+
+Formes demandées : ${body.forms.join(", ")}.
+
+Pour chaque exercice, donne :
+- "verb": le verbe en forme dictionnaire (kanji ou kana)
+- "form": la forme demandée (en français, ex: "forme polie", "forme -te", etc.)
+- "prompt": la consigne affichée à l'élève (ex: "食べる → forme polie")
+- "answer": la bonne réponse conjuguée
+
+Retourne un tableau JSON. Exemple :
+[{"verb": "食べる", "form": "forme polie", "prompt": "食べる → forme polie", "answer": "食べます"}]`;
+
+      incrementGeminiUsage(database);
+      const exercises = await callGeminiJson(prompt);
+
+      if (!Array.isArray(exercises)) {
+        res.status(500).json({ error: "Format de réponse invalide" });
+        return;
+      }
+
+      res.json({ exercises, quota: getGeminiQuota(database) });
+    }),
+  );
+
+  app.post(
+    "/api/conjugation/evaluate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      if (!isGeminiConfigured()) {
+        res.status(503).json({ error: "Gemini not configured" });
+        return;
+      }
+
+      const bodySchema = z.object({
+        prompt: z.string(),
+        expected: z.string(),
+        userAnswer: z.string(),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const quota = getGeminiQuota(database);
+      if (quota.remaining <= 0) {
+        res.status(429).json({ error: "Gemini quota exceeded", quota });
+        return;
+      }
+
+      const geminiPrompt = `Tu évalues une réponse de conjugaison japonaise.
+Consigne : ${body.prompt}
+Réponse attendue : ${body.expected}
+Réponse de l'élève : ${body.userAnswer}
+
+Évalue la réponse. Retourne un objet JSON :
+{ "isCorrect": true/false, "correctedAnswer": "la réponse correcte", "explanation": "explication courte" }`;
+
+      incrementGeminiUsage(database);
+      const evaluation = await callGeminiJson(geminiPrompt);
+
+      res.json({ evaluation, quota: getGeminiQuota(database) });
     }),
   );
 }

@@ -196,6 +196,82 @@ export async function fetchSrsWords(): Promise<SrsWords> {
   return (await response.json()) as SrsWords;
 }
 
+export async function fetchDueWords(): Promise<{ words: WordWithStats[]; dueCount: number }> {
+  const response = await fetch("/api/srs/due", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch due words");
+  }
+  return (await response.json()) as { words: WordWithStats[]; dueCount: number };
+}
+
+export type SrsSummary = {
+  dueCount: number;
+  newCount: number;
+  learningCount: number;
+  graduatedCount: number;
+  masteredCount: number;
+};
+
+export async function fetchSrsSummary(): Promise<SrsSummary> {
+  const response = await fetch("/api/srs/summary", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch SRS summary");
+  }
+  return (await response.json()) as SrsSummary;
+}
+
+export type StreakInfo = {
+  currentStreak: number;
+  todayReviews: number;
+  dailyGoal: number;
+};
+
+export async function fetchStreak(): Promise<StreakInfo> {
+  const response = await fetch("/api/stats/streak", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch streak");
+  }
+  return (await response.json()) as StreakInfo;
+}
+
+export async function updateDailyGoal(dailyGoal: number): Promise<void> {
+  const response = await fetch("/api/settings/daily-goal", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dailyGoal }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to update daily goal");
+  }
+}
+
+export type StatsOverview = {
+  totalWords: number;
+  masteredCount: number;
+  totalReviews: number;
+  avgSuccessRate: number;
+  activeSince: string | null;
+};
+
+export async function fetchStatsOverview(): Promise<StatsOverview> {
+  const response = await fetch("/api/stats/overview", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch stats");
+  }
+  return (await response.json()) as StatsOverview;
+}
+
+export type ActivityDay = { activity_date: string; reviews_count: number };
+
+export async function fetchActivityData(): Promise<{ activity: ActivityDay[] }> {
+  const response = await fetch("/api/stats/activity", { credentials: "include" });
+  if (!response.ok) {
+    throw new Error("Failed to fetch activity");
+  }
+  return (await response.json()) as { activity: ActivityDay[] };
+}
+
 export async function fetchSeries(): Promise<
   Array<{
     tagId: number;
@@ -489,6 +565,7 @@ export type JlptConstraints = {
   withKanji: boolean;
   count: number;
   paragraphLength?: "short" | "medium" | "long";
+  customContext?: string;
 };
 
 export type JlptExercise = {
@@ -611,4 +688,55 @@ export async function downloadTagAudio(tagId: number, tagName: string): Promise<
   anchor.click();
   document.body.removeChild(anchor);
   URL.revokeObjectURL(url);
+}
+
+// --- Conjugation ---
+
+export type ConjugationExercise = {
+  verb: string;
+  form: string;
+  prompt: string;
+  answer: string;
+};
+
+export type ConjugationEvaluation = {
+  isCorrect: boolean;
+  correctedAnswer: string;
+  explanation: string;
+};
+
+export async function generateConjugationExercises(
+  words: { french: string; kana?: string; kanji?: string }[],
+  forms: string[],
+  count: number,
+): Promise<{ exercises: ConjugationExercise[]; quota: GeminiQuota }> {
+  const response = await fetch("/api/conjugation/generate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ words, forms, count }),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la génération");
+  }
+  return (await response.json()) as { exercises: ConjugationExercise[]; quota: GeminiQuota };
+}
+
+export async function evaluateConjugation(
+  prompt: string,
+  expected: string,
+  userAnswer: string,
+): Promise<{ evaluation: ConjugationEvaluation; quota: GeminiQuota }> {
+  const response = await fetch("/api/conjugation/evaluate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, expected, userAnswer }),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation");
+  }
+  return (await response.json()) as { evaluation: ConjugationEvaluation; quota: GeminiQuota };
 }
