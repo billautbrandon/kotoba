@@ -1419,7 +1419,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         direction: z.enum(["fr-to-jp", "jp-to-fr"]).optional().default("fr-to-jp"),
         contentType: z.enum(["phrases", "paragraph"]).optional().default("phrases"),
         withKanji: z.boolean().optional().default(true),
-        paragraphLength: z.enum(["short", "medium", "long"]).optional().default("medium"),
+        sentenceLength: z.enum(["short", "medium", "long"]).optional().default("medium"),
       });
       const body = bodySchema.parse(req.body);
 
@@ -1465,15 +1465,23 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       };
 
       const isParagraph = body.contentType === "paragraph";
-      const paragraphSentences: Record<string, string> = {
-        short: "2-3",
-        medium: "4-5",
-        long: "6-8",
+      const sentenceLengthWordsLabels: Record<string, string> = {
+        short: "5-7 mots",
+        medium: "8-12 mots",
+        long: "13-20 mots avec des subordonnées",
       };
 
       const contentInstruction = isParagraph
-        ? `génère UN paragraphe cohérent de ${paragraphSentences[body.paragraphLength]} phrases qui forment une petite histoire ou description.`
-        : `génère exactement ${body.count} phrases uniques.`;
+        ? `génère UNE mini-histoire cohérente de exactement ${body.count} phrases.`
+        : `génère exactement ${body.count} phrases uniques et indépendantes.`;
+
+      const lengthInstruction = isParagraph
+        ? `- Chaque phrase de l'histoire doit faire environ ${sentenceLengthWordsLabels[body.sentenceLength]}.`
+        : `- Chaque phrase doit faire environ ${sentenceLengthWordsLabels[body.sentenceLength]}.`;
+
+      const storyInstruction = isParagraph
+        ? `\n- Mode histoire : les phrases doivent former une mini-histoire cohérente avec un début, un milieu et une fin.\n- Les mêmes personnages, objets et lieux doivent être réutilisés à travers l'histoire.\n- Utilise des connecteurs logiques (それから、でも、だから、そして、しかし、次に、最後に) pour lier les phrases.\n- L'histoire doit avoir du sens et ne pas être une simple juxtaposition de phrases isolées.`
+        : "";
 
       const kanjiInstruction =
         isParagraph && !body.withKanji
@@ -1484,6 +1492,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         body.direction === "jp-to-fr"
           ? "\n- L'exercice est en direction Japonais → Français : l'élève verra la phrase japonaise et devra traduire en français."
           : "";
+
+      const outputUnit = isParagraph ? "phrase de l'histoire" : "phrase";
 
       const prompt = `Tu es un professeur de japonais. En utilisant UNIQUEMENT le vocabulaire fourni ci-dessous (et des verbes de base courants si nécessaire comme ある、いる、する、行く、食べる、見る、飲む), ${contentInstruction}
 
@@ -1499,14 +1509,16 @@ Contraintes strictes :
 - Temps : ${tenseLabels[body.tense] ?? body.tense}
 - Polarité : ${polarityLabels[body.polarity] ?? body.polarity}
 - Style de politesse : ${politenessLabels[body.politeness] ?? body.politeness}
+${lengthInstruction}
 - Utilise un japonais naturel, pas de phrases de manuels scolaires rigides.
-- ${isParagraph ? "Le paragraphe" : "Chaque phrase"} doit utiliser au moins un mot du vocabulaire fourni.
-- ${isParagraph ? "Le paragraphe" : "Chaque phrase"} doit utiliser au moins une des particules autorisées.
-- L'élève apprend les kanji, donc écrire en kana est acceptable.${kanjiInstruction}${directionInstruction}
+- Chaque phrase doit utiliser au moins un mot du vocabulaire fourni.
+- Chaque phrase doit utiliser au moins une des particules autorisées.
+- L'élève apprend les kanji, donc écrire en kana est acceptable.${storyInstruction}${kanjiInstruction}${directionInstruction}
 ${body.customContext ? `\nContexte additionnel de l'élève : ${body.customContext}\n` : ""}
-Réponds UNIQUEMENT au format JSON, un tableau d'objets avec cette structure exacte :
-[{"fr": "${isParagraph ? "Le paragraphe en français" : "La phrase en français"}", "jp_kanji": "${isParagraph ? "Le paragraphe en japonais" : "La phrase en japonais"} avec kanji", "jp_kana": "${isParagraph ? "Le paragraphe en japonais" : "La phrase en japonais"} tout en hiragana/katakana", "explanation": "Brève explication grammaticale", "used_words_fr": ["mot1_fr", "mot2_fr"]}]
+Réponds UNIQUEMENT au format JSON, un tableau d'objets (un objet par ${outputUnit}) avec cette structure exacte :
+[{"fr": "La phrase en français", "jp_kanji": "La phrase en japonais avec kanji", "jp_kana": "La phrase en japonais tout en hiragana/katakana", "explanation": "Brève explication grammaticale", "used_words_fr": ["mot1_fr", "mot2_fr"]}]
 
+${isParagraph ? `Le tableau doit contenir exactement ${body.count} objets représentant chacun une phrase de la mini-histoire, dans l'ordre narratif.` : ""}
 Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qui ont été utilisés.`;
 
       type GeminiPhrase = {
@@ -1594,8 +1606,18 @@ Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qu
 
       const isJpToFr = body.direction === "jp-to-fr";
 
+      const pedagogicalRules = `Règles de feedback :
+- Si la réponse est correcte ou acceptable (même formulée différemment ou avec des synonymes), mets isCorrect à true, errorType à null et feedback à un court message d'encouragement (1-2 phrases).
+- Si l'élève s'est trompé, ton feedback DOIT contenir dans l'ordre :
+  1. 💚 Ce qui est correct dans sa réponse (toujours encourager avant de corriger).
+  2. 🎯 L'erreur précise (ex. "tu as utilisé は au lieu de が") et la règle grammaticale sous-jacente qui explique pourquoi c'est une erreur dans ce contexte.
+  3. 📝 Un mini-exemple supplémentaire (une phrase courte) pour ancrer la règle.
+- Utilise un seul emoji discret par section (💚 / 🎯 / 📝) pour rendre le feedback chaleureux et facile à lire.
+- Sépare chaque section par un saut de ligne.
+- Maximum 5 phrases au total, reste concis et précis.`;
+
       const prompt = isJpToFr
-        ? `Tu es un professeur de japonais bienveillant. Un élève devait traduire cette phrase japonaise en français :
+        ? `Tu es un professeur de japonais bienveillant et très pédagogue. Un élève devait traduire cette phrase japonaise en français :
 
 Phrase japonaise : "${body.frenchSentence}"
 Réponse attendue (français) : "${body.expectedAnswer}"
@@ -1604,12 +1626,13 @@ Réponse de l'élève : "${body.userAnswer}"
 Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cette structure exacte :
 {"isCorrect": false, "errorType": "vocabulary|grammar|meaning|other", "feedback": "Ton conseil pédagogique ici"}
 
-Règles :
-- Si la réponse est correcte ou acceptable (même si formulée différemment ou avec des synonymes), mets isCorrect à true et errorType à null.
+Règles de classification :
+- Si la réponse est correcte ou acceptable (même formulée différemment ou avec des synonymes), mets isCorrect à true et errorType à null.
 - Sois tolérant sur les formulations françaises différentes si le sens est correct.
 - errorType doit être "vocabulary" si l'erreur porte sur un mot mal traduit, "grammar" si c'est une erreur de structure, "meaning" si le sens global est différent, "other" sinon.
-- Le feedback doit être en français, court (2-3 phrases max), pédagogique et encourageant.`
-        : `Tu es un professeur de japonais bienveillant. Un élève devait traduire cette phrase française en japonais :
+
+${pedagogicalRules}`
+        : `Tu es un professeur de japonais bienveillant et très pédagogue. Un élève devait traduire cette phrase française en japonais :
 
 Phrase française : "${body.frenchSentence}"
 Réponse attendue : "${body.expectedAnswer}"
@@ -1618,11 +1641,12 @@ Réponse de l'élève : "${body.userAnswer}"
 Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cette structure exacte :
 {"isCorrect": false, "errorType": "particle|conjugation|kanji|other", "feedback": "Ton conseil pédagogique ici"}
 
-Règles :
-- Si la réponse est correcte ou acceptable (même si formulée différemment), mets isCorrect à true et errorType à null.
+Règles de classification :
+- Si la réponse est correcte ou acceptable (même formulée différemment), mets isCorrect à true et errorType à null.
 - L'élève apprend les kanji. Si la réponse est écrite en kana au lieu des kanji mais est autrement correcte, considère-la comme correcte.
 - errorType doit être "particle" si l'erreur porte sur une particule, "conjugation" si c'est une erreur de conjugaison/temps, "kanji" si c'est uniquement un problème de kanji, "other" sinon.
-- Le feedback doit être en français, court (2-3 phrases max), pédagogique et encourageant. Explique la nuance ou l'erreur précise.`;
+
+${pedagogicalRules}`;
 
       type EvalResult = {
         isCorrect: boolean;
@@ -1645,6 +1669,225 @@ Règles :
         }
         const message = error instanceof Error ? error.message : "Erreur inconnue";
         console.error("[kotoba/api] Phrase evaluation failed:", message);
+        res.status(502).json({ error: `Erreur d'évaluation IA : ${message}` });
+      }
+    }),
+  );
+
+  // --- Dialogue AI endpoints ---
+
+  app.post(
+    "/api/dialogue/generate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        tagIds: z.array(z.number().int().positive()).min(1),
+        scenario: z.enum(["restaurant", "voyage", "famille", "travail", "ecole", "libre"]),
+        difficulty: z.enum(["debutant", "intermediaire"]),
+        count: z.number().int().min(2).max(10),
+        customContext: z.string().max(500).optional(),
+      });
+      const body = bodySchema.parse(req.body);
+
+      type VocabRow = { id: number; french: string; kana: string | null; kanji: string | null };
+      const placeholders = body.tagIds.map(() => "?").join(",");
+      const vocabularyRows = database
+        .prepare(
+          `
+          SELECT DISTINCT w.id, w.french, w.kana, w.kanji
+          FROM words w
+          INNER JOIN word_tags wt ON wt.word_id = w.id
+          WHERE wt.tag_id IN (${placeholders})
+            AND w.user_id = ?
+          ORDER BY RANDOM()
+          `,
+        )
+        .all(...body.tagIds, userId) as VocabRow[];
+
+      if (vocabularyRows.length === 0) {
+        res.status(400).json({ error: "Aucun mot trouvé pour les tags sélectionnés." });
+        return;
+      }
+
+      const vocabularyPool = vocabularyRows.map((row) => ({
+        id: row.id,
+        fr: row.french,
+        jp: row.kanji ?? row.kana ?? "",
+        kana: row.kana ?? "",
+      }));
+
+      const scenarioLabels: Record<string, string> = {
+        restaurant: "au restaurant (commander, demander l'addition, parler au serveur)",
+        voyage: "en voyage (demander son chemin, acheter un billet, réserver un hôtel)",
+        famille: "en famille (conversations du quotidien à la maison)",
+        travail: "au travail (collègues, réunions, tâches simples)",
+        ecole: "à l'école (entre élèves, avec le professeur, en classe)",
+        libre: "conversation libre du quotidien",
+      };
+
+      const difficultyLabels: Record<string, string> = {
+        debutant: "débutant (JLPT N5/N4, phrases courtes et simples, politesse en -masu)",
+        intermediaire: "intermédiaire (JLPT N4/N3, phrases un peu plus élaborées)",
+      };
+
+      const prompt = `Tu es un professeur de japonais qui crée un dialogue d'entraînement oral.
+
+Scénario : ${scenarioLabels[body.scenario]}
+Niveau : ${difficultyLabels[body.difficulty]}
+Vocabulaire cible à privilégier (mais tu peux aussi utiliser du vocabulaire de base courant) :
+${JSON.stringify(
+  vocabularyPool.slice(0, 30).map((v) => ({ fr: v.fr, jp: v.jp, kana: v.kana })),
+  null,
+  2,
+)}
+
+Génère un dialogue cohérent de ${body.count} échanges dans lequel l'ÉLÈVE doit parler. Chaque élément du tableau représente UN tour de parole de l'élève :
+- "context" : décrit brièvement en français la situation ou ce que l'interlocuteur vient de dire (1-2 phrases).
+- "fr" : ce que l'élève doit dire, formulé en français clair et naturel (c'est l'intention à exprimer).
+- "expected_jp" : la traduction japonaise attendue (en kanji+kana quand c'est naturel), correcte et naturelle pour un natif.
+- "expected_kana" : la même phrase entièrement en hiragana/katakana (pour la prononciation).
+
+Le dialogue doit avoir une progression logique : chaque élément s'enchaîne avec le précédent pour former une vraie scène cohérente.
+${body.customContext ? `\nContexte supplémentaire de l'élève : ${body.customContext}\n` : ""}
+Réponds UNIQUEMENT au format JSON, un tableau de ${body.count} objets avec cette structure exacte :
+[{"context": "...", "fr": "...", "expected_jp": "...", "expected_kana": "...", "used_words_fr": ["mot1_fr"]}]
+
+Le champ used_words_fr contient les mots français du vocabulaire cible utilisés dans expected_jp.`;
+
+      type GeminiDialogueTurn = {
+        context: string;
+        fr: string;
+        expected_jp: string;
+        expected_kana: string;
+        used_words_fr?: string[];
+      };
+
+      let generatedTurns: GeminiDialogueTurn[];
+      try {
+        generatedTurns = await callGeminiJson<GeminiDialogueTurn[]>(prompt);
+        incrementGeminiUsage(database);
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Dialogue generation failed:", message);
+        res.status(502).json({ error: `Erreur de génération IA : ${message}` });
+        return;
+      }
+
+      if (!Array.isArray(generatedTurns) || generatedTurns.length === 0) {
+        res.status(502).json({ error: "L'IA n'a pas retourné de dialogue valide." });
+        return;
+      }
+
+      const vocabByFrench = new Map<string, number>();
+      for (const vocab of vocabularyPool) {
+        vocabByFrench.set(vocab.fr.toLowerCase(), vocab.id);
+      }
+
+      const turns = generatedTurns.map((turn) => {
+        const wordIds: number[] = [];
+        for (const usedFrench of turn.used_words_fr ?? []) {
+          const wordId = vocabByFrench.get(usedFrench.toLowerCase());
+          if (wordId !== undefined && !wordIds.includes(wordId)) {
+            wordIds.push(wordId);
+          }
+        }
+        return {
+          context: turn.context ?? "",
+          fr: turn.fr ?? "",
+          expected_jp: turn.expected_jp ?? "",
+          expected_kana: turn.expected_kana ?? "",
+          wordIds,
+        };
+      });
+
+      res.json({ turns });
+    }),
+  );
+
+  app.post(
+    "/api/dialogue/evaluate",
+    wrapAsync(async (req, res) => {
+      getRequiredUserId(req);
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        userTranscript: z.string().min(1),
+        expectedJp: z.string().min(1),
+        frenchPrompt: z.string().min(1),
+        context: z.string().optional(),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const normalizedUser = body.userTranscript.trim().normalize("NFKC");
+      const normalizedExpected = body.expectedJp.trim().normalize("NFKC");
+      if (normalizedUser === normalizedExpected) {
+        res.json({ isCorrect: true, feedback: null, errorType: null });
+        return;
+      }
+
+      const pedagogicalRules = `Règles de feedback :
+- Si la réponse est correcte ou acceptable (même formulée différemment, avec des synonymes ou une légère variation de politesse), mets isCorrect à true, errorType à null et feedback à un court encouragement (1-2 phrases).
+- Si l'élève s'est trompé, ton feedback DOIT contenir dans l'ordre :
+  1. 💚 Ce qui est correct ou bien essayé (toujours encourager avant de corriger, la dictée vocale peut introduire de petits bruits).
+  2. 🎯 L'erreur précise et la règle grammaticale ou lexicale sous-jacente.
+  3. 📝 Un mini-exemple supplémentaire (phrase courte) pour ancrer la règle.
+- Maximum 5 phrases au total. Sépare les sections par un saut de ligne.
+- Sois particulièrement tolérant aux petites erreurs de transcription vocale (un caractère absent ou proche phonétiquement) si le sens est clair.`;
+
+      const prompt = `Tu es un professeur de japonais bienveillant et très pédagogue. L'élève pratique l'oral : il a dicté sa réponse via la reconnaissance vocale du navigateur, donc de petites imperfections de transcription peuvent apparaître.
+
+${body.context ? `Contexte de la scène : "${body.context}"\n` : ""}Ce que l'élève devait dire (en français) : "${body.frenchPrompt}"
+Réponse japonaise attendue : "${body.expectedJp}"
+Transcription de ce que l'élève a dit : "${body.userTranscript}"
+
+Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cette structure exacte :
+{"isCorrect": false, "errorType": "particle|conjugation|vocabulary|pronunciation|other", "feedback": "Ton conseil pédagogique ici"}
+
+Règles de classification :
+- Si la réponse transmet le bon sens (même formulée différemment), mets isCorrect à true.
+- errorType "pronunciation" si l'erreur principale semble être un problème de transcription/phonétique, "particle" pour une particule incorrecte, "conjugation" pour une conjugaison, "vocabulary" pour un mot inapproprié, "other" sinon.
+
+${pedagogicalRules}`;
+
+      type EvalResult = {
+        isCorrect: boolean;
+        errorType: "particle" | "conjugation" | "vocabulary" | "pronunciation" | "other" | null;
+        feedback: string | null;
+      };
+
+      try {
+        const evaluation = await callGeminiJson<EvalResult>(prompt);
+        incrementGeminiUsage(database);
+        res.json({
+          isCorrect: evaluation.isCorrect ?? false,
+          feedback: evaluation.feedback ?? null,
+          errorType: evaluation.errorType ?? null,
+        });
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Dialogue evaluation failed:", message);
         res.status(502).json({ error: `Erreur d'évaluation IA : ${message}` });
       }
     }),

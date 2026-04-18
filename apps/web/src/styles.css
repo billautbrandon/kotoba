@@ -3265,3 +3265,192 @@ select.input:focus {
     flex-direction: column;
   }
 }
+
+/* ========================================
+   Answer diff (green/red char or word level)
+   ======================================== */
+
+.answerDiff {
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.answerDiff__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.answerDiff__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.answerDiff__text {
+  font-size: 18px;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.answerDiff__match {
+  color: var(--color-success);
+}
+
+.answerDiff__mismatch {
+  color: var(--color-danger);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.answerDiff__missing {
+  color: var(--color-danger);
+  font-weight: 700;
+  background: rgba(199, 62, 29, 0.08);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.answerDiff__empty {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+/* ========================================
+   Voice button - large variant (dialogue)
+   ======================================== */
+
+.voiceButton--lg {
+  width: 96px;
+  height: 96px;
+  border-width: 3px;
+}
+
+.voiceButton--lg .voiceButton__pulse {
+  width: 32px;
+  height: 32px;
+}
+
+.voiceButton--lg svg {
+  width: 40px;
+  height: 40px;
+}
+
+/* ========================================
+   Dialogue page
+   ======================================== */
+
+.dialoguePage {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.dialoguePage--training {
+  gap: var(--space-4);
+}
+
+.dialoguePage__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dialoguePage__title {
+  font-size: 32px;
+  margin: 0;
+}
+
+.dialoguePage__subtitle {
+  color: var(--color-muted);
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.dialogueTraining__context {
+  font-size: 14px;
+  color: var(--color-muted);
+  font-style: italic;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-panel);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-primary);
+}
+
+.dialogueTraining__intent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.dialogueTraining__intentLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dialogueTraining__intentText {
+  font-size: 20px;
+  line-height: 1.4;
+  color: var(--color-text);
+}
+
+.dialogueTraining__micArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4);
+}
+
+.dialogueTraining__micArea .voiceButton {
+  width: 96px;
+  height: 96px;
+  border-width: 3px;
+}
+
+.dialogueTraining__micArea .voiceButton__pulse {
+  width: 32px;
+  height: 32px;
+}
+
+.dialogueTraining__micArea .voiceButton svg {
+  width: 40px;
+  height: 40px;
+}
+
+.dialogueTraining__micHint {
+  font-size: 13px;
+  color: var(--color-muted);
+  text-align: center;
+  max-width: 440px;
+  line-height: 1.5;
+}
+
+.dialogueTraining__textarea {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+
+.pratique__toggleRow--wrap {
+  flex-wrap: wrap;
+}

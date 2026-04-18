@@ -23,11 +23,47 @@ import {
   generatePhrases,
   submitBulkReviews,
 } from "../../api";
+import { AnswerDiff } from "../components/AnswerDiff";
 import { QuotaBar } from "../components/QuotaBar";
 import { VoiceButton } from "../components/VoiceButton";
 
 type PratiqueTab = "phrases" | "jlpt" | "conjugaison";
 type PratiquePhase = "setup" | "training" | "recap";
+type SentenceLength = "short" | "medium" | "long";
+
+const PHRASES_SETTINGS_KEY = "kotoba.phrasesSettings.v1";
+
+type PersistedPhrasesSettings = {
+  selectedTagIds: number[];
+  selectedParticles: string[];
+  tense: PhraseConstraints["tense"];
+  polarity: PhraseConstraints["polarity"];
+  politeness: PhraseConstraints["politeness"];
+  phraseCount: number;
+  customContext: string;
+  direction: "fr-to-jp" | "jp-to-fr";
+  contentType: "phrases" | "paragraph";
+  withKanji: boolean;
+  sentenceLength: SentenceLength;
+};
+
+function loadPhrasesSettings(): Partial<PersistedPhrasesSettings> | null {
+  try {
+    const raw = window.localStorage.getItem(PHRASES_SETTINGS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Partial<PersistedPhrasesSettings>;
+  } catch {
+    return null;
+  }
+}
+
+function savePhrasesSettings(settings: PersistedPhrasesSettings): void {
+  try {
+    window.localStorage.setItem(PHRASES_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // ignore storage errors (quota, privacy mode, etc.)
+  }
+}
 
 const AVAILABLE_PARTICLES = ["は", "が", "を", "に", "で", "へ", "と", "も", "から", "まで"];
 
@@ -97,18 +133,35 @@ export function PratiquePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(false);
 
-  // Phrases state
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
-  const [selectedParticles, setSelectedParticles] = useState<string[]>(["は", "が"]);
-  const [tense, setTense] = useState<PhraseConstraints["tense"]>("present");
-  const [polarity, setPolarity] = useState<PhraseConstraints["polarity"]>("affirmative");
-  const [politeness, setPoliteness] = useState<PhraseConstraints["politeness"]>("casual");
-  const [phraseCount, setPhraseCount] = useState(3);
-  const [customContext, setCustomContext] = useState("");
-  const [direction, setDirection] = useState<"fr-to-jp" | "jp-to-fr">("fr-to-jp");
-  const [contentType, setContentType] = useState<"phrases" | "paragraph">("phrases");
-  const [withKanji, setWithKanji] = useState(true);
-  const [paragraphLength, setParagraphLength] = useState<"short" | "medium" | "long">("medium");
+  // Phrases state (restored from localStorage on first render)
+  const persistedPhrases = useMemo(() => loadPhrasesSettings(), []);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(
+    persistedPhrases?.selectedTagIds ?? [],
+  );
+  const [selectedParticles, setSelectedParticles] = useState<string[]>(
+    persistedPhrases?.selectedParticles ?? ["は", "が"],
+  );
+  const [tense, setTense] = useState<PhraseConstraints["tense"]>(
+    persistedPhrases?.tense ?? "present",
+  );
+  const [polarity, setPolarity] = useState<PhraseConstraints["polarity"]>(
+    persistedPhrases?.polarity ?? "affirmative",
+  );
+  const [politeness, setPoliteness] = useState<PhraseConstraints["politeness"]>(
+    persistedPhrases?.politeness ?? "casual",
+  );
+  const [phraseCount, setPhraseCount] = useState(persistedPhrases?.phraseCount ?? 3);
+  const [customContext, setCustomContext] = useState(persistedPhrases?.customContext ?? "");
+  const [direction, setDirection] = useState<"fr-to-jp" | "jp-to-fr">(
+    persistedPhrases?.direction ?? "fr-to-jp",
+  );
+  const [contentType, setContentType] = useState<"phrases" | "paragraph">(
+    persistedPhrases?.contentType ?? "phrases",
+  );
+  const [withKanji, setWithKanji] = useState(persistedPhrases?.withKanji ?? true);
+  const [sentenceLength, setSentenceLength] = useState<SentenceLength>(
+    persistedPhrases?.sentenceLength ?? "medium",
+  );
 
   // JLPT state
   const [jlptType, setJlptType] = useState<JlptConstraints["exerciseType"]>("phrases");
@@ -158,6 +211,35 @@ export function PratiquePage() {
       .catch(() => {});
   }, []);
 
+  // Persist phrases setup config to localStorage
+  useEffect(() => {
+    savePhrasesSettings({
+      selectedTagIds,
+      selectedParticles,
+      tense,
+      polarity,
+      politeness,
+      phraseCount,
+      customContext,
+      direction,
+      contentType,
+      withKanji,
+      sentenceLength,
+    });
+  }, [
+    selectedTagIds,
+    selectedParticles,
+    tense,
+    polarity,
+    politeness,
+    phraseCount,
+    customContext,
+    direction,
+    contentType,
+    withKanji,
+    sentenceLength,
+  ]);
+
   function handleTabChange(tab: PratiqueTab) {
     if (phase !== "setup") return;
     setActiveTab(tab);
@@ -192,12 +274,12 @@ export function PratiquePage() {
         tense,
         polarity,
         politeness,
-        count: contentType === "paragraph" ? 1 : phraseCount,
+        count: phraseCount,
         customContext: customContext.trim() || undefined,
         direction,
         contentType,
         withKanji: contentType === "paragraph" ? withKanji : undefined,
-        paragraphLength: contentType === "paragraph" ? paragraphLength : undefined,
+        sentenceLength,
       });
       const unified: UnifiedExercise[] = generated.map((phrase) => ({
         prompt: direction === "jp-to-fr" ? phrase.jp_kanji || phrase.jp_kana : phrase.fr,
@@ -556,7 +638,7 @@ export function PratiquePage() {
                       className={`pratique__toggle ${contentType === "paragraph" ? "pratique__toggle--active" : ""}`}
                       onClick={() => setContentType("paragraph")}
                     >
-                      Paragraphe
+                      Histoire
                     </button>
                   </div>
                 </div>
@@ -654,9 +736,13 @@ export function PratiquePage() {
                 </div>
               </div>
 
-              {contentType === "phrases" && (
+              <div className="pratique__row">
                 <div className="pratique__field">
-                  <div className="pratique__label">Nombre</div>
+                  <div className="pratique__label">
+                    {contentType === "phrases"
+                      ? "Nombre de phrases"
+                      : "Nombre de phrases (histoire)"}
+                  </div>
                   <div className="pratique__toggleRow">
                     {[1, 3, 5, 8, 10].map((count) => (
                       <button
@@ -670,43 +756,41 @@ export function PratiquePage() {
                     ))}
                   </div>
                 </div>
-              )}
+                <div className="pratique__field">
+                  <div className="pratique__label">Longueur des phrases</div>
+                  <div className="pratique__toggleRow">
+                    {(["short", "medium", "long"] as const).map((length) => (
+                      <button
+                        key={length}
+                        type="button"
+                        className={`pratique__toggle pratique__toggle--sm ${sentenceLength === length ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setSentenceLength(length)}
+                      >
+                        {{ short: "Courtes", medium: "Moyennes", long: "Longues" }[length]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
               {contentType === "paragraph" && (
-                <div className="pratique__row">
-                  <div className="pratique__field">
-                    <div className="pratique__label">Kanji</div>
-                    <div className="pratique__toggleRow">
-                      <button
-                        type="button"
-                        className={`pratique__toggle ${withKanji ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setWithKanji(true)}
-                      >
-                        Avec
-                      </button>
-                      <button
-                        type="button"
-                        className={`pratique__toggle ${!withKanji ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setWithKanji(false)}
-                      >
-                        Sans
-                      </button>
-                    </div>
-                  </div>
-                  <div className="pratique__field">
-                    <div className="pratique__label">Longueur</div>
-                    <div className="pratique__toggleRow">
-                      {(["short", "medium", "long"] as const).map((length) => (
-                        <button
-                          key={length}
-                          type="button"
-                          className={`pratique__toggle pratique__toggle--sm ${paragraphLength === length ? "pratique__toggle--active" : ""}`}
-                          onClick={() => setParagraphLength(length)}
-                        >
-                          {{ short: "Court", medium: "Moyen", long: "Long" }[length]}
-                        </button>
-                      ))}
-                    </div>
+                <div className="pratique__field">
+                  <div className="pratique__label">Kanji</div>
+                  <div className="pratique__toggleRow">
+                    <button
+                      type="button"
+                      className={`pratique__toggle ${withKanji ? "pratique__toggle--active" : ""}`}
+                      onClick={() => setWithKanji(true)}
+                    >
+                      Avec
+                    </button>
+                    <button
+                      type="button"
+                      className={`pratique__toggle ${!withKanji ? "pratique__toggle--active" : ""}`}
+                      onClick={() => setWithKanji(false)}
+                    >
+                      Sans
+                    </button>
                   </div>
                 </div>
               )}
@@ -1068,6 +1152,16 @@ export function PratiquePage() {
                   <div className="phrasesTraining__expectedKana">{currentExercise.answerAlt}</div>
                 )}
               </div>
+
+              {!currentIsCorrect && userAnswer.trim().length > 0 && (
+                <AnswerDiff
+                  userAnswer={userAnswer.trim()}
+                  expectedAnswer={currentExercise.answer}
+                  granularity={
+                    activeTab === "phrases" && direction === "jp-to-fr" ? "word" : "character"
+                  }
+                />
+              )}
 
               {currentFeedback && (
                 <div className="phrasesTraining__tip">

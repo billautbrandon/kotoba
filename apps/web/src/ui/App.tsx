@@ -15,6 +15,7 @@ import {
 } from "../api";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { AdminPage } from "./pages/AdminPage";
+import { DialoguePage } from "./pages/DialoguePage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { HomePage } from "./pages/HomePage";
@@ -189,6 +190,14 @@ export function App() {
               className={({ isActive }) =>
                 `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
               }
+              to="/dialogue"
+            >
+              Dialogue
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
+              }
               to="/dictionary"
             >
               Dico
@@ -349,6 +358,7 @@ export function App() {
           <Route path="/kanji" element={requireAuth(<KanjiLearningPage />)} />
           <Route path="/srs" element={requireAuth(<SrsPage />)} />
           <Route path="/pratique" element={requireAuth(<PratiquePage />)} />
+          <Route path="/dialogue" element={requireAuth(<DialoguePage />)} />
           <Route path="/phrases" element={<Navigate to="/pratique?tab=phrases" replace />} />
           <Route path="/jlpt" element={<Navigate to="/pratique?tab=jlpt" replace />} />
           <Route

@@ -506,7 +506,7 @@ export type PhraseConstraints = {
   direction?: "fr-to-jp" | "jp-to-fr";
   contentType?: "phrases" | "paragraph";
   withKanji?: boolean;
-  paragraphLength?: "short" | "medium" | "long";
+  sentenceLength?: "short" | "medium" | "long";
 };
 
 export type GeneratedPhrase = {
@@ -549,6 +549,61 @@ export async function evaluatePhrase(
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ userAnswer, expectedAnswer, frenchSentence, direction }),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation");
+  }
+  return (await response.json()) as PhraseEvaluation;
+}
+
+// --- Dialogue exercises ---
+
+export type DialogueScenario = "restaurant" | "voyage" | "famille" | "travail" | "ecole" | "libre";
+export type DialogueDifficulty = "debutant" | "intermediaire";
+
+export type DialogueConstraints = {
+  tagIds: number[];
+  scenario: DialogueScenario;
+  difficulty: DialogueDifficulty;
+  count: number;
+  customContext?: string;
+};
+
+export type DialogueTurn = {
+  context: string;
+  fr: string;
+  expected_jp: string;
+  expected_kana: string;
+  wordIds: number[];
+};
+
+export async function generateDialogue(constraints: DialogueConstraints): Promise<DialogueTurn[]> {
+  const response = await fetch("/api/dialogue/generate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(constraints),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la génération du dialogue");
+  }
+  const payload = (await response.json()) as { turns: DialogueTurn[] };
+  return payload.turns;
+}
+
+export async function evaluateDialogue(
+  userTranscript: string,
+  expectedJp: string,
+  frenchPrompt: string,
+  context?: string,
+): Promise<PhraseEvaluation> {
+  const response = await fetch("/api/dialogue/evaluate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userTranscript, expectedJp, frenchPrompt, context }),
   });
   if (!response.ok) {
     const errorPayload = (await response.json()) as { error?: string };
