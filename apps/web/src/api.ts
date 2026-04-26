@@ -557,6 +557,37 @@ export async function evaluatePhrase(
   return (await response.json()) as PhraseEvaluation;
 }
 
+// --- Ask the teacher (any practice tab) ---
+
+export type AskTeacherTurn = {
+  question: string;
+  answer: string;
+};
+
+export type AskTeacherParams = {
+  question: string;
+  prompt: string;
+  expectedAnswer: string;
+  userAnswer?: string;
+  direction?: "fr-to-jp" | "jp-to-fr";
+  mode?: "phrases" | "construction" | "jlpt" | "conjugaison" | "dialogue";
+  history?: AskTeacherTurn[];
+};
+
+export async function askTeacher(params: AskTeacherParams): Promise<{ answer: string }> {
+  const response = await fetch("/api/practice/ask", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la demande au professeur");
+  }
+  return (await response.json()) as { answer: string };
+}
+
 // --- Construction (sentence builder) ---
 
 export type ConstructionBlock = {

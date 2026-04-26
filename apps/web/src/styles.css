@@ -3565,8 +3565,16 @@ select.input:focus {
   border-color: var(--color-primary);
 }
 
-.constructionBlock--dragging {
+.constructionBlock--ghost {
   opacity: 0;
+}
+
+.constructionBlock--overlay {
+  cursor: grabbing;
+  box-shadow: 0 8px 24px var(--color-shadow-strong);
+  transform: scale(1.05);
+  border-color: var(--color-primary);
+  background-color: var(--color-panel);
 }
 
 .constructionBlock__main {
@@ -3587,4 +3595,134 @@ select.input:focus {
   letter-spacing: 0;
   line-height: 1.2;
   margin-bottom: 2px;
+}
+
+.teacherChat__toggle {
+  margin-top: var(--space-4);
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--color-border-strong);
+  color: var(--color-muted);
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.teacherChat__toggle:hover {
+  color: var(--color-text);
+  border-color: var(--color-text);
+  background-color: var(--color-panel-subtle);
+}
+
+.teacherChat {
+  margin-top: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-panel-subtle);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.teacherChat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.teacherChat__title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.teacherChat__close {
+  background: none;
+  border: none;
+  color: var(--color-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.teacherChat__close:hover {
+  color: var(--color-text);
+}
+
+.teacherChat__history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.teacherChat__turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.teacherChat__bubble {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.teacherChat__bubble--user {
+  background-color: var(--color-panel);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-soft);
+  align-self: flex-end;
+  max-width: 85%;
+}
+
+.teacherChat__bubble--teacher {
+  background-color: var(--color-panel);
+  border-left: 3px solid var(--color-primary);
+  color: var(--color-text);
+  align-self: flex-start;
+  max-width: 95%;
+}
+
+.teacherChat__inputRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.teacherChat__textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 56px;
+  padding: 10px 12px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--color-panel);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.teacherChat__textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.teacherChat__send {
+  white-space: nowrap;
+  align-self: stretch;
+}
+
+.teacherChat__error {
+  margin-top: 0;
 }

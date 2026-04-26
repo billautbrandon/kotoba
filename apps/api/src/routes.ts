@@ -1607,17 +1607,17 @@ Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qu
       const isJpToFr = body.direction === "jp-to-fr";
 
       const pedagogicalRules = `Règles de feedback :
-- Si la réponse est correcte ou acceptable (même formulée différemment ou avec des synonymes), mets isCorrect à true, errorType à null et feedback à un court message d'encouragement (1-2 phrases).
-- Si l'élève s'est trompé, ton feedback DOIT contenir dans l'ordre :
-  1. 💚 Ce qui est correct dans sa réponse (toujours encourager avant de corriger).
-  2. 🎯 L'erreur précise (ex. "tu as utilisé は au lieu de が") et la règle grammaticale sous-jacente qui explique pourquoi c'est une erreur dans ce contexte.
-  3. 📝 Un mini-exemple supplémentaire (une phrase courte) pour ancrer la règle.
-- Utilise un seul emoji discret par section (💚 / 🎯 / 📝) pour rendre le feedback chaleureux et facile à lire.
-- Sépare chaque section par un saut de ligne.
-- Maximum 5 phrases au total, reste concis et précis.`;
+- Si la réponse est correcte ou acceptable (même formulée différemment ou avec des synonymes), mets isCorrect à true, errorType à null et feedback à une phrase brève qui valide la réponse et précise éventuellement une nuance ou une variante utile.
+- Si la réponse est incorrecte, le feedback doit suivre cet ordre, sans titres ni emojis ni symboles décoratifs :
+  1. Une phrase qui identifie précisément l'erreur (par exemple "L'erreur porte sur la particule : tu as écrit は au lieu de が.").
+  2. Une phrase qui explique la règle grammaticale ou lexicale qui s'applique ici, en termes clairs.
+  3. Une phrase facultative donnant un exemple court qui illustre la règle.
+- Style attendu : ton de professeur en classe — clair, direct, posé, professionnel. Pas de flagornerie ni d'enthousiasme excessif.
+- Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif (pas de 💚, 🎯, 📝, ✓, ✗, ✅, ❌, etc.). Pas de "Bravo !", "Super !", "Génial !".
+- Maximum 4 phrases au total. Sois concis et précis.`;
 
       const prompt = isJpToFr
-        ? `Tu es un professeur de japonais bienveillant et très pédagogue. Un élève devait traduire cette phrase japonaise en français :
+        ? `Tu es un professeur de japonais expérimenté qui corrige le devoir d'un élève. Un élève devait traduire cette phrase japonaise en français :
 
 Phrase japonaise : "${body.frenchSentence}"
 Réponse attendue (français) : "${body.expectedAnswer}"
@@ -1632,7 +1632,7 @@ Règles de classification :
 - errorType doit être "vocabulary" si l'erreur porte sur un mot mal traduit, "grammar" si c'est une erreur de structure, "meaning" si le sens global est différent, "other" sinon.
 
 ${pedagogicalRules}`
-        : `Tu es un professeur de japonais bienveillant et très pédagogue. Un élève devait traduire cette phrase française en japonais :
+        : `Tu es un professeur de japonais expérimenté qui corrige le devoir d'un élève. Un élève devait traduire cette phrase française en japonais :
 
 Phrase française : "${body.frenchSentence}"
 Réponse attendue : "${body.expectedAnswer}"
@@ -1864,6 +1864,103 @@ ${body.customContext ? `Contexte additionnel de l'élève : ${body.customContext
     }),
   );
 
+  // --- Practice "ask the teacher" endpoint (used across all training tabs) ---
+
+  app.post(
+    "/api/practice/ask",
+    wrapAsync(async (req, res) => {
+      getRequiredUserId(req);
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        question: z.string().min(1).max(800),
+        prompt: z.string().min(1),
+        expectedAnswer: z.string().min(1),
+        userAnswer: z.string().max(2000).optional().default(""),
+        direction: z.enum(["fr-to-jp", "jp-to-fr"]).optional(),
+        mode: z.enum(["phrases", "construction", "jlpt", "conjugaison", "dialogue"]).optional(),
+        history: z
+          .array(
+            z.object({
+              question: z.string().max(800),
+              answer: z.string().max(2000),
+            }),
+          )
+          .max(10)
+          .optional()
+          .default([]),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const directionLabel =
+        body.direction === "jp-to-fr"
+          ? "Japonais → Français"
+          : body.direction === "fr-to-jp"
+            ? "Français → Japonais"
+            : null;
+
+      const historyBlock =
+        body.history.length > 0
+          ? `\nÉchanges précédents avec cet élève sur le même exercice :\n${body.history
+              .map(
+                (turn, index) =>
+                  `(${index + 1}) Élève : "${turn.question}"\n    Toi : "${turn.answer}"`,
+              )
+              .join("\n")}\n`
+          : "";
+
+      const askPrompt = `Tu es un professeur de japonais expérimenté qui répond à la question d'un élève portant sur un exercice en cours.
+
+Énoncé de l'exercice : "${body.prompt}"
+Réponse correcte : "${body.expectedAnswer}"${
+        body.userAnswer.trim().length > 0
+          ? `\nRéponse en cours de l'élève : "${body.userAnswer}"`
+          : ""
+      }${directionLabel ? `\nDirection : ${directionLabel}` : ""}
+${historyBlock}
+Question de l'élève : "${body.question}"
+
+Règles de réponse :
+- Adresse-toi à l'élève comme un professeur en classe : ton clair, direct, posé, professionnel.
+- N'écris pas de salutation ni de formule d'introduction. Va à l'essentiel.
+- Réponds en français à la question posée. Explique précisément la règle, la nuance ou le sens demandé, puis donne un ou deux exemples concrets si c'est pertinent.
+- Si la question est ambiguë, demande une précision en une phrase.
+- Ne dévoile pas la réponse complète à l'élève sauf si la question le demande explicitement (par exemple "comment dit-on cette phrase ?"). Préfère guider l'élève vers la solution.
+- Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif (pas de 💚, 🎯, 📝, ✓, ✗, ✅, ❌, etc.). Pas de "Bravo !", "Super !", "Excellente question !".
+- Maximum 6 phrases. Sois concis : 2 ou 3 phrases si la question est simple.
+
+Réponds UNIQUEMENT au format JSON avec cette structure exacte :
+{"answer": "Ta réponse pédagogique ici"}`;
+
+      type AskResult = { answer?: string };
+
+      try {
+        const result = await callGeminiJson<AskResult>(askPrompt);
+        incrementGeminiUsage(database);
+        const answer = (result.answer ?? "").trim();
+        if (answer.length === 0) {
+          res.status(502).json({ error: "L'IA n'a pas fourni de réponse." });
+          return;
+        }
+        res.json({ answer });
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Practice ask failed:", message);
+        res.status(502).json({ error: `Erreur de l'IA : ${message}` });
+      }
+    }),
+  );
+
   // --- Dialogue AI endpoints ---
 
   app.post(
@@ -2034,15 +2131,17 @@ Le champ used_words_fr contient les mots français du vocabulaire cible utilisé
       }
 
       const pedagogicalRules = `Règles de feedback :
-- Si la réponse est correcte ou acceptable (même formulée différemment, avec des synonymes ou une légère variation de politesse), mets isCorrect à true, errorType à null et feedback à un court encouragement (1-2 phrases).
-- Si l'élève s'est trompé, ton feedback DOIT contenir dans l'ordre :
-  1. 💚 Ce qui est correct ou bien essayé (toujours encourager avant de corriger, la dictée vocale peut introduire de petits bruits).
-  2. 🎯 L'erreur précise et la règle grammaticale ou lexicale sous-jacente.
-  3. 📝 Un mini-exemple supplémentaire (phrase courte) pour ancrer la règle.
-- Maximum 5 phrases au total. Sépare les sections par un saut de ligne.
-- Sois particulièrement tolérant aux petites erreurs de transcription vocale (un caractère absent ou proche phonétiquement) si le sens est clair.`;
+- Si la réponse est correcte ou acceptable (même formulée différemment, avec des synonymes ou une légère variation de politesse), mets isCorrect à true, errorType à null et feedback à une phrase brève qui valide la réponse.
+- Si la réponse est incorrecte, le feedback doit suivre cet ordre, sans titres ni emojis ni symboles décoratifs :
+  1. Une phrase qui identifie précisément l'erreur.
+  2. Une phrase qui explique la règle grammaticale ou lexicale concernée, en termes clairs.
+  3. Une phrase facultative donnant un exemple court qui illustre la règle.
+- Style attendu : ton de professeur en classe — clair, direct, posé, professionnel. Pas de flagornerie.
+- Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif (pas de 💚, 🎯, 📝, ✓, ✗, etc.). Pas de "Bravo !" ni d'exclamations enthousiastes.
+- Sois particulièrement tolérant aux petites erreurs de transcription vocale (un caractère absent ou proche phonétiquement) si le sens est clair : ne les signale pas comme des erreurs.
+- Maximum 4 phrases au total.`;
 
-      const prompt = `Tu es un professeur de japonais bienveillant et très pédagogue. L'élève pratique l'oral : il a dicté sa réponse via la reconnaissance vocale du navigateur, donc de petites imperfections de transcription peuvent apparaître.
+      const prompt = `Tu es un professeur de japonais expérimenté qui corrige une production orale. L'élève a dicté sa réponse via la reconnaissance vocale du navigateur, donc de petites imperfections de transcription peuvent apparaître.
 
 ${body.context ? `Contexte de la scène : "${body.context}"\n` : ""}Ce que l'élève devait dire (en français) : "${body.frenchPrompt}"
 Réponse japonaise attendue : "${body.expectedJp}"
@@ -2213,8 +2312,15 @@ ${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le a
 
       const isJpToFr = body.direction === "jp-to-fr";
 
+      const jlptPedagogicalRules = `Règles de feedback :
+- Si la réponse est correcte ou acceptable, mets isCorrect à true et feedback à une phrase brève qui valide la réponse.
+- Si la réponse est incorrecte, le feedback doit suivre cet ordre, sans titres ni emojis ni symboles décoratifs : (1) une phrase qui identifie précisément l'erreur, (2) une phrase qui explique la règle grammaticale ou lexicale concernée, (3) une phrase facultative avec un exemple court.
+- Style attendu : ton de professeur en classe — clair, direct, posé, professionnel. Pas de flagornerie, pas d'exclamations.
+- Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif (💚, 🎯, 📝, ✓, ✗, etc.).
+- Maximum 4 phrases. Le feedback est en français.`;
+
       const evalPrompt = isJpToFr
-        ? `Tu es un professeur de japonais bienveillant (niveau JLPT N5). Un élève devait traduire du japonais vers le français :
+        ? `Tu es un professeur de japonais expérimenté (niveau JLPT N5) qui corrige le devoir d'un élève. Un élève devait traduire du japonais vers le français :
 
 Texte japonais : "${body.prompt}"
 Réponse attendue (français) : "${body.expectedAnswer}"
@@ -2223,8 +2329,10 @@ Réponse de l'élève : "${body.userAnswer}"
 Réponds UNIQUEMENT au format JSON :
 {"isCorrect": false, "errorType": "vocabulary|grammar|meaning|other", "feedback": "Conseil pédagogique"}
 
-Sois tolérant sur les formulations françaises. Le feedback doit être en français, court et encourageant.`
-        : `Tu es un professeur de japonais bienveillant (niveau JLPT N5). Un élève devait traduire du français vers le japonais :
+Sois tolérant sur les formulations françaises si le sens est correct.
+
+${jlptPedagogicalRules}`
+        : `Tu es un professeur de japonais expérimenté (niveau JLPT N5) qui corrige le devoir d'un élève. Un élève devait traduire du français vers le japonais :
 
 Texte français : "${body.prompt}"
 Réponse attendue (japonais) : "${body.expectedAnswer}"
@@ -2233,7 +2341,9 @@ Réponse de l'élève : "${body.userAnswer}"
 Réponds UNIQUEMENT au format JSON :
 {"isCorrect": false, "errorType": "particle|conjugation|kanji|other", "feedback": "Conseil pédagogique"}
 
-Si la réponse est en kana au lieu de kanji mais correcte, accepte-la. Le feedback doit être en français, court et encourageant.`;
+Si la réponse est en kana au lieu de kanji mais correcte, accepte-la.
+
+${jlptPedagogicalRules}`;
 
       type EvalResult = {
         isCorrect: boolean;
@@ -2508,13 +2618,20 @@ Retourne un tableau JSON. Exemple :
         return;
       }
 
-      const geminiPrompt = `Tu évalues une réponse de conjugaison japonaise.
+      const geminiPrompt = `Tu es un professeur de japonais qui corrige une réponse de conjugaison.
 Consigne : ${body.prompt}
 Réponse attendue : ${body.expected}
 Réponse de l'élève : ${body.userAnswer}
 
 Évalue la réponse. Retourne un objet JSON :
-{ "isCorrect": true/false, "correctedAnswer": "la réponse correcte", "explanation": "explication courte" }`;
+{ "isCorrect": true/false, "correctedAnswer": "la réponse correcte", "explanation": "explication courte" }
+
+Règles pour le champ explanation :
+- Si la réponse est correcte, une phrase brève qui valide et précise éventuellement la règle de conjugaison appliquée.
+- Si la réponse est incorrecte : une phrase qui identifie l'erreur, puis une phrase qui rappelle la règle de conjugaison applicable. Une phrase d'exemple court est facultative.
+- Style attendu : ton de professeur — clair, direct, posé, professionnel.
+- Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif. Pas de "Bravo !", pas d'exclamations enthousiastes.
+- Maximum 3 phrases.`;
 
       incrementGeminiUsage(database);
       const evaluation = await callGeminiJson(geminiPrompt);

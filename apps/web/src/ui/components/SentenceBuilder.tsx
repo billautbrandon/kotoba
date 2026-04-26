@@ -1,6 +1,8 @@
 import {
   DndContext,
   type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
@@ -59,6 +61,18 @@ export function joinBlocks(
     .join(separator);
 }
 
+function BlockContent({ block }: { block: ConstructionBlock }) {
+  if (block.furigana) {
+    return (
+      <ruby className="constructionBlock__ruby">
+        {block.text}
+        <rt className="constructionBlock__furigana">{block.furigana}</rt>
+      </ruby>
+    );
+  }
+  return <span className="constructionBlock__main">{block.text}</span>;
+}
+
 type BlockChipProps = {
   blockId: string;
   block: ConstructionBlock;
@@ -85,21 +99,14 @@ function BlockChip({ blockId, block, variant, disabled, onClick }: BlockChipProp
       type="button"
       style={style}
       className={`constructionBlock constructionBlock--${variant} ${
-        isDragging ? "constructionBlock--dragging" : ""
+        isDragging ? "constructionBlock--ghost" : ""
       }`}
       disabled={disabled}
       onClick={onClick}
       {...attributes}
       {...listeners}
     >
-      {block.furigana ? (
-        <ruby className="constructionBlock__ruby">
-          {block.text}
-          <rt className="constructionBlock__furigana">{block.furigana}</rt>
-        </ruby>
-      ) : (
-        <span className="constructionBlock__main">{block.text}</span>
-      )}
+      <BlockContent block={block} />
     </button>
   );
 }
@@ -168,12 +175,14 @@ export function SentenceBuilder({
     shuffleIndices(blocks.length).map(buildBlockId),
   );
   const [answerBlockIds, setAnswerBlockIds] = useState<string[]>([]);
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
   const previousResetKey = useRef(resetKey);
   if (previousResetKey.current !== resetKey) {
     previousResetKey.current = resetKey;
     setPoolBlockIds(shuffleIndices(blocks.length).map(buildBlockId));
     setAnswerBlockIds([]);
+    setActiveBlockId(null);
   }
 
   const onChangeRef = useRef(onChange);
@@ -207,7 +216,16 @@ export function SentenceBuilder({
     }
   }
 
+  function handleDragStart(event: DragStartEvent) {
+    setActiveBlockId(String(event.active.id));
+  }
+
+  function handleDragCancel() {
+    setActiveBlockId(null);
+  }
+
   function handleDragEnd(event: DragEndEvent) {
+    setActiveBlockId(null);
     const { active, over } = event;
     if (!over) return;
 
@@ -258,9 +276,19 @@ export function SentenceBuilder({
 
   const previewSentence = joinBlocks(blocks, answerBlockIds.map(parseBlockId), separator);
 
+  const activeBlock = activeBlockId !== null ? (blocks[parseBlockId(activeBlockId)] ?? null) : null;
+  const activeBlockVariant: "pool" | "answer" =
+    activeBlockId !== null && answerBlockIds.includes(activeBlockId) ? "answer" : "pool";
+
   return (
     <div className="sentenceBuilder">
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
         <div className="sentenceBuilder__answerLabel">Ta phrase</div>
         <DropZone
           zoneId={ANSWER_ZONE_ID}
@@ -283,6 +311,16 @@ export function SentenceBuilder({
           emptyLabel="Tous les blocs ont été placés."
           onBlockClick={handleBlockClick}
         />
+
+        <DragOverlay dropAnimation={null}>
+          {activeBlock ? (
+            <div
+              className={`constructionBlock constructionBlock--${activeBlockVariant} constructionBlock--overlay`}
+            >
+              <BlockContent block={activeBlock} />
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
     </div>
   );

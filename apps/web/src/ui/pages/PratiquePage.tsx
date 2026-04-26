@@ -28,6 +28,7 @@ import {
 import { AnswerDiff } from "../components/AnswerDiff";
 import { QuotaBar } from "../components/QuotaBar";
 import { SentenceBuilder, joinBlocks } from "../components/SentenceBuilder";
+import { TeacherChat } from "../components/TeacherChat";
 import { VoiceButton } from "../components/VoiceButton";
 
 type PratiqueTab = "phrases" | "jlpt" | "conjugaison" | "construction";
@@ -1403,6 +1404,15 @@ export function PratiquePage() {
               {errorMessage}
             </div>
           )}
+
+          <TeacherChat
+            prompt={currentExercise.prompt}
+            expectedAnswer={currentExercise.answer}
+            userAnswer={userAnswer}
+            direction={currentExercise.direction ?? direction}
+            mode={activeTab}
+            resetKey={`${activeTab}-${currentIndex}`}
+          />
 
           {hasCheckedCurrent && currentIsCorrect !== null && (
             <div className="phrasesTraining__feedback">
