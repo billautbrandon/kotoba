@@ -1771,12 +1771,19 @@ Pour chaque phrase, tu dois aussi fournir :
   * Chaque mot de contenu (nom, verbe, adjectif) est un bloc indépendant, terminaisons et conjugaisons INCLUSES dans le même bloc (ex : "食べました" est un seul bloc).
   * La copule です/だ est un bloc à part.
   * Les conjonctions (それから, でも, だから, etc.) sont chacune un bloc.
-  * Pour chaque bloc contenant au moins UN kanji, ajoute "furigana" avec la lecture COMPLÈTE du bloc en hiragana (couvre TOUTE la chaîne du bloc, kanji + okurigana). N'inclus PAS de furigana pour les blocs purement en kana.
-  * Concaténer tous les "text" des blocs (sans espace) doit reproduire EXACTEMENT jp_kanji.
-- blocks_fr : la phrase française tokenisée en mots ; chaque ponctuation (virgule, point, point d'exclamation/interrogation) est un bloc séparé.
+  * Toute ponctuation japonaise présente dans jp_kanji DOIT apparaître comme un bloc séparé, sans furigana :
+    - le point japonais 。 (un bloc 。 par phrase ; s'il y a plusieurs phrases enchaînées, mets autant de blocs 。 que de phrases) ;
+    - la virgule japonaise 、 ;
+    - les points d'interrogation et d'exclamation pleine chasse ？ et ！ ;
+    - les guillemets de citation 「 et 」 (et 『 』 pour citer une œuvre, un livre, un titre) — chaque crochet ouvrant et chaque crochet fermant est un bloc à part ;
+    - le point médian ・ et les autres signes typographiques japonais (… ／ etc.) le cas échéant.
+    N'utilise PAS la ponctuation occidentale (. , ? ! " ' « ») dans jp_kanji ni dans blocks_jp : seule la ponctuation japonaise pleine chasse est admise.
+  * Pour chaque bloc contenant au moins UN kanji, ajoute "furigana" avec la lecture COMPLÈTE du bloc en hiragana (couvre TOUTE la chaîne du bloc, kanji + okurigana). N'inclus PAS de furigana pour les blocs purement en kana ni pour les blocs de ponctuation.
+  * Concaténer tous les "text" des blocs dans l'ordre, sans espace, doit reproduire EXACTEMENT jp_kanji (ponctuation incluse).
+- blocks_fr : la phrase française tokenisée en mots ; chaque ponctuation (virgule, point, point d'exclamation/interrogation, guillemets) est un bloc séparé.
 
 Réponds UNIQUEMENT au format JSON, un tableau d'objets avec cette structure exacte :
-[{"fr": "La phrase en français", "jp_kanji": "La phrase japonaise avec kanji", "jp_kana": "La phrase japonaise tout en kana", "blocks_jp": [{"text": "私", "furigana": "わたし"}, {"text": "は"}, {"text": "学生", "furigana": "がくせい"}, {"text": "です"}], "blocks_fr": ["Je", "suis", "étudiant"], "explanation": "Brève explication grammaticale", "used_words_fr": ["mot1_fr"]}]
+[{"fr": "La phrase en français.", "jp_kanji": "私は「ノルウェイの森」を読みました。", "jp_kana": "わたしは「のるうぇいのもり」をよみました。", "blocks_jp": [{"text": "私", "furigana": "わたし"}, {"text": "は"}, {"text": "「"}, {"text": "ノルウェイの森", "furigana": "ノルウェイのもり"}, {"text": "」"}, {"text": "を"}, {"text": "読みました", "furigana": "よみました"}, {"text": "。"}], "blocks_fr": ["J'", "ai", "lu", "«", "La", "Ballade", "de", "l'impossible", "»", "."], "explanation": "Brève explication grammaticale", "used_words_fr": ["mot1_fr"]}]
 
 ${body.customContext ? `Contexte additionnel de l'élève : ${body.customContext}\n` : ""}Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qui ont été utilisés.`;
 
@@ -1835,12 +1842,48 @@ ${body.customContext ? `Contexte additionnel de l'élève : ${body.customContext
                   : undefined,
             }))
             .filter((block) => block.text.length > 0);
+
+          const rawJpKanji = phrase.jp_kanji ?? "";
+          const concatenatedFromBlocks = blocksJp.map((block) => block.text).join("");
+
+          // If the AI listed Japanese punctuation only in jp_kanji but forgot the matching blocks,
+          // try to recover those trailing punctuation marks so the learner can reconstruct
+          // the expected answer exactly.
+          if (rawJpKanji.length > 0 && concatenatedFromBlocks !== rawJpKanji) {
+            const japanesePunctuationCharacters = new Set([
+              "。",
+              "、",
+              "？",
+              "！",
+              "「",
+              "」",
+              "『",
+              "』",
+              "・",
+              "…",
+            ]);
+            if (rawJpKanji.startsWith(concatenatedFromBlocks)) {
+              const missingSuffix = rawJpKanji.slice(concatenatedFromBlocks.length);
+              const onlyPunctuationMissing = Array.from(missingSuffix).every((character) =>
+                japanesePunctuationCharacters.has(character),
+              );
+              if (onlyPunctuationMissing) {
+                for (const character of missingSuffix) {
+                  blocksJp.push({ text: character, furigana: undefined });
+                }
+              }
+            }
+          }
+
+          const finalJpKanji = blocksJp.map((block) => block.text).join("") || rawJpKanji;
+
           const blocksFr = (phrase.blocks_fr ?? []).filter(
             (token): token is string => typeof token === "string" && token.length > 0,
           );
+
           return {
             fr: phrase.fr ?? "",
-            jp_kanji: phrase.jp_kanji ?? "",
+            jp_kanji: finalJpKanji,
             jp_kana: phrase.jp_kana ?? "",
             blocks_jp: blocksJp,
             blocks_fr: blocksFr,
