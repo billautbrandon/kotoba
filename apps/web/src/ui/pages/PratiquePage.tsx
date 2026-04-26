@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   type ConjugationEvaluation,
   type ConjugationExercise,
+  type ConstructionBlock,
   type GeminiQuota,
   type GeneratedPhrase,
   type JlptConstraints,
@@ -19,15 +20,17 @@ import {
   fetchSeriesWords,
   fetchTags,
   generateConjugationExercises,
+  generateConstructionPhrases,
   generateJlptExercises,
   generatePhrases,
   submitBulkReviews,
 } from "../../api";
 import { AnswerDiff } from "../components/AnswerDiff";
 import { QuotaBar } from "../components/QuotaBar";
+import { SentenceBuilder, joinBlocks } from "../components/SentenceBuilder";
 import { VoiceButton } from "../components/VoiceButton";
 
-type PratiqueTab = "phrases" | "jlpt" | "conjugaison";
+type PratiqueTab = "phrases" | "jlpt" | "conjugaison" | "construction";
 type PratiquePhase = "setup" | "training" | "recap";
 type SentenceLength = "short" | "medium" | "long";
 
@@ -103,6 +106,9 @@ type UnifiedExercise = {
   explanation?: string;
   wordIds?: number[];
   frenchPrompt?: string;
+  blocks?: ConstructionBlock[];
+  blockSeparator?: string;
+  direction?: "fr-to-jp" | "jp-to-fr";
 };
 
 type UnifiedResult = {
@@ -376,8 +382,61 @@ export function PratiquePage() {
     }
   }
 
+  async function handleGenerateConstruction() {
+    if (selectedTagIds.length === 0 || selectedParticles.length === 0) return;
+    setIsGenerating(true);
+    setErrorMessage(null);
+    try {
+      const generated = await generateConstructionPhrases({
+        tagIds: selectedTagIds,
+        particles: selectedParticles,
+        tense,
+        polarity,
+        politeness,
+        count: phraseCount,
+        customContext: customContext.trim() || undefined,
+        direction,
+        sentenceLength,
+      });
+      const isJpToFr = direction === "jp-to-fr";
+      const unified: UnifiedExercise[] = generated.map((phrase) => {
+        const blocks: ConstructionBlock[] = isJpToFr
+          ? phrase.blocks_fr.map((token) => ({ text: token }))
+          : phrase.blocks_jp;
+        return {
+          prompt: isJpToFr ? phrase.jp_kanji || phrase.jp_kana : phrase.fr,
+          answer: isJpToFr ? phrase.fr : phrase.jp_kanji || phrase.jp_kana,
+          answerAlt: isJpToFr ? undefined : phrase.jp_kana,
+          explanation: phrase.explanation,
+          wordIds: phrase.wordIds,
+          frenchPrompt: phrase.fr,
+          blocks,
+          blockSeparator: isJpToFr ? " " : "",
+          direction,
+        };
+      });
+      if (unified.length === 0) {
+        setErrorMessage("Aucune phrase exploitable n'a été générée.");
+        return;
+      }
+      setExercises(unified);
+      setCurrentIndex(0);
+      setUserAnswer("");
+      setResults([]);
+      setHasCheckedCurrent(false);
+      setReviewsSubmitted(false);
+      setPhase("training");
+      refreshQuota();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   function handleGenerate() {
     if (activeTab === "phrases") handleGeneratePhrases();
+    else if (activeTab === "construction") handleGenerateConstruction();
     else if (activeTab === "jlpt") handleGenerateJlpt();
     else handleGenerateConjugation();
   }
@@ -396,6 +455,16 @@ export function PratiquePage() {
           currentExercise.answer,
           currentExercise.prompt,
           direction,
+        );
+        setCurrentIsCorrect(evaluation.isCorrect);
+        setCurrentFeedback(evaluation.feedback);
+      } else if (activeTab === "construction") {
+        const exerciseDirection = currentExercise.direction ?? direction;
+        const evaluation = await evaluatePhrase(
+          userAnswer.trim(),
+          currentExercise.answer,
+          currentExercise.frenchPrompt ?? currentExercise.prompt,
+          exerciseDirection,
         );
         setCurrentIsCorrect(evaluation.isCorrect);
         setCurrentFeedback(evaluation.feedback);
@@ -529,9 +598,10 @@ export function PratiquePage() {
     return { correct, incorrect, skipped };
   }, [results]);
 
-  // Phrases SRS word IDs
+  // Phrases & Construction SRS word IDs
   const allWordIdsForSrs = useMemo(() => {
-    if (activeTab !== "phrases") return { successWordIds: [], failWordIds: [] };
+    if (activeTab !== "phrases" && activeTab !== "construction")
+      return { successWordIds: [], failWordIds: [] };
     const successWordIds: number[] = [];
     const failWordIds: number[] = [];
     for (const result of results) {
@@ -576,7 +646,8 @@ export function PratiquePage() {
   }
 
   function getVoiceLang(): string {
-    if (activeTab === "phrases") return direction === "jp-to-fr" ? "fr-FR" : "ja-JP";
+    if (activeTab === "phrases" || activeTab === "construction")
+      return direction === "jp-to-fr" ? "fr-FR" : "ja-JP";
     if (activeTab === "jlpt") return jlptDirection === "fr-to-jp" ? "ja-JP" : "fr-FR";
     return "ja-JP";
   }
@@ -586,14 +657,20 @@ export function PratiquePage() {
     return (
       <div className="pratique">
         <div className="pratique__tabs">
-          {(["phrases", "jlpt", "conjugaison"] as const).map((tab) => (
+          {(["phrases", "construction", "jlpt", "conjugaison"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
               className={`pratique__tab ${activeTab === tab ? "pratique__tab--active" : ""}`}
               onClick={() => handleTabChange(tab)}
             >
-              {tab === "phrases" ? "Phrases" : tab === "jlpt" ? "JLPT N5" : "Conjugaison"}
+              {tab === "phrases"
+                ? "Phrases"
+                : tab === "construction"
+                  ? "Construction"
+                  : tab === "jlpt"
+                    ? "JLPT N5"
+                    : "Conjugaison"}
             </button>
           ))}
         </div>
@@ -819,6 +896,179 @@ export function PratiquePage() {
             </>
           )}
 
+          {activeTab === "construction" && (
+            <>
+              <div className="pratique__row">
+                <div className="pratique__field">
+                  <div className="pratique__label">Direction</div>
+                  <div className="pratique__toggleRow">
+                    <button
+                      type="button"
+                      className={`pratique__toggle ${direction === "fr-to-jp" ? "pratique__toggle--active" : ""}`}
+                      onClick={() => setDirection("fr-to-jp")}
+                    >
+                      FR → JP
+                    </button>
+                    <button
+                      type="button"
+                      className={`pratique__toggle ${direction === "jp-to-fr" ? "pratique__toggle--active" : ""}`}
+                      onClick={() => setDirection("jp-to-fr")}
+                    >
+                      JP → FR
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pratique__field">
+                <div className="pratique__label">Tags</div>
+                <div className="pratique__chipGrid">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`pratique__chip ${selectedTagIds.includes(tag.id) ? "pratique__chip--active" : ""}`}
+                      onClick={() =>
+                        setSelectedTagIds((previous) =>
+                          previous.includes(tag.id)
+                            ? previous.filter((id) => id !== tag.id)
+                            : [...previous, tag.id],
+                        )
+                      }
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pratique__field">
+                <div className="pratique__label">Particules</div>
+                <div className="pratique__chipGrid">
+                  {AVAILABLE_PARTICLES.map((particle) => (
+                    <button
+                      key={particle}
+                      type="button"
+                      className={`pratique__chip pratique__chip--particle ${selectedParticles.includes(particle) ? "pratique__chip--active" : ""}`}
+                      onClick={() =>
+                        setSelectedParticles((previous) =>
+                          previous.includes(particle)
+                            ? previous.filter((p) => p !== particle)
+                            : [...previous, particle],
+                        )
+                      }
+                    >
+                      {particle}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pratique__row pratique__row--grammar">
+                <div className="pratique__field pratique__field--compact">
+                  <div className="pratique__label">Temps</div>
+                  <div className="pratique__toggleRow">
+                    {TENSE_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`pratique__toggle pratique__toggle--sm ${tense === option.value ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setTense(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="pratique__field pratique__field--compact">
+                  <div className="pratique__label">Polarité</div>
+                  <div className="pratique__toggleRow">
+                    {POLARITY_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`pratique__toggle pratique__toggle--sm ${polarity === option.value ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setPolarity(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="pratique__field pratique__field--compact">
+                  <div className="pratique__label">Politesse</div>
+                  <div className="pratique__toggleRow">
+                    {POLITENESS_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`pratique__toggle pratique__toggle--sm ${politeness === option.value ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setPoliteness(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pratique__row">
+                <div className="pratique__field">
+                  <div className="pratique__label">Nombre de phrases</div>
+                  <div className="pratique__toggleRow">
+                    {[1, 3, 5, 8, 10].map((count) => (
+                      <button
+                        key={count}
+                        type="button"
+                        className={`pratique__toggle pratique__toggle--sm ${phraseCount === count ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setPhraseCount(count)}
+                      >
+                        {count}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="pratique__field">
+                  <div className="pratique__label">Longueur des phrases</div>
+                  <div className="pratique__toggleRow">
+                    {(["short", "medium", "long"] as const).map((length) => (
+                      <button
+                        key={length}
+                        type="button"
+                        className={`pratique__toggle pratique__toggle--sm ${sentenceLength === length ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setSentenceLength(length)}
+                      >
+                        {{ short: "Courtes", medium: "Moyennes", long: "Longues" }[length]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {!showContext ? (
+                <button
+                  type="button"
+                  className="pratique__contextToggle"
+                  onClick={() => setShowContext(true)}
+                >
+                  + Ajouter un contexte
+                </button>
+              ) : (
+                <div className="pratique__field">
+                  <div className="pratique__label">Contexte (optionnel)</div>
+                  <textarea
+                    className="pratique__textarea"
+                    placeholder="Ex : Phrases du quotidien, vocabulaire de cuisine…"
+                    value={customContext}
+                    onChange={(event) => setCustomContext(event.target.value)}
+                    maxLength={500}
+                    rows={2}
+                  />
+                </div>
+              )}
+            </>
+          )}
+
           {activeTab === "jlpt" && (
             <>
               <div className="pratique__row">
@@ -1021,7 +1271,7 @@ export function PratiquePage() {
             onClick={handleGenerate}
             disabled={
               isGenerating ||
-              (activeTab === "phrases" &&
+              ((activeTab === "phrases" || activeTab === "construction") &&
                 (selectedTagIds.length === 0 || selectedParticles.length === 0)) ||
               (activeTab === "conjugaison" && (!conjTagId || conjForms.size === 0))
             }
@@ -1085,6 +1335,23 @@ export function PratiquePage() {
                 }}
                 placeholder="Ta conjugaison…"
                 disabled={hasCheckedCurrent}
+              />
+            ) : activeTab === "construction" && currentExercise.blocks ? (
+              <SentenceBuilder
+                blocks={currentExercise.blocks}
+                separator={currentExercise.blockSeparator ?? ""}
+                disabled={hasCheckedCurrent}
+                resetKey={currentIndex}
+                onChange={(orderedIndices) => {
+                  if (!currentExercise.blocks) return;
+                  setUserAnswer(
+                    joinBlocks(
+                      currentExercise.blocks,
+                      orderedIndices,
+                      currentExercise.blockSeparator ?? "",
+                    ),
+                  );
+                }}
               />
             ) : (
               <div className="phrasesTraining__inputRow">
@@ -1281,7 +1548,7 @@ export function PratiquePage() {
       {errorMessage && <div className="formError">{errorMessage}</div>}
 
       <div className="phrasesRecap__actions">
-        {activeTab === "phrases" && (
+        {(activeTab === "phrases" || activeTab === "construction") && (
           <button
             className="button button--primary"
             type="button"

@@ -557,6 +557,42 @@ export async function evaluatePhrase(
   return (await response.json()) as PhraseEvaluation;
 }
 
+// --- Construction (sentence builder) ---
+
+export type ConstructionBlock = {
+  text: string;
+  furigana?: string;
+};
+
+export type ConstructionPhrase = {
+  fr: string;
+  jp_kanji: string;
+  jp_kana: string;
+  blocks_jp: ConstructionBlock[];
+  blocks_fr: string[];
+  explanation: string;
+  wordIds: number[];
+};
+
+export type ConstructionConstraints = Omit<PhraseConstraints, "contentType" | "withKanji">;
+
+export async function generateConstructionPhrases(
+  constraints: ConstructionConstraints,
+): Promise<ConstructionPhrase[]> {
+  const response = await fetch("/api/construction/generate", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(constraints),
+  });
+  if (!response.ok) {
+    const errorPayload = (await response.json()) as { error?: string };
+    throw new Error(errorPayload.error ?? "Erreur lors de la génération des blocs");
+  }
+  const payload = (await response.json()) as { phrases: ConstructionPhrase[] };
+  return payload.phrases;
+}
+
 // --- Dialogue exercises ---
 
 export type DialogueScenario = "restaurant" | "voyage" | "famille" | "travail" | "ecole" | "libre";

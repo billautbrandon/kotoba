@@ -1674,6 +1674,196 @@ ${pedagogicalRules}`;
     }),
   );
 
+  // --- Construction (sentence builder) AI endpoint ---
+
+  app.post(
+    "/api/construction/generate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        tagIds: z.array(z.number().int().positive()).min(1),
+        particles: z.array(z.string()).min(1),
+        tense: z.enum(["present", "past", "te-form"]),
+        polarity: z.enum(["affirmative", "negative"]),
+        politeness: z.enum(["casual", "polite"]),
+        count: z.number().int().min(1).max(10),
+        customContext: z.string().max(500).optional(),
+        direction: z.enum(["fr-to-jp", "jp-to-fr"]).optional().default("fr-to-jp"),
+        sentenceLength: z.enum(["short", "medium", "long"]).optional().default("medium"),
+      });
+      const body = bodySchema.parse(req.body);
+
+      type VocabRow = { id: number; french: string; kana: string | null; kanji: string | null };
+      const placeholders = body.tagIds.map(() => "?").join(",");
+      const vocabularyRows = database
+        .prepare(
+          `
+          SELECT DISTINCT w.id, w.french, w.kana, w.kanji
+          FROM words w
+          INNER JOIN word_tags wt ON wt.word_id = w.id
+          WHERE wt.tag_id IN (${placeholders})
+            AND w.user_id = ?
+          ORDER BY RANDOM()
+          `,
+        )
+        .all(...body.tagIds, userId) as VocabRow[];
+
+      if (vocabularyRows.length === 0) {
+        res.status(400).json({ error: "Aucun mot trouvé pour les tags sélectionnés." });
+        return;
+      }
+
+      const vocabularyPool = vocabularyRows.map((row) => ({
+        id: row.id,
+        fr: row.french,
+        jp: row.kanji ?? row.kana ?? "",
+        kana: row.kana ?? "",
+      }));
+
+      const tenseLabels: Record<string, string> = {
+        present: "Présent",
+        past: "Passé",
+        "te-form": "Forme en -te",
+      };
+      const polarityLabels: Record<string, string> = {
+        affirmative: "Affirmatif",
+        negative: "Négatif",
+      };
+      const politenessLabels: Record<string, string> = {
+        casual: "Courant/Neutre (forme courte)",
+        polite: "Poli/Desu-Masu",
+      };
+      const sentenceLengthWordsLabels: Record<string, string> = {
+        short: "5-7 mots",
+        medium: "8-12 mots",
+        long: "13-20 mots avec des subordonnées",
+      };
+
+      const prompt = `Tu es un professeur de japonais. En utilisant UNIQUEMENT le vocabulaire fourni ci-dessous (et des verbes de base courants si nécessaire comme ある、いる、する、行く、食べる、見る、飲む), génère exactement ${body.count} phrases japonaises uniques et indépendantes pour un exercice de reconstruction par blocs.
+
+Vocabulaire disponible (utilise au maximum ces mots) :
+${JSON.stringify(
+  vocabularyPool.map((vocab) => ({ fr: vocab.fr, jp: vocab.jp, kana: vocab.kana })),
+  null,
+  2,
+)}
+
+Contraintes strictes :
+- Particules autorisées : UNIQUEMENT ${body.particles.join(", ")}. N'utilise AUCUNE autre particule.
+- Temps : ${tenseLabels[body.tense] ?? body.tense}
+- Polarité : ${polarityLabels[body.polarity] ?? body.polarity}
+- Style de politesse : ${politenessLabels[body.politeness] ?? body.politeness}
+- Chaque phrase doit faire environ ${sentenceLengthWordsLabels[body.sentenceLength]}.
+- Utilise un japonais naturel, et écris les kanji usuels (l'élève s'aide des furigana).
+- Chaque phrase doit utiliser au moins un mot du vocabulaire fourni et au moins une particule autorisée.
+
+Pour chaque phrase, tu dois aussi fournir :
+- blocks_jp : la phrase japonaise SEGMENTÉE en blocs morphologiques. Règles de segmentation :
+  * Chaque particule (は, が, を, に, で, へ, と, も, から, まで, etc.) DOIT être un bloc séparé.
+  * Chaque mot de contenu (nom, verbe, adjectif) est un bloc indépendant, terminaisons et conjugaisons INCLUSES dans le même bloc (ex : "食べました" est un seul bloc).
+  * La copule です/だ est un bloc à part.
+  * Les conjonctions (それから, でも, だから, etc.) sont chacune un bloc.
+  * Pour chaque bloc contenant au moins UN kanji, ajoute "furigana" avec la lecture COMPLÈTE du bloc en hiragana (couvre TOUTE la chaîne du bloc, kanji + okurigana). N'inclus PAS de furigana pour les blocs purement en kana.
+  * Concaténer tous les "text" des blocs (sans espace) doit reproduire EXACTEMENT jp_kanji.
+- blocks_fr : la phrase française tokenisée en mots ; chaque ponctuation (virgule, point, point d'exclamation/interrogation) est un bloc séparé.
+
+Réponds UNIQUEMENT au format JSON, un tableau d'objets avec cette structure exacte :
+[{"fr": "La phrase en français", "jp_kanji": "La phrase japonaise avec kanji", "jp_kana": "La phrase japonaise tout en kana", "blocks_jp": [{"text": "私", "furigana": "わたし"}, {"text": "は"}, {"text": "学生", "furigana": "がくせい"}, {"text": "です"}], "blocks_fr": ["Je", "suis", "étudiant"], "explanation": "Brève explication grammaticale", "used_words_fr": ["mot1_fr"]}]
+
+${body.customContext ? `Contexte additionnel de l'élève : ${body.customContext}\n` : ""}Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qui ont été utilisés.`;
+
+      type GeminiBlock = { text?: string; furigana?: string };
+      type GeminiConstructionPhrase = {
+        fr?: string;
+        jp_kanji?: string;
+        jp_kana?: string;
+        blocks_jp?: GeminiBlock[];
+        blocks_fr?: string[];
+        explanation?: string;
+        used_words_fr?: string[];
+      };
+
+      let generatedPhrases: GeminiConstructionPhrase[];
+      try {
+        generatedPhrases = await callGeminiJson<GeminiConstructionPhrase[]>(prompt);
+        incrementGeminiUsage(database);
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Construction generation failed:", message);
+        res.status(502).json({ error: `Erreur de génération IA : ${message}` });
+        return;
+      }
+
+      if (!Array.isArray(generatedPhrases) || generatedPhrases.length === 0) {
+        res.status(502).json({ error: "L'IA n'a pas retourné de phrases valides." });
+        return;
+      }
+
+      const vocabByFrench = new Map<string, number>();
+      for (const vocab of vocabularyPool) {
+        vocabByFrench.set(vocab.fr.toLowerCase(), vocab.id);
+      }
+
+      const phrases = generatedPhrases
+        .map((phrase) => {
+          const wordIds: number[] = [];
+          const usedWordsFr = phrase.used_words_fr ?? [];
+          for (const frWord of usedWordsFr) {
+            const wordId = vocabByFrench.get(frWord.toLowerCase());
+            if (wordId !== undefined) {
+              wordIds.push(wordId);
+            }
+          }
+          const blocksJp = (phrase.blocks_jp ?? [])
+            .map((block) => ({
+              text: typeof block.text === "string" ? block.text : "",
+              furigana:
+                typeof block.furigana === "string" && block.furigana.trim().length > 0
+                  ? block.furigana
+                  : undefined,
+            }))
+            .filter((block) => block.text.length > 0);
+          const blocksFr = (phrase.blocks_fr ?? []).filter(
+            (token): token is string => typeof token === "string" && token.length > 0,
+          );
+          return {
+            fr: phrase.fr ?? "",
+            jp_kanji: phrase.jp_kanji ?? "",
+            jp_kana: phrase.jp_kana ?? "",
+            blocks_jp: blocksJp,
+            blocks_fr: blocksFr,
+            explanation: phrase.explanation ?? "",
+            wordIds,
+          };
+        })
+        .filter((phrase) => {
+          const hasJpBlocks = phrase.blocks_jp.length > 0;
+          const hasFrBlocks = phrase.blocks_fr.length > 0;
+          const needsJp = body.direction === "fr-to-jp";
+          return needsJp ? hasJpBlocks : hasFrBlocks;
+        });
+
+      if (phrases.length === 0) {
+        res.status(502).json({ error: "L'IA n'a pas retourné de blocs exploitables." });
+        return;
+      }
+
+      res.json({ phrases });
+    }),
+  );
+
   // --- Dialogue AI endpoints ---
 
   app.post(
