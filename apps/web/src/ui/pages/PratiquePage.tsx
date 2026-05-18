@@ -49,6 +49,7 @@ type PersistedPhrasesSettings = {
   contentType: "phrases" | "paragraph";
   withKanji: boolean;
   sentenceLength: SentenceLength;
+  vocabSampleSize: number;
 };
 
 function loadPhrasesSettings(): Partial<PersistedPhrasesSettings> | null {
@@ -169,6 +170,9 @@ export function PratiquePage() {
   const [sentenceLength, setSentenceLength] = useState<SentenceLength>(
     persistedPhrases?.sentenceLength ?? "medium",
   );
+  const [vocabSampleSize, setVocabSampleSize] = useState<number>(
+    persistedPhrases?.vocabSampleSize ?? 80,
+  );
 
   // JLPT state
   const [jlptType, setJlptType] = useState<JlptConstraints["exerciseType"]>("phrases");
@@ -232,6 +236,7 @@ export function PratiquePage() {
       contentType,
       withKanji,
       sentenceLength,
+      vocabSampleSize,
     });
   }, [
     selectedTagIds,
@@ -245,6 +250,7 @@ export function PratiquePage() {
     contentType,
     withKanji,
     sentenceLength,
+    vocabSampleSize,
   ]);
 
   function handleTabChange(tab: PratiqueTab) {
@@ -287,6 +293,7 @@ export function PratiquePage() {
         contentType,
         withKanji: contentType === "paragraph" ? withKanji : undefined,
         sentenceLength,
+        vocabSampleSize,
       });
       const unified: UnifiedExercise[] = generated.map((phrase) => ({
         prompt: direction === "jp-to-fr" ? phrase.jp_kanji || phrase.jp_kana : phrase.fr,
@@ -398,6 +405,7 @@ export function PratiquePage() {
         customContext: customContext.trim() || undefined,
         direction,
         sentenceLength,
+        vocabSampleSize,
       });
       const isJpToFr = direction === "jp-to-fr";
       const unified: UnifiedExercise[] = generated.map((phrase) => {
@@ -851,6 +859,25 @@ export function PratiquePage() {
                 </div>
               </div>
 
+              <div className="pratique__field">
+                <div className="pratique__label">
+                  Vocabulaire envoyé à l'IA : <strong>{vocabSampleSize}</strong> mots aléatoires
+                </div>
+                <input
+                  type="range"
+                  min={10}
+                  max={300}
+                  step={10}
+                  value={vocabSampleSize}
+                  onChange={(event) => setVocabSampleSize(Number(event.target.value))}
+                  className="pratique__slider"
+                  aria-label="Taille de l'échantillon de vocabulaire"
+                />
+                <div className="pratique__hint">
+                  Si l'IA renvoie une erreur JSON ou met du temps à répondre, réduis cette valeur.
+                </div>
+              </div>
+
               {contentType === "paragraph" && (
                 <div className="pratique__field">
                   <div className="pratique__label">Kanji</div>
@@ -1043,6 +1070,25 @@ export function PratiquePage() {
                       </button>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              <div className="pratique__field">
+                <div className="pratique__label">
+                  Vocabulaire envoyé à l'IA : <strong>{vocabSampleSize}</strong> mots aléatoires
+                </div>
+                <input
+                  type="range"
+                  min={10}
+                  max={300}
+                  step={10}
+                  value={vocabSampleSize}
+                  onChange={(event) => setVocabSampleSize(Number(event.target.value))}
+                  className="pratique__slider"
+                  aria-label="Taille de l'échantillon de vocabulaire"
+                />
+                <div className="pratique__hint">
+                  Si l'IA renvoie une erreur JSON ou met du temps à répondre, réduis cette valeur.
                 </div>
               </div>
 

@@ -507,6 +507,7 @@ export type PhraseConstraints = {
   contentType?: "phrases" | "paragraph";
   withKanji?: boolean;
   sentenceLength?: "short" | "medium" | "long";
+  vocabSampleSize?: number;
 };
 
 export type GeneratedPhrase = {

@@ -1420,6 +1420,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         contentType: z.enum(["phrases", "paragraph"]).optional().default("phrases"),
         withKanji: z.boolean().optional().default(true),
         sentenceLength: z.enum(["short", "medium", "long"]).optional().default("medium"),
+        vocabSampleSize: z.number().int().min(10).max(500).optional().default(80),
       });
       const body = bodySchema.parse(req.body);
 
@@ -1434,9 +1435,10 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           WHERE wt.tag_id IN (${placeholders})
             AND w.user_id = ?
           ORDER BY RANDOM()
+          LIMIT ?
           `,
         )
-        .all(...body.tagIds, userId) as VocabRow[];
+        .all(...body.tagIds, userId, body.vocabSampleSize) as VocabRow[];
 
       if (vocabularyRows.length === 0) {
         res.status(400).json({ error: "Aucun mot trouvé pour les tags sélectionnés." });
@@ -1605,6 +1607,11 @@ Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qu
       }
 
       const isJpToFr = body.direction === "jp-to-fr";
+      const userAnswerLooksLikeRomaji =
+        !isJpToFr && !/[\u3040-\u30ff\u4e00-\u9fff]/.test(normalizedUser);
+      const romajiNote = userAnswerLooksLikeRomaji
+        ? "\nNote importante : la réponse de l'élève est saisie en romaji (lettres latines). Accepte-la comme si elle était écrite en kana/kanji, du moment que la transcription phonétique correspond à la réponse attendue. Exemples : \"watashi wa gakusei desu\" est équivalent à 「私は学生です」, \"konnichiwa\" à 「こんにちは」. Ignore les majuscules, l'usage de tirets, d'apostrophes ou de macrons (ō, ū) et les espaces ; seul le rendu phonétique compte. Ne traite PAS l'absence de kanji ou de kana comme une erreur dans ce cas."
+        : "";
 
       const pedagogicalRules = `Règles de feedback :
 - Si la réponse est correcte ou acceptable (même formulée différemment ou avec des synonymes), mets isCorrect à true, errorType à null et feedback à une phrase brève qui valide la réponse et précise éventuellement une nuance ou une variante utile.
@@ -1644,7 +1651,8 @@ Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cett
 Règles de classification :
 - Si la réponse est correcte ou acceptable (même formulée différemment), mets isCorrect à true et errorType à null.
 - L'élève apprend les kanji. Si la réponse est écrite en kana au lieu des kanji mais est autrement correcte, considère-la comme correcte.
-- errorType doit être "particle" si l'erreur porte sur une particule, "conjugation" si c'est une erreur de conjugaison/temps, "kanji" si c'est uniquement un problème de kanji, "other" sinon.
+- L'élève peut aussi écrire en romaji (lettres latines) plutôt qu'en kana/kanji. Si la transcription romaji correspond phonétiquement à la réponse attendue, considère-la comme correcte. Ne signale jamais l'usage du romaji comme une erreur.
+- errorType doit être "particle" si l'erreur porte sur une particule, "conjugation" si c'est une erreur de conjugaison/temps, "kanji" si c'est uniquement un problème de kanji, "other" sinon.${romajiNote}
 
 ${pedagogicalRules}`;
 
@@ -1698,6 +1706,7 @@ ${pedagogicalRules}`;
         customContext: z.string().max(500).optional(),
         direction: z.enum(["fr-to-jp", "jp-to-fr"]).optional().default("fr-to-jp"),
         sentenceLength: z.enum(["short", "medium", "long"]).optional().default("medium"),
+        vocabSampleSize: z.number().int().min(10).max(500).optional().default(80),
       });
       const body = bodySchema.parse(req.body);
 
@@ -1712,9 +1721,10 @@ ${pedagogicalRules}`;
           WHERE wt.tag_id IN (${placeholders})
             AND w.user_id = ?
           ORDER BY RANDOM()
+          LIMIT ?
           `,
         )
-        .all(...body.tagIds, userId) as VocabRow[];
+        .all(...body.tagIds, userId, body.vocabSampleSize) as VocabRow[];
 
       if (vocabularyRows.length === 0) {
         res.status(400).json({ error: "Aucun mot trouvé pour les tags sélectionnés." });
@@ -2354,6 +2364,11 @@ ${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le a
       }
 
       const isJpToFr = body.direction === "jp-to-fr";
+      const userAnswerLooksLikeRomaji =
+        !isJpToFr && !/[\u3040-\u30ff\u4e00-\u9fff]/.test(normalizedUser);
+      const jlptRomajiNote = userAnswerLooksLikeRomaji
+        ? "\nNote importante : la réponse de l'élève est saisie en romaji (lettres latines). Accepte-la comme si elle était écrite en kana/kanji, du moment que la transcription phonétique correspond à la réponse attendue. Ignore les majuscules, tirets, apostrophes, macrons et espaces. Ne signale jamais l'usage du romaji comme une erreur."
+        : "";
 
       const jlptPedagogicalRules = `Règles de feedback :
 - Si la réponse est correcte ou acceptable, mets isCorrect à true et feedback à une phrase brève qui valide la réponse.
@@ -2385,6 +2400,7 @@ Réponds UNIQUEMENT au format JSON :
 {"isCorrect": false, "errorType": "particle|conjugation|kanji|other", "feedback": "Conseil pédagogique"}
 
 Si la réponse est en kana au lieu de kanji mais correcte, accepte-la.
+L'élève peut aussi écrire en romaji ; si la transcription phonétique correspond à la réponse attendue, considère-la comme correcte.${jlptRomajiNote}
 
 ${jlptPedagogicalRules}`;
 
