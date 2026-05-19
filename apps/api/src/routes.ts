@@ -714,7 +714,14 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   });
 
   app.post("/api/reviews/bulk", (req, res) => {
-    const userId = getRequiredUserId(req);
+    let userId: number;
+    try {
+      userId = getRequiredUserId(req);
+    } catch {
+      res.status(401).json({ error: "Session expirée. Reconnectez-vous." });
+      return;
+    }
+
     const bodySchema = z.object({
       reviews: z.array(
         z.object({
@@ -723,13 +730,26 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         }),
       ),
     });
-    const body = bodySchema.parse(req.body);
+
+    let body: z.infer<typeof bodySchema>;
+    try {
+      body = bodySchema.parse(req.body);
+    } catch (parseError) {
+      const message = parseError instanceof Error ? parseError.message : "Invalid payload";
+      res.status(400).json({ error: `Données invalides : ${message}` });
+      return;
+    }
+
+    if (body.reviews.length === 0) {
+      res.status(201).json({ appliedCount: 0 });
+      return;
+    }
 
     const wordBelongsToUserStatement = database.prepare(
       "SELECT 1 FROM words WHERE id = ? AND user_id = ?",
     );
     const selectStatsStatement = database.prepare(
-      "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step FROM word_stats WHERE word_id = ?",
+      "SELECT word_id, COALESCE(success_count, 0) AS success_count, COALESCE(partial_count, 0) AS partial_count, COALESCE(fail_count, 0) AS fail_count, COALESCE(score, 0) AS score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step FROM word_stats WHERE word_id = ?",
     );
     const upsertStatsStatement = database.prepare(
       "INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)",
@@ -775,9 +795,24 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       }
     });
 
-    transaction();
-
-    trackDailyActivity(database, userId, appliedCount);
+    try {
+      transaction();
+      trackDailyActivity(database, userId, appliedCount);
+    } catch (transactionError) {
+      const message =
+        transactionError instanceof Error ? transactionError.message : String(transactionError);
+      console.error(
+        "[kotoba/api] Bulk reviews transaction failed (userId=%d, count=%d): %s",
+        userId,
+        body.reviews.length,
+        message,
+      );
+      res.status(500).json({
+        error: "Erreur lors de l'enregistrement des révisions. Réessayez dans un instant.",
+        detail: message,
+      });
+      return;
+    }
 
     res.status(201).json({ appliedCount });
   });

@@ -433,19 +433,77 @@ export async function submitReview(wordId: number, result: ReviewResult): Promis
   }
 }
 
-export async function submitBulkReviews(
+export class BulkReviewsError extends Error {
+  status: number;
+  isAuthError: boolean;
+  isRetryable: boolean;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "BulkReviewsError";
+    this.status = status;
+    this.isAuthError = status === 401;
+    this.isRetryable = !this.isAuthError && (status === 0 || status >= 500 || status === 408);
+  }
+}
+
+async function extractErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = (await response.json()) as { error?: string; detail?: string };
+    if (payload.error) return payload.error;
+    if (payload.detail) return payload.detail;
+  } catch {
+    // response body wasn't JSON
+  }
+  return fallback;
+}
+
+async function submitBulkReviewsOnce(
   reviews: Array<{ wordId: number; result: ReviewResult }>,
 ): Promise<{ appliedCount: number }> {
-  const response = await fetch("/api/reviews/bulk", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reviews }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/reviews/bulk", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reviews }),
+    });
+  } catch (networkError) {
+    const message = networkError instanceof Error ? networkError.message : "Erreur réseau inconnue";
+    throw new BulkReviewsError(`Erreur réseau : ${message}`, 0);
+  }
   if (!response.ok) {
-    throw new Error("Failed to submit bulk reviews");
+    const errorMessage = await extractErrorMessage(
+      response,
+      `Le serveur a renvoyé une erreur ${response.status}.`,
+    );
+    throw new BulkReviewsError(errorMessage, response.status);
   }
   return (await response.json()) as { appliedCount: number };
+}
+
+export async function submitBulkReviews(
+  reviews: Array<{ wordId: number; result: ReviewResult }>,
+  options: { maxAttempts?: number } = {},
+): Promise<{ appliedCount: number }> {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await submitBulkReviewsOnce(reviews);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof BulkReviewsError) || !error.isRetryable) {
+        throw error;
+      }
+      if (attempt < maxAttempts) {
+        const backoffMs = 300 * 2 ** (attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Failed to submit bulk reviews");
 }
 
 export async function exportBackup(): Promise<unknown> {

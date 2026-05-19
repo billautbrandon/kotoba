@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  BulkReviewsError,
   type ConjugationEvaluation,
   type ConjugationExercise,
   type ConstructionBlock,
@@ -220,6 +221,44 @@ export function PratiquePage() {
         setQuota(loadedQuota);
       })
       .catch(() => {});
+  }, []);
+
+  // Recover and flush any pending SRS reviews from a previous failed session.
+  useEffect(() => {
+    let pendingRaw: string | null = null;
+    try {
+      pendingRaw = window.localStorage.getItem("pratique:pending-reviews");
+    } catch {
+      return;
+    }
+    if (!pendingRaw) return;
+    try {
+      const parsed = JSON.parse(pendingRaw) as Array<{
+        wordId: number;
+        result: "success" | "fail";
+      }>;
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        window.localStorage.removeItem("pratique:pending-reviews");
+        return;
+      }
+      submitBulkReviews(parsed)
+        .then(() => {
+          try {
+            window.localStorage.removeItem("pratique:pending-reviews");
+          } catch {
+            // ignore storage errors
+          }
+        })
+        .catch(() => {
+          // keep the pending reviews in storage for a later retry
+        });
+    } catch {
+      try {
+        window.localStorage.removeItem("pratique:pending-reviews");
+      } catch {
+        // ignore storage errors
+      }
+    }
   }, []);
 
   // Persist phrases setup config to localStorage
@@ -624,7 +663,7 @@ export function PratiquePage() {
     return { successWordIds, failWordIds };
   }, [results, activeTab]);
 
-  async function handleSubmitReviews() {
+  function buildPendingReviews(): Array<{ wordId: number; result: "success" | "fail" }> {
     const reviews: Array<{ wordId: number; result: "success" | "fail" }> = [];
     const seen = new Set<number>();
     for (const wordId of allWordIdsForSrs.successWordIds) {
@@ -639,16 +678,52 @@ export function PratiquePage() {
         seen.add(wordId);
       }
     }
+    return reviews;
+  }
+
+  async function handleSubmitReviews() {
+    const reviews = buildPendingReviews();
     if (reviews.length === 0) {
       setReviewsSubmitted(true);
+      try {
+        window.localStorage.removeItem("pratique:pending-reviews");
+      } catch {
+        // ignore storage errors
+      }
       return;
     }
     setIsSubmittingReviews(true);
+    setErrorMessage(null);
+    try {
+      window.localStorage.setItem("pratique:pending-reviews", JSON.stringify(reviews));
+    } catch {
+      // ignore storage errors
+    }
     try {
       await submitBulkReviews(reviews);
       setReviewsSubmitted(true);
-    } catch {
-      setErrorMessage("Erreur lors de l'enregistrement SRS.");
+      try {
+        window.localStorage.removeItem("pratique:pending-reviews");
+      } catch {
+        // ignore storage errors
+      }
+    } catch (error) {
+      if (error instanceof BulkReviewsError) {
+        if (error.isAuthError) {
+          setErrorMessage(
+            "Ta session a expiré. Reconnecte-toi puis reviens sur cet écran pour réessayer l'enregistrement SRS.",
+          );
+        } else {
+          setErrorMessage(
+            `Échec de l'enregistrement SRS : ${error.message} Tes révisions sont conservées localement, tu peux retenter avec « Réessayer ».`,
+          );
+        }
+      } else {
+        const message = error instanceof Error ? error.message : "Erreur inconnue.";
+        setErrorMessage(
+          `Échec de l'enregistrement SRS : ${message} Tes révisions sont conservées localement, tu peux retenter avec « Réessayer ».`,
+        );
+      }
     } finally {
       setIsSubmittingReviews(false);
     }
@@ -1611,7 +1686,13 @@ export function PratiquePage() {
             onClick={handleSubmitReviews}
             disabled={isSubmittingReviews || reviewsSubmitted}
           >
-            {reviewsSubmitted ? "SRS enregistré ✓" : "Enregistrer dans le SRS"}
+            {reviewsSubmitted
+              ? "SRS enregistré ✓"
+              : isSubmittingReviews
+                ? "Enregistrement en cours…"
+                : errorMessage
+                  ? "Réessayer l'enregistrement"
+                  : "Enregistrer dans le SRS"}
           </button>
         )}
         {activeTab === "jlpt" && (

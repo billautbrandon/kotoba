@@ -306,15 +306,18 @@ export function computeScoreDelta(reviewResult: ReviewResult): number {
   return -5;
 }
 
+const MAX_SRS_INTERVAL_DAYS = 3650;
+
 function computeSrsSchedule(
   currentStep: number,
   currentInterval: number,
   currentEaseFactor: number,
   reviewResult: ReviewResult,
 ): { srs_step: number; srs_interval: number; srs_ease_factor: number; srs_next_review_at: string } {
-  let step = currentStep;
-  let interval = currentInterval;
-  let easeFactor = currentEaseFactor || 2.5;
+  let step = Number.isFinite(currentStep) ? Math.trunc(currentStep) : 0;
+  let interval = Number.isFinite(currentInterval) ? Math.trunc(currentInterval) : 0;
+  let easeFactor =
+    Number.isFinite(currentEaseFactor) && currentEaseFactor > 0 ? currentEaseFactor : 2.5;
 
   if (reviewResult === "success") {
     step += 1;
@@ -336,9 +339,14 @@ function computeSrsSchedule(
     step = 0;
   }
 
+  if (!Number.isFinite(interval) || interval < 0) interval = 1;
+  if (interval > MAX_SRS_INTERVAL_DAYS) interval = MAX_SRS_INTERVAL_DAYS;
+
   const nextReviewDate = new Date();
   nextReviewDate.setDate(nextReviewDate.getDate() + interval);
-  const srsNextReviewAt = nextReviewDate.toISOString();
+  const srsNextReviewAt = Number.isNaN(nextReviewDate.getTime())
+    ? new Date().toISOString()
+    : nextReviewDate.toISOString();
 
   return {
     srs_step: step,
@@ -348,29 +356,51 @@ function computeSrsSchedule(
   };
 }
 
+function toSafeInteger(value: unknown, fallback = 0): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.trunc(value);
+}
+
+function toSafeFloat(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return value;
+}
+
 export function applyReviewToStats(
   existingStats: WordStatsRow,
   reviewResult: ReviewResult,
 ): WordStatsRow {
   const scoreDelta = computeScoreDelta(reviewResult);
   const nowIso = new Date().toISOString();
-  const consecutiveSuccessCount = existingStats.consecutive_success_count ?? 0;
+
+  const safeExistingStats: WordStatsRow = {
+    ...existingStats,
+    success_count: toSafeInteger(existingStats.success_count),
+    partial_count: toSafeInteger(existingStats.partial_count),
+    fail_count: toSafeInteger(existingStats.fail_count),
+    score: toSafeInteger(existingStats.score),
+    consecutive_success_count: toSafeInteger(existingStats.consecutive_success_count),
+    srs_interval: toSafeInteger(existingStats.srs_interval),
+    srs_ease_factor: toSafeFloat(existingStats.srs_ease_factor, 2.5),
+    srs_step: toSafeInteger(existingStats.srs_step),
+  };
 
   const srsResult = computeSrsSchedule(
-    existingStats.srs_step ?? 0,
-    existingStats.srs_interval ?? 0,
-    existingStats.srs_ease_factor ?? 2.5,
+    safeExistingStats.srs_step,
+    safeExistingStats.srs_interval,
+    safeExistingStats.srs_ease_factor,
     reviewResult,
   );
 
   return {
-    ...existingStats,
-    success_count: existingStats.success_count + (reviewResult === "success" ? 1 : 0),
-    partial_count: existingStats.partial_count + (reviewResult === "partial" ? 1 : 0),
-    fail_count: existingStats.fail_count + (reviewResult === "fail" ? 1 : 0),
-    score: existingStats.score + scoreDelta,
+    ...safeExistingStats,
+    success_count: safeExistingStats.success_count + (reviewResult === "success" ? 1 : 0),
+    partial_count: safeExistingStats.partial_count + (reviewResult === "partial" ? 1 : 0),
+    fail_count: safeExistingStats.fail_count + (reviewResult === "fail" ? 1 : 0),
+    score: safeExistingStats.score + scoreDelta,
     last_reviewed_at: nowIso,
-    consecutive_success_count: reviewResult === "success" ? consecutiveSuccessCount + 1 : 0,
+    consecutive_success_count:
+      reviewResult === "success" ? safeExistingStats.consecutive_success_count + 1 : 0,
     ...srsResult,
   };
 }
