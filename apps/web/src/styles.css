@@ -1479,22 +1479,58 @@ select.input:focus {
   color: #ffffff;
 }
 
-.trainSession__kanjiBtn {
+.trainSession__secondaryActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.trainSession__secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 1px solid var(--color-border);
-  background: transparent;
-  border-radius: var(--radius-md);
+  background: var(--color-panel-subtle);
+  border-radius: 999px;
   padding: 8px 16px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--color-muted);
+  color: var(--color-text-soft);
   transition: all 0.15s ease;
   font-family: inherit;
 }
 
-.trainSession__kanjiBtn:hover {
+.trainSession__secondaryBtn:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
+  background: rgba(199, 62, 29, 0.08);
+}
+
+.trainSession__secondaryBtnIcon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.trainSession__secondaryBtnCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-border);
+  color: var(--color-text-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.trainSession__secondaryBtn:hover .trainSession__secondaryBtnCount {
+  background: var(--color-primary);
+  color: #ffffff;
 }
 
 .trainSession__navRow {
@@ -3739,4 +3775,412 @@ select.input:focus {
   font-size: 12px;
   color: var(--color-muted);
   font-style: italic;
+}
+
+/* ========================================
+   Words page
+   ======================================== */
+
+.wordsPage__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.wordsPage__toolbar {
+  margin-top: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.wordsPage__search {
+  max-width: 480px;
+}
+
+.wordsPage__tagFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.wordsPage__filterChip {
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text-soft);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wordsPage__filterChip:hover {
+  border-color: var(--color-primary);
+}
+
+.wordsPage__filterChip--active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #ffffff;
+}
+
+.wordsPage__empty {
+  margin-top: var(--space-10);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.wordsPage__advanced {
+  margin-top: var(--space-10);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--color-border);
+}
+
+.wordsPage__advancedBody {
+  margin-top: var(--space-5);
+}
+
+/* Word cards grid */
+
+.wordGrid {
+  margin-top: var(--space-4);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+
+.wordCard {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  transition: all 0.15s ease;
+}
+
+.wordCard:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 16px var(--color-shadow);
+}
+
+.wordCard__editOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  padding: 0;
+}
+
+.wordCard__editOverlay:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Interactive elements that must sit above the full-card edit overlay */
+.wordCard__delete,
+.wordCard__audio {
+  position: relative;
+  z-index: 2;
+}
+
+.wordCard__delete {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+}
+
+.wordCard:hover .wordCard__delete,
+.wordCard:focus-within .wordCard__delete {
+  opacity: 1;
+}
+
+.wordCard__delete:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  background: rgba(199, 62, 29, 0.08);
+}
+
+.wordCard__audio {
+  display: inline-flex;
+}
+
+.wordCard__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wordCard__japanese {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: 32px;
+}
+
+.wordCard__primary {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+.wordCard__primary--empty {
+  color: var(--color-muted-light);
+}
+
+.wordCard__reading {
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.wordCard__french {
+  margin-top: 4px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text-soft);
+}
+
+.wordCard__romaji {
+  font-size: 13px;
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.wordCard__note {
+  font-size: 13px;
+  color: var(--color-muted);
+  border-left: 2px solid var(--color-border);
+  padding-left: var(--space-3);
+}
+
+.wordCard__footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.wordCard__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.wordTagBadge {
+  padding: 3px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(199, 62, 29, 0.08);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wordCard__examplesBadge {
+  padding: 3px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(201, 169, 97, 0.18);
+  color: var(--color-text-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Word form modal */
+
+.wordFormModal {
+  max-width: 75vw;
+  width: 100%;
+  max-height: 92vh;
+}
+
+.wordFormModal__required {
+  color: var(--color-primary);
+}
+
+.wordFormModal__japaneseRow {
+  margin-top: var(--space-4);
+  gap: var(--space-3);
+}
+
+.wordFormModal__examples {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.wordFormModal__sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.wordFormModal__examplesHint {
+  font-size: 13px;
+  margin: 0 0 var(--space-3);
+}
+
+.wordFormModal__exampleCard {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-subtle);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.wordFormModal__exampleHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wordFormModal__exampleNumber {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-muted);
+}
+
+.wordFormModal__exampleRemove {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.wordFormModal__tags {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.wordFormModal__tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.wordTagChip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--color-panel);
+}
+
+.wordTagChip__toggle {
+  border: none;
+  background: transparent;
+  padding: 6px 4px 6px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-soft);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.wordTagChip--selected {
+  border-color: var(--color-primary);
+  background: rgba(199, 62, 29, 0.1);
+}
+
+.wordTagChip--selected .wordTagChip__toggle {
+  color: var(--color-primary);
+}
+
+.wordTagChip__remove {
+  border: none;
+  background: transparent;
+  padding: 6px 12px 6px 6px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-muted);
+  cursor: pointer;
+}
+
+.wordTagChip__remove:hover {
+  color: var(--color-primary);
+}
+
+.wordFormModal__error {
+  margin-top: var(--space-4);
+}
+
+.wordFormModal__actions {
+  margin-top: var(--space-5);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* Examples in train session */
+
+.examplesModal__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.examplesModal__item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-subtle);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.examplesModal__jp {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.examplesModal__kana {
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.examplesModal__fr {
+  font-size: 15px;
+  color: var(--color-text-soft);
+  margin-top: 4px;
 }

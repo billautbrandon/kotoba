@@ -73,6 +73,7 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showKanjiViewer, setShowKanjiViewer] = useState(false);
   const [selectedKanjiForViewer, setSelectedKanjiForViewer] = useState<string | null>(null);
+  const [showExamples, setShowExamples] = useState<boolean>(false);
 
   const [ratingsByWordId, setRatingsByWordId] = useState<Record<number, SessionRating | null>>({});
   const [isRatingsSubmitted, setIsRatingsSubmitted] = useState<boolean>(false);
@@ -177,6 +178,11 @@ export function TrainPage(props: { mode: TrainMode }) {
       setShowKanjiViewer(true);
     }
   };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset examples panel when navigating to another word
+  useEffect(() => {
+    setShowExamples(false);
+  }, [currentIndex]);
 
   const advanceToNextWord = useCallback(() => {
     setCurrentIndex((previousIndex) => {
@@ -855,14 +861,40 @@ export function TrainPage(props: { mode: TrainMode }) {
                   </button>
                 </div>
 
-                {currentWordKanji.length > 0 && (
-                  <button
-                    className="trainSession__kanjiBtn"
-                    type="button"
-                    onClick={handleShowKanjiStroke}
-                  >
-                    Voir le sens de trace ({currentWordKanji.length} kanji)
-                  </button>
+                {(currentWordKanji.length > 0 || (currentWord.examples?.length ?? 0) > 0) && (
+                  <div className="trainSession__secondaryActions">
+                    {currentWordKanji.length > 0 && (
+                      <button
+                        className="trainSession__secondaryBtn"
+                        type="button"
+                        onClick={handleShowKanjiStroke}
+                      >
+                        <span className="trainSession__secondaryBtnIcon" aria-hidden="true">
+                          &#x270E;
+                        </span>
+                        Sens de trace
+                        <span className="trainSession__secondaryBtnCount">
+                          {currentWordKanji.length}
+                        </span>
+                      </button>
+                    )}
+
+                    {(currentWord.examples?.length ?? 0) > 0 && (
+                      <button
+                        className="trainSession__secondaryBtn"
+                        type="button"
+                        onClick={() => setShowExamples(true)}
+                      >
+                        <span className="trainSession__secondaryBtnIcon" aria-hidden="true">
+                          &#x1F4D6;
+                        </span>
+                        Exemples
+                        <span className="trainSession__secondaryBtnCount">
+                          {currentWord.examples.length}
+                        </span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -905,6 +937,10 @@ export function TrainPage(props: { mode: TrainMode }) {
               setSelectedKanjiForViewer(null);
             }}
           />
+        )}
+
+        {showExamples && currentWord && (currentWord.examples?.length ?? 0) > 0 && (
+          <ExamplesModal word={currentWord} onClose={() => setShowExamples(false)} />
         )}
       </div>
     );
@@ -1145,6 +1181,68 @@ function saveSettings(settings: PersistedSeriesSettings) {
   } catch {
     /* ignore */
   }
+}
+
+function ExamplesModal({
+  word,
+  onClose,
+}: {
+  word: WordWithStats;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="modal__overlay"
+      onClick={onClose}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+      role="presentation"
+    >
+      <div
+        className="modal__content"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+        role="presentation"
+      >
+        <div className="modal__header">
+          <h2 className="modal__title">Exemples — {word.french}</h2>
+          <button className="modal__close" type="button" onClick={onClose}>
+            &times;
+          </button>
+        </div>
+
+        <div className="examplesModal__list">
+          {word.examples.map((example) => (
+            <div
+              key={`${example.jp}|${example.kana}|${example.fr}`}
+              className="examplesModal__item"
+            >
+              {example.jp ? (
+                <div className="examplesModal__jp">
+                  <span>{example.jp}</span>
+                  <AudioButton text={example.jp} size="small" />
+                </div>
+              ) : null}
+              {example.kana ? <div className="examplesModal__kana">{example.kana}</div> : null}
+              {example.fr ? <div className="examplesModal__fr">{example.fr}</div> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function KanjiViewerModal({

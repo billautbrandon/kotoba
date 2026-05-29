@@ -8,6 +8,12 @@ export type User = {
   created_at: string;
 };
 
+export type WordExample = {
+  jp: string;
+  kana: string;
+  fr: string;
+};
+
 export type Word = {
   id: number;
   french: string;
@@ -15,6 +21,7 @@ export type Word = {
   kana: string | null;
   kanji: string | null;
   note: string | null;
+  examples: WordExample[];
   created_at: string;
 };
 
@@ -345,6 +352,7 @@ export async function createWord(word: {
   kana?: string | null;
   kanji?: string | null;
   note?: string | null;
+  examples?: WordExample[];
   tagIds?: number[];
 }): Promise<Word> {
   const response = await fetch("/api/words", {
@@ -368,6 +376,7 @@ export async function updateWord(
     kana?: string | null;
     kanji?: string | null;
     note?: string | null;
+    examples?: WordExample[];
     tagIds?: number[];
   },
 ): Promise<Word> {
@@ -521,6 +530,7 @@ export async function importWordsFromJson(
     kana?: string | null;
     kanji?: string | null;
     note?: string | null;
+    examples?: WordExample[];
     tags?: string[];
   }>,
 ): Promise<{ importedWordsCount: number; importedTagsCount: number }> {

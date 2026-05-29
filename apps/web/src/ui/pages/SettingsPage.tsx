@@ -2,28 +2,10 @@ import type React from "react";
 import { useEffect, useState } from "react";
 
 import type { User } from "../../api";
-import {
-  changePassword,
-  fetchMe,
-  fetchStreak,
-  updateDailyGoal,
-  updateProfile,
-  uploadAvatar,
-} from "../../api";
+import { changePassword, fetchMe, updateProfile, uploadAvatar } from "../../api";
 import { WordsPage } from "./WordsPage";
 
-type SettingsTab = "profile" | "password" | "vocabulary" | "appearance";
-
-function loadTheme(): "light" | "dark" {
-  const saved = window.localStorage.getItem("kotoba.theme");
-  if (saved === "dark") return "dark";
-  return "light";
-}
-
-function applyTheme(theme: "light" | "dark") {
-  document.documentElement.setAttribute("data-theme", theme);
-  window.localStorage.setItem("kotoba.theme", theme);
-}
+type SettingsTab = "profile" | "password" | "vocabulary";
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
@@ -57,19 +39,11 @@ export function SettingsPage() {
         >
           Vocabulaire
         </button>
-        <button
-          className={`settingsTabs__tab ${activeTab === "appearance" ? "settingsTabs__tab--active" : ""}`}
-          type="button"
-          onClick={() => setActiveTab("appearance")}
-        >
-          Apparence
-        </button>
       </div>
 
       {activeTab === "profile" && <ProfileSection />}
       {activeTab === "password" && <PasswordSection />}
       {activeTab === "vocabulary" && <WordsPage />}
-      {activeTab === "appearance" && <AppearanceSection />}
     </div>
   );
 }
@@ -321,85 +295,5 @@ function PasswordSection() {
         </button>
       </div>
     </form>
-  );
-}
-
-function AppearanceSection() {
-  const [theme, setTheme] = useState<"light" | "dark">(loadTheme);
-  const [dailyGoal, setDailyGoal] = useState<number>(20);
-  const [dailyGoalSaved, setDailyGoalSaved] = useState(false);
-
-  useEffect(() => {
-    fetchStreak()
-      .then((info) => setDailyGoal(info.dailyGoal))
-      .catch(() => {});
-  }, []);
-
-  function handleThemeChange(newTheme: "light" | "dark") {
-    setTheme(newTheme);
-    applyTheme(newTheme);
-  }
-
-  async function handleDailyGoalSave() {
-    try {
-      await updateDailyGoal(dailyGoal);
-      setDailyGoalSaved(true);
-      setTimeout(() => setDailyGoalSaved(false), 2000);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return (
-    <div className="settingsSection">
-      <div className="field">
-        <div className="field__label">Thème</div>
-        <div className="phrasesSetup__optionRow">
-          <label
-            className={`phrasesSetup__radioOption ${theme === "light" ? "phrasesSetup__radioOption--active" : ""}`}
-          >
-            <input
-              type="radio"
-              name="theme"
-              checked={theme === "light"}
-              onChange={() => handleThemeChange("light")}
-            />
-            Clair
-          </label>
-          <label
-            className={`phrasesSetup__radioOption ${theme === "dark" ? "phrasesSetup__radioOption--active" : ""}`}
-          >
-            <input
-              type="radio"
-              name="theme"
-              checked={theme === "dark"}
-              onChange={() => handleThemeChange("dark")}
-            />
-            Sombre
-          </label>
-        </div>
-      </div>
-
-      <div className="field" style={{ marginTop: "var(--space-6)" }}>
-        <div className="field__label">Objectif quotidien</div>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-          <input
-            className="input"
-            type="number"
-            min={1}
-            max={200}
-            value={dailyGoal}
-            onChange={(event) => setDailyGoal(Number(event.target.value))}
-            style={{ width: 80 }}
-          />
-          <span className="muted" style={{ fontSize: 13 }}>
-            révisions / jour
-          </span>
-          <button type="button" className="button button--primary" onClick={handleDailyGoalSave}>
-            {dailyGoalSaved ? "Enregistré ✓" : "Enregistrer"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

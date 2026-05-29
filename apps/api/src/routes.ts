@@ -12,6 +12,7 @@ import {
   type ReviewResult,
   type WordStatsRow,
   applyReviewToStats,
+  avatarsDirectoryPath,
   getGeminiQuota,
   incrementGeminiUsage,
 } from "./db.js";
@@ -259,7 +260,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     wrapAsync(async (req, res) => {
       const userId = getRequiredUserId(req);
 
-      const avatarsDir = path.join(process.cwd(), "data", "avatars");
+      const avatarsDir = avatarsDirectoryPath;
       fs.mkdirSync(avatarsDir, { recursive: true });
 
       const storage = multer.diskStorage({
@@ -391,14 +392,18 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         w.kana,
         w.kanji,
         w.note,
+        w.examples,
         w.created_at
       FROM words w
       WHERE w.user_id = ?
     `;
 
     if (!includeStats && !includeTags) {
-      const rows = database.prepare(`${baseSelect} ORDER BY w.id DESC`).all(userId);
-      res.json({ words: rows });
+      const rows = database.prepare(`${baseSelect} ORDER BY w.id DESC`).all(userId) as Array<
+        Record<string, unknown> & { examples: string | null }
+      >;
+      const words = rows.map((row) => ({ ...row, examples: parseExamples(row.examples) }));
+      res.json({ words });
       return;
     }
 
@@ -410,6 +415,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       kana: string | null;
       kanji: string | null;
       note: string | null;
+      examples: string | null;
       created_at: string;
       success_count: number;
       partial_count: number;
@@ -419,7 +425,9 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       tags_concat: string | null;
     };
 
-    type WordWithStatsColumns = Omit<WordJoinedRow, "tags_concat">;
+    type WordWithStatsColumns = Omit<WordJoinedRow, "tags_concat" | "examples"> & {
+      examples: WordExample[];
+    };
     type WordWithStatsAndTags = WordWithStatsColumns & { tags: TagInfo[] };
 
     const rows = database
@@ -432,6 +440,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           w.kana,
           w.kanji,
           w.note,
+          w.examples,
           w.created_at,
           COALESCE(s.success_count, 0) AS success_count,
           COALESCE(s.partial_count, 0) AS partial_count,
@@ -453,10 +462,11 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     const wordsWithOptionalTags = rows.map((row): WordWithStatsColumns | WordWithStatsAndTags => {
       const parsedTags = parseTagsConcat(row.tags_concat);
       const { tags_concat, ...restRow } = row satisfies WordJoinedRow;
+      const rowWithExamples = { ...restRow, examples: parseExamples(restRow.examples) };
       if (!includeTags) {
-        return restRow;
+        return rowWithExamples;
       }
-      return { ...restRow, tags: parsedTags };
+      return { ...rowWithExamples, tags: parsedTags };
     });
 
     if (includeStats && includeTags) {
@@ -495,12 +505,22 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       kana: z.string().optional().nullable(),
       kanji: z.string().optional().nullable(),
       note: z.string().optional().nullable(),
+      examples: z
+        .array(
+          z.object({
+            jp: z.string().optional(),
+            kana: z.string().optional(),
+            fr: z.string().optional(),
+          }),
+        )
+        .max(3)
+        .optional(),
       tagIds: z.array(z.number().int().positive()).optional(),
     });
     const body = bodySchema.parse(req.body);
 
     const insertWordStatement = database.prepare(
-      "INSERT INTO words (user_id, french, romaji, kana, kanji, note) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO words (user_id, french, romaji, kana, kanji, note, examples) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const insertResult = insertWordStatement.run(
       userId,
@@ -509,6 +529,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       body.kana ?? null,
       body.kanji ?? null,
       body.note ?? null,
+      serializeExamples(body.examples),
     );
 
     const wordId = Number(insertResult.lastInsertRowid);
@@ -530,11 +551,14 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       }
     }
 
-    const createdWord = database
+    const createdWordRow = database
       .prepare(
-        "SELECT id, french, romaji, kana, kanji, note, created_at FROM words WHERE id = ? AND user_id = ?",
+        "SELECT id, french, romaji, kana, kanji, note, examples, created_at FROM words WHERE id = ? AND user_id = ?",
       )
-      .get(wordId, userId);
+      .get(wordId, userId) as (Record<string, unknown> & { examples: string | null }) | undefined;
+    const createdWord = createdWordRow
+      ? { ...createdWordRow, examples: parseExamples(createdWordRow.examples) }
+      : createdWordRow;
 
     // Télécharger automatiquement les SVG des kanji (de manière asynchrone, sans bloquer)
     downloadKanjiSvgsFromText(body.kanji).catch((error) => {
@@ -558,6 +582,16 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       kana: z.string().optional().nullable(),
       kanji: z.string().optional().nullable(),
       note: z.string().optional().nullable(),
+      examples: z
+        .array(
+          z.object({
+            jp: z.string().optional(),
+            kana: z.string().optional(),
+            fr: z.string().optional(),
+          }),
+        )
+        .max(3)
+        .optional(),
       tagIds: z.array(z.number().int().positive()).optional(),
     });
     const body = bodySchema.parse(req.body);
@@ -569,7 +603,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
     const updateResult = database
       .prepare(
-        "UPDATE words SET french = ?, romaji = ?, kana = ?, kanji = ?, note = ? WHERE id = ? AND user_id = ?",
+        "UPDATE words SET french = ?, romaji = ?, kana = ?, kanji = ?, note = ?, examples = ? WHERE id = ? AND user_id = ?",
       )
       .run(
         body.french,
@@ -577,6 +611,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         body.kana ?? null,
         body.kanji ?? null,
         body.note ?? null,
+        serializeExamples(body.examples),
         wordId,
         userId,
       );
@@ -592,11 +627,14 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       });
     }
 
-    const updatedWord = database
+    const updatedWordRow = database
       .prepare(
-        "SELECT id, french, romaji, kana, kanji, note, created_at FROM words WHERE id = ? AND user_id = ?",
+        "SELECT id, french, romaji, kana, kanji, note, examples, created_at FROM words WHERE id = ? AND user_id = ?",
       )
-      .get(wordId, userId);
+      .get(wordId, userId) as (Record<string, unknown> & { examples: string | null }) | undefined;
+    const updatedWord = updatedWordRow
+      ? { ...updatedWordRow, examples: parseExamples(updatedWordRow.examples) }
+      : updatedWordRow;
 
     if (body.tagIds) {
       database.prepare("DELETE FROM word_tags WHERE word_id = ?").run(wordId);
@@ -877,6 +915,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           w.kana,
           w.kanji,
           w.note,
+          w.examples,
           w.created_at,
           COALESCE(s.success_count, 0) AS success_count,
           COALESCE(s.partial_count, 0) AS partial_count,
@@ -891,9 +930,10 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         ORDER BY w.id DESC
       `,
       )
-      .all(tagId, userId, userId);
+      .all(tagId, userId, userId) as Array<Record<string, unknown> & { examples: string | null }>;
 
-    res.json({ words: rows });
+    const words = rows.map((row) => ({ ...row, examples: parseExamples(row.examples) }));
+    res.json({ words });
   });
 
   app.get("/api/words/difficult", (req, res) => {
@@ -912,6 +952,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           w.kana,
           w.kanji,
           w.note,
+          w.examples,
           w.created_at,
           COALESCE(s.success_count, 0) AS success_count,
           COALESCE(s.partial_count, 0) AS partial_count,
@@ -934,9 +975,12 @@ export function registerApiRoutes(app: import("express").Express, database: Data
         ORDER BY COALESCE(s.score, 0) ASC, w.id DESC
       `,
       )
-      .all(userId, scoreThreshold, minAttempts, failRateThreshold);
+      .all(userId, scoreThreshold, minAttempts, failRateThreshold) as Array<
+      Record<string, unknown> & { examples: string | null }
+    >;
 
-    res.json({ words: rows, params: { scoreThreshold, failRateThreshold, minAttempts } });
+    const words = rows.map((row) => ({ ...row, examples: parseExamples(row.examples) }));
+    res.json({ words, params: { scoreThreshold, failRateThreshold, minAttempts } });
   });
 
   const srsWordSelect = `
@@ -947,6 +991,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       w.kana,
       w.kanji,
       w.note,
+      w.examples,
       w.created_at,
       COALESCE(s.success_count, 0) AS success_count,
       COALESCE(s.partial_count, 0) AS partial_count,
@@ -1036,11 +1081,17 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       (row) => !masteredWordIds.has(row.id),
     );
 
+    const mapExamples = (rows: unknown[]) =>
+      (rows as Array<Record<string, unknown> & { examples: string | null }>).map((row) => ({
+        ...row,
+        examples: parseExamples(row.examples),
+      }));
+
     res.json({
-      hard: hardRowsFiltered,
-      medium: mediumRows,
-      easy: easyRows,
-      mastered: masteredRows,
+      hard: mapExamples(hardRowsFiltered),
+      medium: mapExamples(mediumRows as unknown[]),
+      easy: mapExamples(easyRows as unknown[]),
+      mastered: mapExamples(masteredRows as unknown[]),
     });
   });
 
@@ -1069,7 +1120,10 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       )
       .all(userId);
 
-    const allDueWords = [...dueWords, ...newWords];
+    const allDueWords = [...dueWords, ...newWords].map((row) => {
+      const wordRow = row as Record<string, unknown> & { examples: string | null };
+      return { ...wordRow, examples: parseExamples(wordRow.examples) };
+    });
     res.json({ words: allDueWords, dueCount: allDueWords.length });
   });
 
@@ -1249,6 +1303,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       kana: string | null;
       kanji: string | null;
       note: string | null;
+      examples: string | null;
       created_at: string;
       success_count: number;
       partial_count: number;
@@ -1268,6 +1323,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           w.kana,
           w.kanji,
           w.note,
+          w.examples,
           w.created_at,
           COALESCE(s.success_count, 0) AS success_count,
           COALESCE(s.partial_count, 0) AS partial_count,
@@ -1289,7 +1345,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     const words = wordRows.map((row) => {
       const tagNames = parseTagNamesConcat(row.tag_names_concat);
       const { tag_names_concat, ...restRow } = row;
-      return { ...restRow, tags: tagNames };
+      return { ...restRow, examples: parseExamples(restRow.examples), tags: tagNames };
     });
 
     res.json({ version: 1, exportedAt: new Date().toISOString(), tags, words });
@@ -1305,6 +1361,15 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           kana: z.string().optional().nullable(),
           kanji: z.string().optional().nullable(),
           note: z.string().optional().nullable(),
+          examples: z
+            .array(
+              z.object({
+                jp: z.string().optional(),
+                kana: z.string().optional(),
+                fr: z.string().optional(),
+              }),
+            )
+            .optional(),
           tags: z.array(z.string()).optional(),
         }),
       ),
@@ -1318,7 +1383,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       "SELECT id FROM tags WHERE user_id = ? AND name = ?",
     );
     const insertWordStatement = database.prepare(
-      "INSERT INTO words (user_id, french, romaji, kana, kanji, note) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO words (user_id, french, romaji, kana, kanji, note, examples) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const insertWordStatsStatement = database.prepare(
       "INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)",
@@ -1339,6 +1404,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           word.kana ?? null,
           word.kanji ?? null,
           word.note ?? null,
+          serializeExamples(word.examples),
         );
 
         const insertedWordId = Number(insertResult.lastInsertRowid);
@@ -2733,6 +2799,48 @@ Règles pour le champ explanation :
       res.json({ evaluation, quota: getGeminiQuota(database) });
     }),
   );
+}
+
+type WordExample = { jp: string; kana: string; fr: string };
+
+function parseExamples(value: unknown): WordExample[] {
+  if (typeof value !== "string" || value.trim() === "") return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item): WordExample | null => {
+        if (typeof item !== "object" || item === null) return null;
+        const record = item as Record<string, unknown>;
+        const jp = typeof record.jp === "string" ? record.jp : "";
+        const kana = typeof record.kana === "string" ? record.kana : "";
+        const fr = typeof record.fr === "string" ? record.fr : "";
+        if (!jp && !kana && !fr) return null;
+        return { jp, kana, fr };
+      })
+      .filter((example): example is WordExample => example !== null)
+      .slice(0, 3);
+  } catch {
+    return [];
+  }
+}
+
+function serializeExamples(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const examples = value
+    .map((item): WordExample | null => {
+      if (typeof item !== "object" || item === null) return null;
+      const record = item as Record<string, unknown>;
+      const jp = typeof record.jp === "string" ? record.jp.trim() : "";
+      const kana = typeof record.kana === "string" ? record.kana.trim() : "";
+      const fr = typeof record.fr === "string" ? record.fr.trim() : "";
+      if (!jp && !kana && !fr) return null;
+      return { jp, kana, fr };
+    })
+    .filter((example): example is WordExample => example !== null)
+    .slice(0, 3);
+  if (examples.length === 0) return null;
+  return JSON.stringify(examples);
 }
 
 function parseTagsConcat(value: unknown): Array<{ id: number; name: string }> {

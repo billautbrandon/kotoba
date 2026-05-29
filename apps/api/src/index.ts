@@ -3,7 +3,7 @@ import express from "express";
 import session from "express-session";
 import { ZodError } from "zod";
 
-import { openDatabase } from "./db.js";
+import { avatarsDirectoryPath, openDatabase } from "./db.js";
 import { registerApiRoutes } from "./routes.js";
 
 const apiPort = Number(process.env.PORT ?? 3001);
@@ -63,15 +63,15 @@ if (process.env.NODE_ENV === "production") {
 
 app.use(session(sessionConfig));
 
-// Serve avatar files
-app.use("/avatars", express.static("data/avatars"));
+// Serve avatar files from the persisted data directory (resolved independently of process.cwd()).
+app.use("/avatars", express.static(avatarsDirectoryPath));
 
 // Debug middleware to log session creation and Set-Cookie headers
 if (process.env.NODE_ENV === "production") {
   app.use((req, res, next) => {
     if (req.path.startsWith("/api/auth/login") || req.path.startsWith("/api/auth/register")) {
       res.on("finish", () => {
-        if (req.session && req.session.userId) {
+        if (req.session?.userId) {
           console.log("[kotoba/api] Session created:", {
             userId: req.session.userId,
             cookie: req.session.cookie,

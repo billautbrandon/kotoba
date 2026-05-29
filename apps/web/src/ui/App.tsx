@@ -263,6 +263,16 @@ export function App() {
                   type="button"
                   onClick={() => {
                     setIsDropdownOpen(false);
+                    navigate("/words");
+                  }}
+                >
+                  Mots
+                </button>
+                <button
+                  className="dropdown__item"
+                  type="button"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
                     navigate("/settings");
                   }}
                 >

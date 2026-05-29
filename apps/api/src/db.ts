@@ -8,7 +8,11 @@ import Database from "better-sqlite3";
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDirectoryPath = path.dirname(currentFilePath);
 const projectRootPath = path.resolve(currentDirectoryPath, "../../..");
-const dataDirectoryPath = path.join(projectRootPath, "data");
+
+// Resolved relative to the source/compiled file location (NOT process.cwd()) so that
+// it always points to the persisted data volume regardless of the process working directory.
+export const dataDirectoryPath = path.join(projectRootPath, "data");
+export const avatarsDirectoryPath = path.join(dataDirectoryPath, "avatars");
 const databaseFilePath = path.join(dataDirectoryPath, "kotoba.sqlite");
 
 export type ReviewResult = "success" | "partial" | "fail";
@@ -21,6 +25,7 @@ export type WordRow = {
   kana: string | null;
   kanji: string | null;
   note: string | null;
+  examples: string | null;
   created_at: string;
 };
 
@@ -124,6 +129,7 @@ function ensureSchema(database: Database.Database) {
   `);
 
   ensureColumnExists(database, "words", "user_id", "INTEGER");
+  ensureColumnExists(database, "words", "examples", "TEXT");
   ensureColumnExists(database, "tags", "user_id", "INTEGER");
   ensureColumnExists(database, "word_stats", "consecutive_success_count", "INTEGER DEFAULT 0");
   ensureColumnExists(database, "word_stats", "srs_interval", "INTEGER DEFAULT 0");

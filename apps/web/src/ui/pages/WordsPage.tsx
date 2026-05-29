@@ -5,7 +5,6 @@ import {
   type Tag,
   type WordWithTags,
   createTag,
-  createWord,
   deleteTag,
   deleteWord,
   exportBackup,
@@ -13,46 +12,26 @@ import {
   fetchWordsWithTags,
   importWordsFromJson,
   resetAllWordScores,
-  updateWord,
 } from "../../api";
 import { AudioButton } from "../components/AudioButton";
-
-type WordFormState = {
-  french: string;
-  romaji: string;
-  kana: string;
-  kanji: string;
-  note: string;
-  selectedTagIds: number[];
-};
-
-const emptyWordFormState: WordFormState = {
-  french: "",
-  romaji: "",
-  kana: "",
-  kanji: "",
-  note: "",
-  selectedTagIds: [],
-};
+import { WordFormModal } from "../components/WordFormModal";
 
 export function WordsPage() {
   const [words, setWords] = useState<WordWithTags[] | null>(null);
   const [tags, setTags] = useState<Tag[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [formState, setFormState] = useState<WordFormState>(emptyWordFormState);
-  const [editingWordId, setEditingWordId] = useState<number | null>(null);
-  const [newTagName, setNewTagName] = useState<string>("");
+
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [editingWord, setEditingWord] = useState<WordWithTags | null>(null);
+
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [activeTagFilterId, setActiveTagFilterId] = useState<number | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+
   const [jsonImportText, setJsonImportText] = useState<string>("");
   const [jsonImportStatus, setJsonImportStatus] = useState<string | null>(null);
-  const frenchInputId = "word-french";
-  const kanaInputId = "word-kana";
-  const kanjiInputId = "word-kanji";
-  const romajiInputId = "word-romaji";
-  const noteTextareaId = "word-note";
   const jsonImportTextareaId = "json-import";
-
-  const isEditing = editingWordId !== null;
 
   useEffect(() => {
     let isCancelled = false;
@@ -98,58 +77,29 @@ export function WordsPage() {
     setTags(loadedTags);
   }
 
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-
-    const payload = {
-      french: formState.french.trim(),
-      romaji: normalizeOptionalText(formState.romaji),
-      kana: normalizeOptionalText(formState.kana),
-      kanji: normalizeOptionalText(formState.kanji),
-      note: normalizeOptionalText(formState.note),
-      tagIds: formState.selectedTagIds,
-    };
-
-    if (!payload.french) {
-      setErrorMessage("Le champ 'français' est requis.");
-      return;
-    }
-
-    setErrorMessage(null);
-
-    try {
-      if (editingWordId === null) {
-        await createWord(payload);
-      } else {
-        await updateWord(editingWordId, payload);
-      }
-
-      await refreshWordsAndTags();
-      setFormState(emptyWordFormState);
-      setEditingWordId(null);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-    }
-  }
-
-  function startEdit(word: WordWithTags) {
-    setEditingWordId(word.id);
-    setFormState({
-      french: word.french,
-      romaji: word.romaji ?? "",
-      kana: word.kana ?? "",
-      kanji: word.kanji ?? "",
-      note: word.note ?? "",
-      selectedTagIds: word.tags.map((tag) => tag.id),
+  async function handleCreateTag(name: string): Promise<Tag> {
+    const createdTag = await createTag(name);
+    setTags((previousTags) => {
+      const existing = (previousTags ?? []).some((tag) => tag.id === createdTag.id);
+      const updatedTags = existing
+        ? [...(previousTags ?? [])]
+        : [...(previousTags ?? []), createdTag];
+      updatedTags.sort((firstTag, secondTag) => firstTag.name.localeCompare(secondTag.name));
+      return updatedTags;
     });
+    return createdTag;
   }
 
-  function cancelEdit() {
-    setEditingWordId(null);
-    setFormState(emptyWordFormState);
+  async function handleDeleteTag(tag: Tag): Promise<void> {
+    await deleteTag(tag.id);
+    if (activeTagFilterId === tag.id) {
+      setActiveTagFilterId(null);
+    }
+    await refreshWordsAndTags();
   }
 
   async function handleDelete(wordId: number) {
+    if (!window.confirm("Supprimer ce mot ?")) return;
     try {
       await deleteWord(wordId);
       await refreshWordsAndTags();
@@ -158,55 +108,36 @@ export function WordsPage() {
     }
   }
 
-  async function handleCreateTag() {
-    const trimmedTagName = newTagName.trim();
-    if (!trimmedTagName) return;
-    setErrorMessage(null);
-    try {
-      const createdTag = await createTag(trimmedTagName);
-      setNewTagName("");
-      setTags((previousTags) => {
-        const updatedTags = [...(previousTags ?? []), createdTag];
-        updatedTags.sort((firstTag, secondTag) => firstTag.name.localeCompare(secondTag.name));
-        return updatedTags;
-      });
-      setFormState((previousState) => ({
-        ...previousState,
-        selectedTagIds: Array.from(new Set([...previousState.selectedTagIds, createdTag.id])),
-      }));
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-    }
+  function openAddModal() {
+    setEditingWord(null);
+    setIsModalOpen(true);
   }
 
-  function toggleTag(tagId: number) {
-    setFormState((previousState) => {
-      const isSelected = previousState.selectedTagIds.includes(tagId);
-      const nextSelectedTagIds = isSelected
-        ? previousState.selectedTagIds.filter((selectedTagId) => selectedTagId !== tagId)
-        : [...previousState.selectedTagIds, tagId];
+  function openEditModal(word: WordWithTags) {
+    setEditingWord(word);
+    setIsModalOpen(true);
+  }
 
-      return {
-        ...previousState,
-        selectedTagIds: nextSelectedTagIds,
-      };
+  function closeModal() {
+    setIsModalOpen(false);
+    setEditingWord(null);
+  }
+
+  const filteredWords = useMemo(() => {
+    if (!words) return [];
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return words.filter((word) => {
+      if (activeTagFilterId !== null && !word.tags.some((tag) => tag.id === activeTagFilterId)) {
+        return false;
+      }
+      if (!normalizedQuery) return true;
+      const haystack = [word.french, word.kana, word.kanji, word.romaji, word.note]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
     });
-  }
-
-  async function handleDeleteTag(tag: Tag) {
-    if (!window.confirm(`Supprimer le tag « ${tag.name} » ?`)) return;
-    setErrorMessage(null);
-    try {
-      await deleteTag(tag.id);
-      setFormState((previousState) => ({
-        ...previousState,
-        selectedTagIds: previousState.selectedTagIds.filter((id) => id !== tag.id),
-      }));
-      await refreshWordsAndTags();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-    }
-  }
+  }, [words, searchQuery, activeTagFilterId]);
 
   async function handleExportBackup() {
     setErrorMessage(null);
@@ -263,8 +194,6 @@ export function WordsPage() {
 
     setErrorMessage(null);
     setJsonImportStatus(null);
-
-    // Reset the input so the same file can be selected again
     event.target.value = "";
 
     try {
@@ -294,184 +223,57 @@ export function WordsPage() {
     }
   }
 
+  const hasWords = (words?.length ?? 0) > 0;
+
   return (
-    <div>
-      <div className="pageHeader">
+    <div className="wordsPage">
+      <div className="pageHeader wordsPage__header">
         <div>
           <h1 className="pageTitle">Mots</h1>
           <p className="pageSubtitle">
-            {wordsCount} mot(s). Ajoute le français, puis (optionnel) kana/kanji/romaji.
+            {wordsCount} mot(s) dans ton vocabulaire. Ajoute, organise et illustre tes mots avec des
+            exemples.
           </p>
         </div>
-      </div>
-
-      <div style={{ marginTop: "var(--space-8)" }}>
-        <form onSubmit={handleSubmit}>
-          <div
-            style={{
-              padding: "var(--space-6)",
-              border: "2px solid var(--color-border)",
-              borderRadius: "var(--radius-lg)",
-              background: "var(--color-panel-subtle)",
-            }}
-          >
-            <div className="row" style={{ gap: "var(--space-4)" }}>
-              <div className="field" style={{ flex: "1 1 240px" }}>
-                <label htmlFor={frenchInputId}>Français</label>
-                <input
-                  id={frenchInputId}
-                  className="input"
-                  value={formState.french}
-                  onChange={(event) => setFormState({ ...formState, french: event.target.value })}
-                  placeholder="Ex: Bonjour"
-                />
-              </div>
-              <div className="field" style={{ flex: "1 1 200px" }}>
-                <label htmlFor={kanaInputId}>Kana</label>
-                <input
-                  id={kanaInputId}
-                  className="input"
-                  value={formState.kana}
-                  onChange={(event) => setFormState({ ...formState, kana: event.target.value })}
-                  placeholder="Ex: こんにちは"
-                />
-              </div>
-              <div className="field" style={{ flex: "1 1 200px" }}>
-                <label htmlFor={kanjiInputId}>Kanji</label>
-                <input
-                  id={kanjiInputId}
-                  className="input"
-                  value={formState.kanji}
-                  onChange={(event) => setFormState({ ...formState, kanji: event.target.value })}
-                  placeholder="Ex: 今日は"
-                />
-              </div>
-              <div className="field" style={{ flex: "1 1 200px" }}>
-                <label htmlFor={romajiInputId}>Rōmaji</label>
-                <input
-                  id={romajiInputId}
-                  className="input"
-                  value={formState.romaji}
-                  onChange={(event) => setFormState({ ...formState, romaji: event.target.value })}
-                  placeholder="Ex: konnichiwa"
-                />
-              </div>
-            </div>
-
-            <div className="field" style={{ marginTop: "var(--space-5)" }}>
-              <label htmlFor={noteTextareaId}>Note</label>
-              <textarea
-                id={noteTextareaId}
-                className="textarea"
-                value={formState.note}
-                onChange={(event) => setFormState({ ...formState, note: event.target.value })}
-                placeholder="Note optionnelle..."
-              />
-            </div>
-
-            <div style={{ marginTop: "var(--space-5)" }}>
-              <div className="field__label" style={{ marginBottom: "var(--space-3)" }}>
-                Tags (un mot peut avoir plusieurs tags)
-              </div>
-              <div className="row" style={{ alignItems: "center", gap: "var(--space-3)" }}>
-                <input
-                  className="input"
-                  style={{ flex: "0 1 300px" }}
-                  value={newTagName}
-                  placeholder="Nouveau tag…"
-                  onChange={(event) => setNewTagName(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void handleCreateTag();
-                    }
-                  }}
-                />
-                <button className="button" type="button" onClick={() => void handleCreateTag()}>
-                  Ajouter le tag
-                </button>
-              </div>
-
-              <div
-                className="row"
-                style={{ marginTop: "var(--space-4)", gap: "var(--space-3)", flexWrap: "wrap" }}
-              >
-                {(tags ?? []).map((tag) => {
-                  const isSelected = formState.selectedTagIds.includes(tag.id);
-                  const checkboxId = `tag-${tag.id}`;
-                  return (
-                    <div
-                      key={tag.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "var(--space-2)",
-                        padding: "6px 12px 6px 14px",
-                        borderRadius: "var(--radius-md)",
-                        border: `2px solid ${isSelected ? "var(--color-primary)" : "var(--color-border)"}`,
-                        background: isSelected ? "rgba(199, 62, 29, 0.1)" : "var(--color-panel)",
-                      }}
-                    >
-                      <label
-                        htmlFor={checkboxId}
-                        style={{
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "var(--space-2)",
-                          userSelect: "none",
-                          color: isSelected ? "var(--color-primary)" : "var(--color-text-soft)",
-                          fontWeight: isSelected ? 700 : 600,
-                          fontSize: "15px",
-                          flex: 1,
-                        }}
-                      >
-                        <input
-                          id={checkboxId}
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleTag(tag.id)}
-                          style={{ cursor: "pointer" }}
-                        />
-                        {tag.name}
-                      </label>
-                      <button
-                        type="button"
-                        className="button"
-                        onClick={() => void handleDeleteTag(tag)}
-                        style={{
-                          padding: "2px 8px",
-                          fontSize: "13px",
-                          lineHeight: 1,
-                          color: "var(--color-text-soft)",
-                        }}
-                        aria-label={`Supprimer le tag ${tag.name}`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="row" style={{ marginTop: "var(--space-6)", gap: "var(--space-3)" }}>
-              <button className="button button--primary" type="submit">
-                {isEditing ? "Mettre à jour" : "Ajouter le mot"}
-              </button>
-              {isEditing ? (
-                <button className="button" type="button" onClick={() => cancelEdit()}>
-                  Annuler
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </form>
+        <button className="button button--primary" type="button" onClick={openAddModal}>
+          + Ajouter un mot
+        </button>
       </div>
 
       {errorMessage ? (
         <div style={{ marginTop: "var(--space-5)" }} className="formError">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {hasWords ? (
+        <div className="wordsPage__toolbar">
+          <input
+            className="input wordsPage__search"
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Rechercher un mot (français, kana, kanji, rōmaji…)"
+          />
+          <div className="wordsPage__tagFilters">
+            <button
+              type="button"
+              className={`wordsPage__filterChip ${activeTagFilterId === null ? "wordsPage__filterChip--active" : ""}`}
+              onClick={() => setActiveTagFilterId(null)}
+            >
+              Tous
+            </button>
+            {(tags ?? []).map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                className={`wordsPage__filterChip ${activeTagFilterId === tag.id ? "wordsPage__filterChip--active" : ""}`}
+                onClick={() => setActiveTagFilterId(tag.id)}
+              >
+                {tag.name}
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -481,143 +283,176 @@ export function WordsPage() {
         </div>
       ) : null}
 
-      {words && words.length > 0 ? (
-        <div style={{ marginTop: "var(--space-10)" }}>
-          <WordsGroupedByTag words={words} startEdit={startEdit} handleDelete={handleDelete} />
+      {!isLoading && !hasWords ? (
+        <div className="wordsPage__empty">
+          <p className="muted">Aucun mot pour l'instant.</p>
+          <button className="button button--primary" type="button" onClick={openAddModal}>
+            + Ajouter ton premier mot
+          </button>
         </div>
       ) : null}
 
-      <div
-        style={{
-          marginTop: "var(--space-10)",
-          paddingTop: "var(--space-8)",
-          borderTop: "2px solid var(--color-border)",
-        }}
-      >
-        <h2 className="pageTitle" style={{ fontSize: "28px", marginBottom: "var(--space-3)" }}>
-          Import / Export JSON
-        </h2>
-        <p className="pageSubtitle" style={{ marginBottom: "var(--space-5)" }}>
-          Colle un JSON (tableau de mots, ou export complet) pour ajouter en masse, et exporte pour
-          backup.
-        </p>
-
-        <div className="row" style={{ gap: "var(--space-3)", marginBottom: "var(--space-5)" }}>
-          <button
-            className="button button--primary"
-            type="button"
-            onClick={() => void handleExportBackup()}
-          >
-            Exporter backup
-          </button>
-          <button
-            className="button button--danger"
-            type="button"
-            onClick={async () => {
-              if (
-                !window.confirm(
-                  "Êtes-vous sûr de vouloir réinitialiser tous les scores ? Cette action est irréversible.",
-                )
-              )
-                return;
-              setErrorMessage(null);
-              try {
-                await resetAllWordScores();
-                await refreshWordsAndTags();
-                setErrorMessage("Tous les scores ont été réinitialisés.");
-                setTimeout(() => setErrorMessage(null), 3000);
-              } catch (error) {
-                setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-              }
-            }}
-          >
-            Réinitialiser tous les scores
-          </button>
+      {hasWords && filteredWords.length === 0 ? (
+        <div style={{ marginTop: "var(--space-8)" }} className="muted">
+          Aucun mot ne correspond à ta recherche.
         </div>
+      ) : null}
 
-        <div className="field">
-          <label htmlFor={jsonImportTextareaId}>JSON à importer</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-            <label
-              className="button"
+      {hasWords && filteredWords.length > 0 ? (
+        <div style={{ marginTop: "var(--space-6)" }}>
+          <WordsGroupedByTag
+            words={filteredWords}
+            startEdit={openEditModal}
+            handleDelete={handleDelete}
+          />
+        </div>
+      ) : null}
+
+      <div className="wordsPage__advanced">
+        <button
+          type="button"
+          className="sectionHeader"
+          onClick={() => setShowAdvanced((previous) => !previous)}
+        >
+          <span className="sectionHeader__chevron">{showAdvanced ? "▾" : "▸"}</span>
+          <span className="sectionHeader__title">Import / Export</span>
+          <span className="sectionHeader__meta muted">Backup, import en masse, scores</span>
+        </button>
+
+        {showAdvanced ? (
+          <div className="wordsPage__advancedBody">
+            <div className="row" style={{ gap: "var(--space-3)", marginBottom: "var(--space-5)" }}>
+              <button
+                className="button button--primary"
+                type="button"
+                onClick={() => void handleExportBackup()}
+              >
+                Exporter backup
+              </button>
+              <button
+                className="button button--danger"
+                type="button"
+                onClick={async () => {
+                  if (
+                    !window.confirm(
+                      "Êtes-vous sûr de vouloir réinitialiser tous les scores ? Cette action est irréversible.",
+                    )
+                  )
+                    return;
+                  setErrorMessage(null);
+                  try {
+                    await resetAllWordScores();
+                    await refreshWordsAndTags();
+                    setJsonImportStatus("Tous les scores ont été réinitialisés.");
+                    setTimeout(() => setJsonImportStatus(null), 3000);
+                  } catch (error) {
+                    setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+                  }
+                }}
+              >
+                Réinitialiser tous les scores
+              </button>
+            </div>
+
+            <div className="field">
+              <label htmlFor={jsonImportTextareaId}>JSON à importer</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                <label
+                  className="button"
+                  style={{ cursor: "pointer", display: "inline-block", alignSelf: "flex-start" }}
+                >
+                  📁 Importer un fichier JSON
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleImportFile}
+                    style={{ display: "none" }}
+                  />
+                </label>
+                <div className="muted" style={{ fontSize: "14px" }}>
+                  ou colle le JSON ci-dessous :
+                </div>
+                <textarea
+                  id={jsonImportTextareaId}
+                  className="textarea"
+                  value={jsonImportText}
+                  onChange={(event) => setJsonImportText(event.target.value)}
+                  placeholder='[{"french":"bonjour","romaji":"konnichiwa","kana":"こんにちは","kanji":"今日は","examples":[{"jp":"今日は!","kana":"こんにちは!","fr":"Bonjour !"}],"tags":["salutations"]}]'
+                  style={{ minHeight: "120px" }}
+                />
+              </div>
+            </div>
+            <div
+              className="row"
               style={{
-                cursor: "pointer",
-                display: "inline-block",
-                alignSelf: "flex-start",
+                marginTop: "var(--space-4)",
+                gap: "var(--space-3)",
+                alignItems: "center",
+                flexWrap: "wrap",
               }}
             >
-              📁 Importer un fichier JSON
-              <input
-                type="file"
-                accept=".json,application/json"
-                onChange={handleImportFile}
-                style={{ display: "none" }}
-              />
-            </label>
-            <div className="muted" style={{ fontSize: "14px" }}>
-              ou colle le JSON ci-dessous :
+              <button
+                className="button"
+                type="button"
+                onClick={() => void handleImportJson()}
+                disabled={!jsonImportText.trim()}
+              >
+                Importer depuis le texte
+              </button>
+              <button
+                className="button"
+                type="button"
+                onClick={async () => {
+                  const example = [
+                    {
+                      french: "bonjour",
+                      romaji: "konnichiwa",
+                      kana: "こんにちは",
+                      kanji: "今日は",
+                      examples: [
+                        {
+                          jp: "今日は良い天気ですね。",
+                          kana: "きょうはいいてんきですね。",
+                          fr: "Il fait beau aujourd'hui.",
+                        },
+                      ],
+                      tags: ["salutations"],
+                    },
+                    {
+                      french: "merci",
+                      romaji: "arigatou",
+                      kana: "ありがとう",
+                      kanji: "有難う",
+                      tags: ["salutations"],
+                    },
+                  ];
+                  await navigator.clipboard.writeText(JSON.stringify(example, null, 2));
+                  setJsonImportStatus("Exemple copié dans le presse-papier !");
+                  setTimeout(() => setJsonImportStatus(null), 3000);
+                }}
+              >
+                Copier un exemple
+              </button>
+              {jsonImportStatus ? (
+                <div className="muted" style={{ fontSize: "15px" }}>
+                  {jsonImportStatus}
+                </div>
+              ) : null}
             </div>
-            <textarea
-              id={jsonImportTextareaId}
-              className="textarea"
-              value={jsonImportText}
-              onChange={(event) => setJsonImportText(event.target.value)}
-              placeholder='Colle un JSON. Format: [{"french":"bonjour","romaji":"konnichiwa","kana":"こんにちは","kanji":"今日は","tags":["salutations"]}]. Pour une liste simple, clique "Copier un exemple", envoie-le avec ta liste à une IA, puis importe le JSON généré.'
-              style={{ minHeight: "120px" }}
-            />
           </div>
-        </div>
-        <div
-          className="row"
-          style={{
-            marginTop: "var(--space-4)",
-            gap: "var(--space-3)",
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <button
-            className="button"
-            type="button"
-            onClick={() => void handleImportJson()}
-            disabled={!jsonImportText.trim()}
-          >
-            Importer depuis le texte
-          </button>
-          <button
-            className="button"
-            type="button"
-            onClick={async () => {
-              const example = [
-                {
-                  french: "bonjour",
-                  romaji: "konnichiwa",
-                  kana: "こんにちは",
-                  kanji: "今日は",
-                  tags: ["salutations"],
-                },
-                {
-                  french: "merci",
-                  romaji: "arigatou",
-                  kana: "ありがとう",
-                  kanji: "有難う",
-                  tags: ["salutations"],
-                },
-              ];
-              await navigator.clipboard.writeText(JSON.stringify(example, null, 2));
-              setJsonImportStatus("Exemple copié dans le presse-papier !");
-              setTimeout(() => setJsonImportStatus(null), 3000);
-            }}
-          >
-            Copier un exemple
-          </button>
-          {jsonImportStatus ? (
-            <div className="muted" style={{ fontSize: "15px" }}>
-              {jsonImportStatus}
-            </div>
-          ) : null}
-        </div>
+        ) : null}
       </div>
+
+      {isModalOpen ? (
+        <WordFormModal
+          editingWord={editingWord}
+          tags={tags ?? []}
+          onClose={closeModal}
+          onSaved={refreshWordsAndTags}
+          onCreateTag={handleCreateTag}
+          onDeleteTag={handleDeleteTag}
+        />
+      ) : null}
     </div>
   );
 }
@@ -649,39 +484,21 @@ function WordsGroupedByTag(props: {
     }));
   }, [props.words]);
 
-  const [collapsedByGroupKey, setCollapsedByGroupKey] = useState<Record<string, boolean>>(() => {
-    const initialState: Record<string, boolean> = {};
-    for (const group of groups) {
-      initialState[group.groupKey] = true;
-    }
-    return initialState;
-  });
-
-  useEffect(() => {
-    setCollapsedByGroupKey((previousValue) => {
-      const nextValue: Record<string, boolean> = { ...previousValue };
-      for (const group of groups) {
-        if (nextValue[group.groupKey] === undefined) {
-          nextValue[group.groupKey] = true;
-        }
-      }
-      return nextValue;
-    });
-  }, [groups]);
+  const [collapsedByGroupKey, setCollapsedByGroupKey] = useState<Record<string, boolean>>({});
 
   function toggleGroup(groupKey: string) {
     setCollapsedByGroupKey((previousValue) => ({
       ...previousValue,
-      [groupKey]: !(previousValue[groupKey] ?? false),
+      [groupKey]: !(previousValue[groupKey] ?? true),
     }));
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {groups.map((group) => {
-        const isCollapsed = collapsedByGroupKey[group.groupKey] ?? false;
+        const isCollapsed = collapsedByGroupKey[group.groupKey] ?? true;
         return (
-          <div key={group.groupKey} style={{ marginBottom: "var(--space-4)" }}>
+          <div key={group.groupKey}>
             <button
               className="sectionHeader"
               type="button"
@@ -693,86 +510,15 @@ function WordsGroupedByTag(props: {
             </button>
 
             {isCollapsed ? null : (
-              <div
-                style={{
-                  marginTop: "var(--space-3)",
-                  border: "2px solid var(--color-border)",
-                  borderRadius: "var(--radius-lg)",
-                  overflow: "hidden",
-                }}
-              >
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Français</th>
-                      <th>Kana / Kanji</th>
-                      <th>Rōmaji</th>
-                      <th>Tags</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.words.map((word) => (
-                      <tr key={word.id}>
-                        <td style={{ fontWeight: 600 }}>{word.french}</td>
-                        <td className="muted">
-                          <span
-                            style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
-                          >
-                            {word.kanji ?? word.kana ?? "—"}
-                            {word.kana && <AudioButton text={word.kana} size="small" />}
-                          </span>
-                        </td>
-                        <td className="muted">{word.romaji ?? "—"}</td>
-                        <td className="muted">
-                          {word.tags.length > 0 ? (
-                            <div
-                              style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}
-                            >
-                              {word.tags.map((tag) => (
-                                <span
-                                  key={tag.id}
-                                  style={{
-                                    padding: "4px 10px",
-                                    borderRadius: "var(--radius-md)",
-                                    background: "rgba(199, 62, 29, 0.08)",
-                                    color: "var(--color-primary)",
-                                    fontSize: "13px",
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  {tag.name}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td>
-                          <div className="row" style={{ gap: "var(--space-2)" }}>
-                            <button
-                              className="button"
-                              type="button"
-                              onClick={() => props.startEdit(word)}
-                              style={{ padding: "8px 16px", fontSize: "15px" }}
-                            >
-                              Modifier
-                            </button>
-                            <button
-                              className="button button--danger"
-                              type="button"
-                              onClick={() => void props.handleDelete(word.id)}
-                              style={{ padding: "8px 16px", fontSize: "15px" }}
-                            >
-                              Supprimer
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="wordGrid">
+                {group.words.map((word) => (
+                  <WordCard
+                    key={word.id}
+                    word={word}
+                    startEdit={props.startEdit}
+                    handleDelete={props.handleDelete}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -782,8 +528,88 @@ function WordsGroupedByTag(props: {
   );
 }
 
-function normalizeOptionalText(value: string): string | null {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) return null;
-  return trimmedValue;
+function WordCard(props: {
+  word: WordWithTags;
+  startEdit: (word: WordWithTags) => void;
+  handleDelete: (wordId: number) => Promise<void>;
+}) {
+  const { word } = props;
+  const examplesCount = word.examples?.length ?? 0;
+  const primaryJapanese = word.kanji ?? word.kana ?? null;
+  const showKanaReading = Boolean(word.kanji && word.kana);
+
+  return (
+    <div className="wordCard wordCard--clickable">
+      <button
+        type="button"
+        className="wordCard__editOverlay"
+        aria-label={`Modifier ${word.french}`}
+        title="Modifier"
+        onClick={() => props.startEdit(word)}
+      />
+
+      <button
+        type="button"
+        className="wordCard__delete"
+        aria-label={`Supprimer ${word.french}`}
+        title="Supprimer"
+        onClick={() => void props.handleDelete(word.id)}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 6h18" />
+          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6" />
+          <path d="M14 11v6" />
+        </svg>
+      </button>
+
+      <div className="wordCard__main">
+        <div className="wordCard__japanese">
+          {primaryJapanese ? (
+            <>
+              <span className="wordCard__primary">{primaryJapanese}</span>
+              {word.kana ? (
+                <span className="wordCard__audio">
+                  <AudioButton text={word.kana} size="small" />
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <span className="wordCard__primary wordCard__primary--empty">—</span>
+          )}
+        </div>
+        {showKanaReading ? <div className="wordCard__reading">{word.kana}</div> : null}
+        <div className="wordCard__french">{word.french}</div>
+        {word.romaji ? <div className="wordCard__romaji">{word.romaji}</div> : null}
+      </div>
+
+      {word.note ? <div className="wordCard__note">{word.note}</div> : null}
+
+      <div className="wordCard__footer">
+        <div className="wordCard__tags">
+          {word.tags.map((tag) => (
+            <span key={tag.id} className="wordTagBadge">
+              {tag.name}
+            </span>
+          ))}
+          {examplesCount > 0 ? (
+            <span className="wordCard__examplesBadge">
+              {examplesCount} exemple{examplesCount > 1 ? "s" : ""}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
 }
