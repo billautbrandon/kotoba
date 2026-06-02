@@ -50,26 +50,96 @@ export type WordWithStatsAndTags = WordWithStats & {
 
 export type ReviewResult = "success" | "partial" | "fail";
 
-export async function fetchMe(): Promise<User> {
-  const response = await fetch("/api/auth/me", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Not authenticated");
+async function safeJson<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`Réponse invalide du serveur (${response.status}). Réessayez.`);
   }
-  const payload = (await response.json()) as { user: User };
+}
+
+async function extractErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const text = await response.text();
+    const payload = JSON.parse(text) as { error?: string; detail?: string };
+    if (payload.error) return payload.error;
+    if (payload.detail) return payload.detail;
+  } catch {
+    // response body wasn't JSON
+  }
+  return fallback;
+}
+
+async function apiGet<T>(url: string): Promise<T> {
+  const response = await fetch(url, { credentials: "include" });
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, `Erreur serveur (${response.status})`);
+    throw new Error(message);
+  }
+  return safeJson<T>(response);
+}
+
+async function apiPost<T = void>(
+  url: string,
+  body?: unknown,
+  errorFallback?: string,
+): Promise<T> {
+  const options: RequestInit = { method: "POST", credentials: "include" };
+  if (body !== undefined) {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const message = await extractErrorMessage(
+      response,
+      errorFallback ?? `Erreur serveur (${response.status})`,
+    );
+    throw new Error(message);
+  }
+  return safeJson<T>(response);
+}
+
+async function apiPut<T = void>(
+  url: string,
+  body: unknown,
+  errorFallback?: string,
+): Promise<T> {
+  const response = await fetch(url, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const message = await extractErrorMessage(
+      response,
+      errorFallback ?? `Erreur serveur (${response.status})`,
+    );
+    throw new Error(message);
+  }
+  return safeJson<T>(response);
+}
+
+async function apiDelete(url: string, errorFallback?: string): Promise<void> {
+  const response = await fetch(url, { method: "DELETE", credentials: "include" });
+  if (!response.ok) {
+    const message = await extractErrorMessage(
+      response,
+      errorFallback ?? `Erreur serveur (${response.status})`,
+    );
+    throw new Error(message);
+  }
+}
+
+export async function fetchMe(): Promise<User> {
+  const payload = await apiGet<{ user: User }>("/api/auth/me");
   return payload.user;
 }
 
 export async function registerUser(username: string, password: string): Promise<User> {
-  const response = await fetch("/api/auth/register", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
-  if (!response.ok) {
-    throw new Error("Failed to register");
-  }
-  const payload = (await response.json()) as { user: User };
+  const payload = await apiPost<{ user: User }>("/api/auth/register", { username, password });
   return payload.user;
 }
 
@@ -78,57 +148,27 @@ export async function loginUser(
   password: string,
   rememberMe?: boolean,
 ): Promise<User> {
-  const response = await fetch("/api/auth/login", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, rememberMe: rememberMe ?? false }),
+  const payload = await apiPost<{ user: User }>("/api/auth/login", {
+    username,
+    password,
+    rememberMe: rememberMe ?? false,
   });
-  if (!response.ok) {
-    throw new Error("Failed to login");
-  }
-  const payload = (await response.json()) as { user: User };
   return payload.user;
 }
 
 export async function logoutUser(): Promise<void> {
-  const response = await fetch("/api/auth/logout", {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!response.ok) {
-    throw new Error("Failed to logout");
-  }
+  await apiPost("/api/auth/logout");
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
-  const response = await fetch("/api/auth/change-password", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ currentPassword, newPassword }),
-  });
-  if (!response.ok) {
-    const error = (await response.json()) as { error?: string };
-    throw new Error(error.error ?? "Failed to change password");
-  }
+  await apiPost("/api/auth/change-password", { currentPassword, newPassword });
 }
 
 export async function updateProfile(profile: {
   email?: string | null;
   display_name?: string | null;
 }): Promise<User> {
-  const response = await fetch("/api/auth/profile", {
-    method: "PUT",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(profile),
-  });
-  if (!response.ok) {
-    const error = (await response.json()) as { error?: string };
-    throw new Error(error.error ?? "Failed to update profile");
-  }
-  const payload = (await response.json()) as { user: User };
+  const payload = await apiPut<{ user: User }>("/api/auth/profile", profile);
   return payload.user;
 }
 
@@ -142,49 +182,31 @@ export async function uploadAvatar(file: File): Promise<User> {
     body: formData,
   });
   if (!response.ok) {
-    const error = (await response.json()) as { error?: string };
-    throw new Error(error.error ?? "Failed to upload avatar");
+    const message = await extractErrorMessage(response, "Erreur lors de l'upload de l'avatar");
+    throw new Error(message);
   }
-  const payload = (await response.json()) as { user: User };
+  const payload = await safeJson<{ user: User }>(response);
   return payload.user;
 }
 
 export async function fetchWords(includeStats: boolean): Promise<WordWithStats[] | Word[]> {
-  const response = await fetch(
+  const payload = await apiGet<{ words: WordWithStats[] | Word[] }>(
     `/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=0`,
-    {
-      credentials: "include",
-    },
   );
-  if (!response.ok) {
-    throw new Error("Failed to fetch words");
-  }
-  const payload = (await response.json()) as { words: unknown };
-  return payload.words as WordWithStats[] | Word[];
+  return payload.words;
 }
 
 export async function fetchWordsWithTags(
   includeStats: boolean,
 ): Promise<WordWithTags[] | WordWithStatsAndTags[]> {
-  const response = await fetch(
+  const payload = await apiGet<{ words: WordWithTags[] | WordWithStatsAndTags[] }>(
     `/api/words?includeStats=${includeStats ? "1" : "0"}&includeTags=1`,
-    {
-      credentials: "include",
-    },
   );
-  if (!response.ok) {
-    throw new Error("Failed to fetch words");
-  }
-  const payload = (await response.json()) as { words: unknown };
-  return payload.words as WordWithTags[] | WordWithStatsAndTags[];
+  return payload.words;
 }
 
 export async function fetchDifficultWords(): Promise<WordWithStats[]> {
-  const response = await fetch("/api/words/difficult", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch difficult words");
-  }
-  const payload = (await response.json()) as { words: WordWithStats[] };
+  const payload = await apiGet<{ words: WordWithStats[] }>("/api/words/difficult");
   return payload.words;
 }
 
@@ -196,19 +218,11 @@ export type SrsWords = {
 };
 
 export async function fetchSrsWords(): Promise<SrsWords> {
-  const response = await fetch("/api/srs/words", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch SRS words");
-  }
-  return (await response.json()) as SrsWords;
+  return apiGet<SrsWords>("/api/srs/words");
 }
 
 export async function fetchDueWords(): Promise<{ words: WordWithStats[]; dueCount: number }> {
-  const response = await fetch("/api/srs/due", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch due words");
-  }
-  return (await response.json()) as { words: WordWithStats[]; dueCount: number };
+  return apiGet<{ words: WordWithStats[]; dueCount: number }>("/api/srs/due");
 }
 
 export type SrsSummary = {
@@ -220,11 +234,7 @@ export type SrsSummary = {
 };
 
 export async function fetchSrsSummary(): Promise<SrsSummary> {
-  const response = await fetch("/api/srs/summary", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch SRS summary");
-  }
-  return (await response.json()) as SrsSummary;
+  return apiGet<SrsSummary>("/api/srs/summary");
 }
 
 export type StreakInfo = {
@@ -234,23 +244,11 @@ export type StreakInfo = {
 };
 
 export async function fetchStreak(): Promise<StreakInfo> {
-  const response = await fetch("/api/stats/streak", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch streak");
-  }
-  return (await response.json()) as StreakInfo;
+  return apiGet<StreakInfo>("/api/stats/streak");
 }
 
 export async function updateDailyGoal(dailyGoal: number): Promise<void> {
-  const response = await fetch("/api/settings/daily-goal", {
-    method: "PUT",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dailyGoal }),
-  });
-  if (!response.ok) {
-    throw new Error("Failed to update daily goal");
-  }
+  await apiPut("/api/settings/daily-goal", { dailyGoal });
 }
 
 export type StatsOverview = {
@@ -262,21 +260,13 @@ export type StatsOverview = {
 };
 
 export async function fetchStatsOverview(): Promise<StatsOverview> {
-  const response = await fetch("/api/stats/overview", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch stats");
-  }
-  return (await response.json()) as StatsOverview;
+  return apiGet<StatsOverview>("/api/stats/overview");
 }
 
 export type ActivityDay = { activity_date: string; reviews_count: number };
 
 export async function fetchActivityData(): Promise<{ activity: ActivityDay[] }> {
-  const response = await fetch("/api/stats/activity", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch activity");
-  }
-  return (await response.json()) as { activity: ActivityDay[] };
+  return apiGet<{ activity: ActivityDay[] }>("/api/stats/activity");
 }
 
 export async function fetchSeries(): Promise<
@@ -288,11 +278,7 @@ export async function fetchSeries(): Promise<
     lastReviewedAt: string | null;
   }>
 > {
-  const response = await fetch("/api/series", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch series");
-  }
-  const payload = (await response.json()) as {
+  const payload = await apiGet<{
     series: Array<{
       tagId: number;
       tagName: string;
@@ -300,50 +286,27 @@ export async function fetchSeries(): Promise<
       totalScore: number;
       lastReviewedAt: string | null;
     }>;
-  };
+  }>("/api/series");
   return payload.series;
 }
 
 export async function fetchSeriesWords(tagId: number): Promise<WordWithStats[]> {
-  const response = await fetch(`/api/series/${tagId}/words`, { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch series words");
-  }
-  const payload = (await response.json()) as { words: WordWithStats[] };
+  const payload = await apiGet<{ words: WordWithStats[] }>(`/api/series/${tagId}/words`);
   return payload.words;
 }
 
 export async function fetchTags(): Promise<Tag[]> {
-  const response = await fetch("/api/tags", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch tags");
-  }
-  const payload = (await response.json()) as { tags: Tag[] };
+  const payload = await apiGet<{ tags: Tag[] }>("/api/tags");
   return payload.tags;
 }
 
 export async function createTag(name: string): Promise<Tag> {
-  const response = await fetch("/api/tags", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!response.ok) {
-    throw new Error("Failed to create tag");
-  }
-  const payload = (await response.json()) as { tag: Tag };
+  const payload = await apiPost<{ tag: Tag }>("/api/tags", { name });
   return payload.tag;
 }
 
 export async function deleteTag(tagId: number): Promise<void> {
-  const response = await fetch(`/api/tags/${tagId}`, {
-    method: "DELETE",
-    credentials: "include",
-  });
-  if (!response.ok) {
-    throw new Error("Failed to delete tag");
-  }
+  await apiDelete(`/api/tags/${tagId}`);
 }
 
 export async function createWord(word: {
@@ -355,16 +318,7 @@ export async function createWord(word: {
   examples?: WordExample[];
   tagIds?: number[];
 }): Promise<Word> {
-  const response = await fetch("/api/words", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(word),
-  });
-  if (!response.ok) {
-    throw new Error("Failed to create word");
-  }
-  const payload = (await response.json()) as { word: Word };
+  const payload = await apiPost<{ word: Word }>("/api/words", word);
   return payload.word;
 }
 
@@ -380,66 +334,29 @@ export async function updateWord(
     tagIds?: number[];
   },
 ): Promise<Word> {
-  const response = await fetch(`/api/words/${id}`, {
-    method: "PUT",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(word),
-  });
-  if (!response.ok) {
-    throw new Error("Failed to update word");
-  }
-  const payload = (await response.json()) as { word: Word };
+  const payload = await apiPut<{ word: Word }>(`/api/words/${id}`, word);
   return payload.word;
 }
 
 export async function deleteWord(id: number): Promise<void> {
-  const response = await fetch(`/api/words/${id}`, { method: "DELETE", credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to delete word");
-  }
+  await apiDelete(`/api/words/${id}`);
 }
 
 export async function resetAllWordScores(): Promise<void> {
-  const response = await fetch("/api/words/reset-scores", {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!response.ok) {
-    throw new Error("Failed to reset word scores");
-  }
+  await apiPost("/api/words/reset-scores");
 }
 
 export async function fetchAdminUsers(): Promise<User[]> {
-  const response = await fetch("/api/admin/users", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch users");
-  }
-  const payload = (await response.json()) as { users: User[] };
+  const payload = await apiGet<{ users: User[] }>("/api/admin/users");
   return payload.users;
 }
 
 export async function deleteAdminUser(userId: number): Promise<void> {
-  const response = await fetch(`/api/admin/users/${userId}`, {
-    method: "DELETE",
-    credentials: "include",
-  });
-  if (!response.ok) {
-    const error = (await response.json()) as { error?: string };
-    throw new Error(error.error ?? "Failed to delete user");
-  }
+  await apiDelete(`/api/admin/users/${userId}`);
 }
 
 export async function submitReview(wordId: number, result: ReviewResult): Promise<void> {
-  const response = await fetch("/api/reviews", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wordId, result }),
-  });
-  if (!response.ok) {
-    throw new Error("Failed to submit review");
-  }
+  await apiPost("/api/reviews", { wordId, result });
 }
 
 export class BulkReviewsError extends Error {
@@ -454,17 +371,6 @@ export class BulkReviewsError extends Error {
     this.isAuthError = status === 401;
     this.isRetryable = !this.isAuthError && (status === 0 || status >= 500 || status === 408);
   }
-}
-
-async function extractErrorMessage(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = (await response.json()) as { error?: string; detail?: string };
-    if (payload.error) return payload.error;
-    if (payload.detail) return payload.detail;
-  } catch {
-    // response body wasn't JSON
-  }
-  return fallback;
 }
 
 async function submitBulkReviewsOnce(
@@ -489,7 +395,7 @@ async function submitBulkReviewsOnce(
     );
     throw new BulkReviewsError(errorMessage, response.status);
   }
-  return (await response.json()) as { appliedCount: number };
+  return safeJson<{ appliedCount: number }>(response);
 }
 
 export async function submitBulkReviews(
@@ -516,11 +422,7 @@ export async function submitBulkReviews(
 }
 
 export async function exportBackup(): Promise<unknown> {
-  const response = await fetch("/api/export", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to export backup");
-  }
-  return await response.json();
+  return apiGet<unknown>("/api/export");
 }
 
 export async function importWordsFromJson(
@@ -534,16 +436,9 @@ export async function importWordsFromJson(
     tags?: string[];
   }>,
 ): Promise<{ importedWordsCount: number; importedTagsCount: number }> {
-  const response = await fetch("/api/import", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ words }),
+  return apiPost<{ importedWordsCount: number; importedTagsCount: number }>("/api/import", {
+    words,
   });
-  if (!response.ok) {
-    throw new Error("Failed to import words");
-  }
-  return (await response.json()) as { importedWordsCount: number; importedTagsCount: number };
 }
 
 // --- Phrases AI ---
@@ -556,11 +451,7 @@ export type GeminiQuota = {
 };
 
 export async function fetchGeminiQuota(): Promise<GeminiQuota> {
-  const response = await fetch("/api/phrases/quota", { credentials: "include" });
-  if (!response.ok) {
-    throw new Error("Failed to fetch quota");
-  }
-  return (await response.json()) as GeminiQuota;
+  return apiGet<GeminiQuota>("/api/phrases/quota");
 }
 
 export type PhraseConstraints = {
@@ -593,17 +484,11 @@ export type PhraseEvaluation = {
 };
 
 export async function generatePhrases(constraints: PhraseConstraints): Promise<GeneratedPhrase[]> {
-  const response = await fetch("/api/phrases/generate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(constraints),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la génération des phrases");
-  }
-  const payload = (await response.json()) as { phrases: GeneratedPhrase[] };
+  const payload = await apiPost<{ phrases: GeneratedPhrase[] }>(
+    "/api/phrases/generate",
+    constraints,
+    "Erreur lors de la génération des phrases",
+  );
   return payload.phrases;
 }
 
@@ -613,17 +498,11 @@ export async function evaluatePhrase(
   frenchSentence: string,
   direction: "fr-to-jp" | "jp-to-fr" = "fr-to-jp",
 ): Promise<PhraseEvaluation> {
-  const response = await fetch("/api/phrases/evaluate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userAnswer, expectedAnswer, frenchSentence, direction }),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation");
-  }
-  return (await response.json()) as PhraseEvaluation;
+  return apiPost<PhraseEvaluation>(
+    "/api/phrases/evaluate",
+    { userAnswer, expectedAnswer, frenchSentence, direction },
+    "Erreur lors de l'évaluation",
+  );
 }
 
 // --- Ask the teacher (any practice tab) ---
@@ -639,22 +518,16 @@ export type AskTeacherParams = {
   expectedAnswer: string;
   userAnswer?: string;
   direction?: "fr-to-jp" | "jp-to-fr";
-  mode?: "phrases" | "construction" | "jlpt" | "conjugaison" | "dialogue";
+  mode?: "phrases" | "construction" | "jlpt" | "conjugaison" | "dialogue" | "ecoute";
   history?: AskTeacherTurn[];
 };
 
 export async function askTeacher(params: AskTeacherParams): Promise<{ answer: string }> {
-  const response = await fetch("/api/practice/ask", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la demande au professeur");
-  }
-  return (await response.json()) as { answer: string };
+  return apiPost<{ answer: string }>(
+    "/api/practice/ask",
+    params,
+    "Erreur lors de la demande au professeur",
+  );
 }
 
 // --- Construction (sentence builder) ---
@@ -679,17 +552,11 @@ export type ConstructionConstraints = Omit<PhraseConstraints, "contentType" | "w
 export async function generateConstructionPhrases(
   constraints: ConstructionConstraints,
 ): Promise<ConstructionPhrase[]> {
-  const response = await fetch("/api/construction/generate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(constraints),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la génération des blocs");
-  }
-  const payload = (await response.json()) as { phrases: ConstructionPhrase[] };
+  const payload = await apiPost<{ phrases: ConstructionPhrase[] }>(
+    "/api/construction/generate",
+    constraints,
+    "Erreur lors de la génération des blocs",
+  );
   return payload.phrases;
 }
 
@@ -715,17 +582,11 @@ export type DialogueTurn = {
 };
 
 export async function generateDialogue(constraints: DialogueConstraints): Promise<DialogueTurn[]> {
-  const response = await fetch("/api/dialogue/generate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(constraints),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la génération du dialogue");
-  }
-  const payload = (await response.json()) as { turns: DialogueTurn[] };
+  const payload = await apiPost<{ turns: DialogueTurn[] }>(
+    "/api/dialogue/generate",
+    constraints,
+    "Erreur lors de la génération du dialogue",
+  );
   return payload.turns;
 }
 
@@ -735,17 +596,11 @@ export async function evaluateDialogue(
   frenchPrompt: string,
   context?: string,
 ): Promise<PhraseEvaluation> {
-  const response = await fetch("/api/dialogue/evaluate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userTranscript, expectedJp, frenchPrompt, context }),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation");
-  }
-  return (await response.json()) as PhraseEvaluation;
+  return apiPost<PhraseEvaluation>(
+    "/api/dialogue/evaluate",
+    { userTranscript, expectedJp, frenchPrompt, context },
+    "Erreur lors de l'évaluation",
+  );
 }
 
 // --- JLPT exercises ---
@@ -767,17 +622,11 @@ export type JlptExercise = {
 };
 
 export async function generateJlptExercises(constraints: JlptConstraints): Promise<JlptExercise[]> {
-  const response = await fetch("/api/jlpt/generate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(constraints),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la génération JLPT");
-  }
-  const payload = (await response.json()) as { exercises: JlptExercise[] };
+  const payload = await apiPost<{ exercises: JlptExercise[] }>(
+    "/api/jlpt/generate",
+    constraints,
+    "Erreur lors de la génération JLPT",
+  );
   return payload.exercises;
 }
 
@@ -787,17 +636,11 @@ export async function evaluateJlptAnswer(
   prompt: string,
   direction: "fr-to-jp" | "jp-to-fr",
 ): Promise<PhraseEvaluation> {
-  const response = await fetch("/api/jlpt/evaluate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userAnswer, expectedAnswer, prompt, direction }),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation JLPT");
-  }
-  return (await response.json()) as PhraseEvaluation;
+  return apiPost<PhraseEvaluation>(
+    "/api/jlpt/evaluate",
+    { userAnswer, expectedAnswer, prompt, direction },
+    "Erreur lors de l'évaluation JLPT",
+  );
 }
 
 // --- Keyboard mode batch correction ---
@@ -822,17 +665,11 @@ export type KeyboardCorrection = {
 export async function correctKeyboardAnswers(
   answers: KeyboardAnswer[],
 ): Promise<KeyboardCorrection[]> {
-  const response = await fetch("/api/series/keyboard/correct", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answers }),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la correction");
-  }
-  return (await response.json()) as KeyboardCorrection[];
+  return apiPost<KeyboardCorrection[]>(
+    "/api/series/keyboard/correct",
+    { answers },
+    "Erreur lors de la correction",
+  );
 }
 
 export function computeFailRate(word: WordWithStats): number {
@@ -848,27 +685,20 @@ export async function downloadMissingKanjiSvgs(): Promise<{
   failed: number;
   missingCount: number;
 }> {
-  const response = await fetch("/api/kanji/download-missing", {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!response.ok) {
-    throw new Error("Failed to download missing kanji SVGs");
-  }
-  return (await response.json()) as {
+  return apiPost<{
     success: boolean;
     total: number;
     downloaded: number;
     failed: number;
     missingCount: number;
-  };
+  }>("/api/kanji/download-missing");
 }
 
 export async function downloadTagAudio(tagId: number, tagName: string): Promise<void> {
   const response = await fetch(`/api/tags/${tagId}/audio`, { credentials: "include" });
   if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la génération audio");
+    const message = await extractErrorMessage(response, "Erreur lors de la génération audio");
+    throw new Error(message);
   }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
@@ -901,17 +731,11 @@ export async function generateConjugationExercises(
   forms: string[],
   count: number,
 ): Promise<{ exercises: ConjugationExercise[]; quota: GeminiQuota }> {
-  const response = await fetch("/api/conjugation/generate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ words, forms, count }),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de la génération");
-  }
-  return (await response.json()) as { exercises: ConjugationExercise[]; quota: GeminiQuota };
+  return apiPost<{ exercises: ConjugationExercise[]; quota: GeminiQuota }>(
+    "/api/conjugation/generate",
+    { words, forms, count },
+    "Erreur lors de la génération",
+  );
 }
 
 export async function evaluateConjugation(
@@ -919,15 +743,225 @@ export async function evaluateConjugation(
   expected: string,
   userAnswer: string,
 ): Promise<{ evaluation: ConjugationEvaluation; quota: GeminiQuota }> {
-  const response = await fetch("/api/conjugation/evaluate", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, expected, userAnswer }),
-  });
-  if (!response.ok) {
-    const errorPayload = (await response.json()) as { error?: string };
-    throw new Error(errorPayload.error ?? "Erreur lors de l'évaluation");
-  }
-  return (await response.json()) as { evaluation: ConjugationEvaluation; quota: GeminiQuota };
+  return apiPost<{ evaluation: ConjugationEvaluation; quota: GeminiQuota }>(
+    "/api/conjugation/evaluate",
+    { prompt, expected, userAnswer },
+    "Erreur lors de l'évaluation",
+  );
+}
+
+// --- Badges ---
+
+export type BadgeDefinition = {
+  id: string;
+  category: string;
+  title: string;
+  description: string;
+  icon: string;
+  condition_type: string;
+  condition_value: number | null;
+  earned_at: string | null;
+};
+
+export async function fetchBadges(): Promise<BadgeDefinition[]> {
+  const payload = await apiGet<{ badges: BadgeDefinition[] }>("/api/badges");
+  return payload.badges;
+}
+
+export async function fetchRecentBadges(): Promise<BadgeDefinition[]> {
+  const payload = await apiGet<{ badges: BadgeDefinition[] }>("/api/badges/recent");
+  return payload.badges;
+}
+
+// --- Weak points ---
+
+export type WeakPointsData = {
+  byErrorType: Array<{ error_type: string; count: number }>;
+  byMode: Array<{ exercise_mode: string; count: number }>;
+  thisWeek: number;
+  lastWeek: number;
+};
+
+export async function fetchWeakPoints(): Promise<WeakPointsData> {
+  return apiGet<WeakPointsData>("/api/stats/weak-points");
+}
+
+// --- Saved phrases ---
+
+export type SavedPhrase = {
+  id: number;
+  french: string;
+  japanese: string;
+  japanese_kana: string | null;
+  explanation: string | null;
+  source: string;
+  word_ids: string | null;
+  srs_step: number;
+  srs_interval: number;
+  srs_ease_factor: number;
+  srs_next_review_at: string | null;
+  success_count: number;
+  fail_count: number;
+  last_reviewed_at: string | null;
+  created_at: string;
+};
+
+export async function fetchSavedPhrases(source?: string): Promise<SavedPhrase[]> {
+  const url = source ? `/api/saved-phrases?source=${encodeURIComponent(source)}` : "/api/saved-phrases";
+  const payload = await apiGet<{ phrases: SavedPhrase[] }>(url);
+  return payload.phrases;
+}
+
+export async function fetchDuePhrases(): Promise<{ phrases: SavedPhrase[]; dueCount: number }> {
+  return apiGet<{ phrases: SavedPhrase[]; dueCount: number }>("/api/saved-phrases/due");
+}
+
+export async function savePhrase(phrase: {
+  french: string;
+  japanese: string;
+  japanese_kana?: string;
+  explanation?: string;
+  source: string;
+  word_ids?: number[];
+}): Promise<{ id: number; newBadges: BadgeDefinition[] }> {
+  return apiPost<{ id: number; newBadges: BadgeDefinition[] }>("/api/saved-phrases", phrase);
+}
+
+export async function reviewSavedPhrase(
+  phraseId: number,
+  result: "success" | "fail",
+): Promise<void> {
+  await apiPost(`/api/saved-phrases/${phraseId}/review`, { result });
+}
+
+export async function deleteSavedPhrase(phraseId: number): Promise<void> {
+  await apiDelete(`/api/saved-phrases/${phraseId}`);
+}
+
+// --- Grammar notes ---
+
+export type GrammarNote = {
+  id: number;
+  topic: string;
+  content: string;
+  error_type: string | null;
+  view_count: number;
+  created_at: string;
+};
+
+export async function fetchGrammarNote(topic: string): Promise<GrammarNote> {
+  const payload = await apiGet<{ note: GrammarNote }>(
+    `/api/grammar/note?topic=${encodeURIComponent(topic)}`,
+  );
+  return payload.note;
+}
+
+export async function fetchGrammarNotes(): Promise<GrammarNote[]> {
+  const payload = await apiGet<{ notes: GrammarNote[] }>("/api/grammar/notes");
+  return payload.notes;
+}
+
+export async function deleteGrammarNote(noteId: number): Promise<void> {
+  await apiDelete(`/api/grammar/notes/${noteId}`);
+}
+
+// --- Daily challenge ---
+
+export type DailyChallenge = {
+  id: number;
+  challenge_date: string;
+  challenge_type: string;
+  challenge_data: { prompt: string; answer: string; hint?: string; wordId?: number };
+  completed: number;
+  is_correct: number | null;
+};
+
+export async function fetchDailyChallenge(): Promise<DailyChallenge | null> {
+  const payload = await apiGet<{ challenge: DailyChallenge | null }>("/api/daily-challenge");
+  return payload.challenge;
+}
+
+export async function submitDailyChallenge(
+  answer: string,
+): Promise<{ isCorrect: boolean; expectedAnswer: string; newBadges: BadgeDefinition[] }> {
+  return apiPost<{ isCorrect: boolean; expectedAnswer: string; newBadges: BadgeDefinition[] }>(
+    "/api/daily-challenge/submit",
+    { answer },
+  );
+}
+
+// --- Listening / Dictée ---
+
+export type ListeningExercise = {
+  japanese: string;
+  japanese_kana: string;
+  french: string;
+  wordIds: number[];
+};
+
+export async function generateListeningExercises(constraints: {
+  tagIds: number[];
+  difficulty: "debutant" | "intermediaire";
+  count: number;
+}): Promise<{ exercises: ListeningExercise[]; quota: GeminiQuota }> {
+  return apiPost<{ exercises: ListeningExercise[]; quota: GeminiQuota }>(
+    "/api/listening/generate",
+    constraints,
+    "Erreur lors de la génération des exercices d'écoute",
+  );
+}
+
+export async function evaluateListening(
+  userTranscript: string,
+  expectedJapanese: string,
+  frenchTranslation: string,
+): Promise<PhraseEvaluation> {
+  return apiPost<PhraseEvaluation>(
+    "/api/listening/evaluate",
+    { userTranscript, expectedJapanese, frenchTranslation },
+    "Erreur lors de l'évaluation",
+  );
+}
+
+// --- Reading / Lecture ---
+
+export type ReadingParagraph = {
+  japanese: string;
+  french: string;
+  words: Array<{ text: string; reading: string; meaning: string }>;
+};
+
+export type ReadingQuestion = {
+  question: string;
+  answer: string;
+};
+
+export type ReadingData = {
+  paragraphs: ReadingParagraph[];
+  questions: ReadingQuestion[];
+  quota: GeminiQuota;
+};
+
+export async function generateReading(constraints: {
+  tagIds: number[];
+  difficulty: "debutant" | "intermediaire";
+  length: "short" | "medium" | "long";
+}): Promise<ReadingData> {
+  return apiPost<ReadingData>(
+    "/api/reading/generate",
+    constraints,
+    "Erreur lors de la génération du texte",
+  );
+}
+
+export async function checkReadingAnswer(
+  question: string,
+  expectedAnswer: string,
+  userAnswer: string,
+): Promise<{ isCorrect: boolean; feedback: string }> {
+  return apiPost<{ isCorrect: boolean; feedback: string }>(
+    "/api/reading/check-answer",
+    { question, expectedAnswer, userAnswer },
+    "Erreur lors de l'évaluation",
+  );
 }

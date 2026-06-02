@@ -1,4 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type ResponseSchema } from "@google/generative-ai";
+import type { ZodType } from "zod";
 
 const apiKey = process.env.GEMINI_API_KEY ?? "";
 
@@ -18,6 +19,12 @@ export type GeminiErrorInfo = {
   message: string;
   isQuotaError: boolean;
   httpStatus: number | null;
+};
+
+export type GeminiJsonOptions<T> = {
+  responseSchema?: ResponseSchema;
+  zodSchema?: ZodType<T>;
+  maxRetries?: number;
 };
 
 function parseGeminiError(error: unknown): GeminiErrorInfo {
@@ -76,34 +83,56 @@ function extractJsonPayload(rawText: string): string {
   return text;
 }
 
-export async function callGeminiJson<T>(prompt: string): Promise<T> {
+export async function callGeminiJson<T>(
+  prompt: string,
+  options?: GeminiJsonOptions<T>,
+): Promise<T> {
+  const maxRetries = options?.maxRetries ?? 2;
   const genAI = getGenAI();
   const model = genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     generationConfig: {
       responseMimeType: "application/json",
       maxOutputTokens: 8192,
+      ...(options?.responseSchema ? { responseSchema: options.responseSchema } : {}),
     },
   });
 
-  const result = await executeGeminiCall(model, prompt);
-  const responseText = result.response.text();
-  const candidatePayload = extractJsonPayload(responseText);
+  let lastError: Error | null = null;
 
-  try {
-    return JSON.parse(candidatePayload) as T;
-  } catch (parseError) {
-    const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
-    console.error(
-      "[kotoba/gemini] Failed to parse JSON response:",
-      parseMessage,
-      "\nRaw response (truncated):",
-      responseText.slice(0, 400),
-    );
-    throw new Error(
-      `Gemini a renvoyé une réponse JSON invalide. Réessayez, ou réduisez la quantité de vocabulaire envoyé à l'IA.`,
-    );
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const result = await executeGeminiCall(model, prompt);
+    const responseText = result.response.text();
+    const candidatePayload = extractJsonPayload(responseText);
+
+    try {
+      const parsed = JSON.parse(candidatePayload) as T;
+
+      if (options?.zodSchema) {
+        const validation = options.zodSchema.safeParse(parsed);
+        if (!validation.success) {
+          throw new Error(`Validation du schéma échouée : ${validation.error.message}`);
+        }
+        return validation.data;
+      }
+
+      return parsed;
+    } catch (parseError) {
+      const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
+      console.error(
+        `[kotoba/gemini] JSON parse/validation failed (attempt ${attempt}/${maxRetries}):`,
+        parseMessage,
+        "\nRaw response (truncated):",
+        responseText.slice(0, 400),
+      );
+      lastError = parseError instanceof Error ? parseError : new Error(parseMessage);
+    }
   }
+
+  console.error("[kotoba/gemini] All retries exhausted, last error:", lastError?.message);
+  throw new Error(
+    "Gemini a renvoyé une réponse JSON invalide. Réessayez, ou réduisez la quantité de vocabulaire envoyé à l'IA.",
+  );
 }
 
 export async function callGeminiText(prompt: string): Promise<string> {

@@ -10,6 +10,8 @@ import {
   fetchStatsOverview,
   fetchStreak,
 } from "../../api";
+import { BadgeGrid } from "../components/BadgeGrid";
+import { WeakPointsPanel } from "../components/WeakPointsPanel";
 
 export function StatsPage() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);
@@ -75,12 +77,16 @@ export function StatsPage() {
         </div>
       )}
 
+      <WeakPointsPanel />
+
       {srsSummary && (
         <div className="statsSection">
           <h2 className="statsSection__title">Distribution SRS</h2>
           <SrsDistributionChart summary={srsSummary} />
         </div>
       )}
+
+      <BadgeGrid />
 
       <div className="statsSection">
         <h2 className="statsSection__title">Activité (12 derniers mois)</h2>

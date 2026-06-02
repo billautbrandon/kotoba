@@ -158,6 +158,79 @@ function ensureSchema(database: Database.Database) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_user_id_name ON tags(user_id, name);
   `);
 
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS saved_phrases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      french TEXT NOT NULL,
+      japanese TEXT NOT NULL,
+      japanese_kana TEXT,
+      explanation TEXT,
+      source TEXT NOT NULL,
+      word_ids TEXT,
+      srs_step INTEGER DEFAULT 0,
+      srs_interval INTEGER DEFAULT 0,
+      srs_ease_factor REAL DEFAULT 2.5,
+      srs_next_review_at TEXT,
+      success_count INTEGER DEFAULT 0,
+      fail_count INTEGER DEFAULT 0,
+      last_reviewed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS error_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      error_type TEXT NOT NULL,
+      exercise_mode TEXT NOT NULL,
+      detail TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_error_logs_user_date ON error_logs(user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS badge_definitions (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      icon TEXT NOT NULL,
+      condition_type TEXT NOT NULL,
+      condition_value INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS user_badges (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      badge_id TEXT NOT NULL REFERENCES badge_definitions(id),
+      earned_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, badge_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS grammar_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      topic TEXT NOT NULL,
+      content TEXT NOT NULL,
+      error_type TEXT,
+      view_count INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, topic)
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_challenges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      challenge_date TEXT NOT NULL,
+      challenge_type TEXT NOT NULL,
+      challenge_data TEXT NOT NULL,
+      completed INTEGER DEFAULT 0,
+      is_correct INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(user_id, challenge_date)
+    );
+  `);
+
+  seedBadgeDefinitions(database);
   ensureRootUser(database);
   rebuildTagsAndWordTagsIfNeeded(database);
 }
@@ -314,7 +387,7 @@ export function computeScoreDelta(reviewResult: ReviewResult): number {
 
 const MAX_SRS_INTERVAL_DAYS = 3650;
 
-function computeSrsSchedule(
+export function computeSrsSchedule(
   currentStep: number,
   currentInterval: number,
   currentEaseFactor: number,
@@ -370,6 +443,186 @@ function toSafeInteger(value: unknown, fallback = 0): number {
 function toSafeFloat(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return value;
+}
+
+export type BadgeDefinition = {
+  id: string;
+  category: string;
+  title: string;
+  description: string;
+  icon: string;
+  condition_type: string;
+  condition_value: number | null;
+};
+
+export type UserBadge = BadgeDefinition & {
+  earned_at: string | null;
+};
+
+const BADGE_SEEDS: Array<{
+  id: string;
+  category: string;
+  title: string;
+  description: string;
+  icon: string;
+  condition_type: string;
+  condition_value: number | null;
+}> = [
+  { id: "first_word", category: "vocabulary", title: "Premier pas", description: "Ajouter son premier mot", icon: "📝", condition_type: "words_total", condition_value: 1 },
+  { id: "words_10", category: "vocabulary", title: "Apprenti", description: "Avoir 10 mots dans son dictionnaire", icon: "📖", condition_type: "words_total", condition_value: 10 },
+  { id: "words_50", category: "vocabulary", title: "Étudiant", description: "Avoir 50 mots dans son dictionnaire", icon: "📚", condition_type: "words_total", condition_value: 50 },
+  { id: "words_100", category: "vocabulary", title: "Centurion", description: "Avoir 100 mots dans son dictionnaire", icon: "💯", condition_type: "words_total", condition_value: 100 },
+  { id: "words_500", category: "vocabulary", title: "Érudit", description: "Avoir 500 mots dans son dictionnaire", icon: "🏛️", condition_type: "words_total", condition_value: 500 },
+  { id: "first_mastered", category: "vocabulary", title: "Maîtrise", description: "Maîtriser son premier mot", icon: "⭐", condition_type: "mastered_total", condition_value: 1 },
+  { id: "mastered_10", category: "vocabulary", title: "Expert", description: "Maîtriser 10 mots", icon: "🌟", condition_type: "mastered_total", condition_value: 10 },
+  { id: "mastered_50", category: "vocabulary", title: "Maître", description: "Maîtriser 50 mots", icon: "🎓", condition_type: "mastered_total", condition_value: 50 },
+  { id: "streak_3", category: "streak", title: "Régulier", description: "Maintenir une série de 3 jours", icon: "🔥", condition_type: "streak", condition_value: 3 },
+  { id: "streak_7", category: "streak", title: "Semaine parfaite", description: "Maintenir une série de 7 jours", icon: "🔥", condition_type: "streak", condition_value: 7 },
+  { id: "streak_30", category: "streak", title: "Mois de feu", description: "Maintenir une série de 30 jours", icon: "🔥", condition_type: "streak", condition_value: 30 },
+  { id: "reviews_100", category: "practice", title: "Persévérant", description: "Faire 100 révisions au total", icon: "💪", condition_type: "reviews_total", condition_value: 100 },
+  { id: "reviews_500", category: "practice", title: "Assidu", description: "Faire 500 révisions au total", icon: "🏋️", condition_type: "reviews_total", condition_value: 500 },
+  { id: "reviews_1000", category: "practice", title: "Infatigable", description: "Faire 1000 révisions au total", icon: "🏆", condition_type: "reviews_total", condition_value: 1000 },
+  { id: "first_phrase_saved", category: "practice", title: "Collectionneur", description: "Sauvegarder sa première phrase", icon: "📌", condition_type: "saved_phrases_total", condition_value: 1 },
+  { id: "perfect_session", category: "milestone", title: "Sans faute", description: "Terminer une session sans aucune erreur", icon: "✨", condition_type: "event", condition_value: null },
+  { id: "first_dialogue", category: "milestone", title: "Conversation", description: "Compléter son premier dialogue", icon: "🗣️", condition_type: "event", condition_value: null },
+];
+
+function seedBadgeDefinitions(database: Database.Database) {
+  const insertStatement = database.prepare(
+    `INSERT OR IGNORE INTO badge_definitions (id, category, title, description, icon, condition_type, condition_value)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const badge of BADGE_SEEDS) {
+    insertStatement.run(badge.id, badge.category, badge.title, badge.description, badge.icon, badge.condition_type, badge.condition_value);
+  }
+}
+
+export function checkAndAwardBadges(
+  database: Database.Database,
+  userId: number,
+): BadgeDefinition[] {
+  const thresholdBadges = database
+    .prepare(
+      `SELECT bd.* FROM badge_definitions bd
+       WHERE bd.condition_type != 'event'
+         AND bd.id NOT IN (SELECT badge_id FROM user_badges WHERE user_id = ?)`,
+    )
+    .all(userId) as BadgeDefinition[];
+
+  if (thresholdBadges.length === 0) return [];
+
+  const wordsTotal = (
+    database.prepare("SELECT COUNT(*) as count FROM words WHERE user_id = ?").get(userId) as {
+      count: number;
+    }
+  ).count;
+
+  const masteredTotal = (
+    database
+      .prepare(
+        `SELECT COUNT(*) as count FROM word_stats ws
+         INNER JOIN words w ON w.id = ws.word_id
+         WHERE w.user_id = ? AND ws.consecutive_success_count >= 10`,
+      )
+      .get(userId) as { count: number }
+  ).count;
+
+  const reviewsTotal = (
+    database
+      .prepare(
+        `SELECT COALESCE(SUM(ws.success_count + ws.partial_count + ws.fail_count), 0) as count
+         FROM word_stats ws INNER JOIN words w ON w.id = ws.word_id WHERE w.user_id = ?`,
+      )
+      .get(userId) as { count: number }
+  ).count;
+
+  const savedPhrasesTotal = (
+    database
+      .prepare("SELECT COUNT(*) as count FROM saved_phrases WHERE user_id = ?")
+      .get(userId) as { count: number }
+  ).count;
+
+  const dailyGoal = (
+    database.prepare("SELECT daily_goal FROM users WHERE id = ?").get(userId) as {
+      daily_goal: number;
+    }
+  ).daily_goal;
+
+  let currentStreak = 0;
+  const activityRows = database
+    .prepare(
+      `SELECT activity_date, reviews_count FROM daily_activity
+       WHERE user_id = ? ORDER BY activity_date DESC LIMIT 365`,
+    )
+    .all(userId) as Array<{ activity_date: string; reviews_count: number }>;
+
+  const activityMap = new Map<string, number>();
+  for (const row of activityRows) {
+    activityMap.set(row.activity_date, row.reviews_count);
+  }
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayReviews = activityMap.get(todayStr) ?? 0;
+  const startDate = new Date();
+  if (todayReviews < dailyGoal) {
+    startDate.setDate(startDate.getDate() - 1);
+  }
+  for (let dayOffset = 0; dayOffset < 365; dayOffset++) {
+    const dateStr = startDate.toISOString().slice(0, 10);
+    const reviews = activityMap.get(dateStr) ?? 0;
+    if (reviews >= dailyGoal) {
+      currentStreak++;
+      startDate.setDate(startDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+  if (todayReviews >= dailyGoal) {
+    currentStreak = Math.max(currentStreak, 1);
+  }
+
+  const metricsMap: Record<string, number> = {
+    words_total: wordsTotal,
+    mastered_total: masteredTotal,
+    reviews_total: reviewsTotal,
+    saved_phrases_total: savedPhrasesTotal,
+    streak: currentStreak,
+  };
+
+  const newlyEarned: BadgeDefinition[] = [];
+  const insertBadge = database.prepare(
+    "INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)",
+  );
+
+  for (const badge of thresholdBadges) {
+    const currentValue = metricsMap[badge.condition_type];
+    if (currentValue !== undefined && badge.condition_value !== null && currentValue >= badge.condition_value) {
+      insertBadge.run(userId, badge.id);
+      newlyEarned.push(badge);
+    }
+  }
+
+  return newlyEarned;
+}
+
+export function awardEventBadge(
+  database: Database.Database,
+  userId: number,
+  badgeId: string,
+): BadgeDefinition | null {
+  const existing = database
+    .prepare("SELECT 1 FROM user_badges WHERE user_id = ? AND badge_id = ?")
+    .get(userId, badgeId);
+  if (existing) return null;
+
+  const badge = database
+    .prepare("SELECT * FROM badge_definitions WHERE id = ?")
+    .get(badgeId) as BadgeDefinition | undefined;
+  if (!badge) return null;
+
+  database
+    .prepare("INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)")
+    .run(userId, badgeId);
+  return badge;
 }
 
 export function applyReviewToStats(

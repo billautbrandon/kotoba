@@ -92,6 +92,15 @@ registerApiRoutes(app, database);
 
 app.use(
   (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "type" in error &&
+      (error as { type: string }).type === "entity.parse.failed"
+    ) {
+      res.status(400).json({ error: "Corps de requête JSON invalide." });
+      return;
+    }
     if (error instanceof ZodError) {
       res.status(400).json({ error: "Invalid request", issues: error.issues });
       return;

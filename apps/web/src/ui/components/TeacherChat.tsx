@@ -7,7 +7,7 @@ type TeacherChatProps = {
   expectedAnswer: string;
   userAnswer?: string;
   direction?: "fr-to-jp" | "jp-to-fr";
-  mode?: "phrases" | "construction" | "jlpt" | "conjugaison" | "dialogue";
+  mode?: "phrases" | "construction" | "jlpt" | "conjugaison" | "dialogue" | "ecoute";
   resetKey: string | number;
 };
 

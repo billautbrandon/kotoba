@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { fetchSeries } from "../../api";
+import { DailyChallengeCard } from "../components/DailyChallengeCard";
 
 type SeriesRow = {
   tagId: number;
@@ -78,6 +79,8 @@ export function HomePage() {
           + Ajouter du vocabulaire
         </button>
       </div>
+
+      <DailyChallengeCard />
 
       {isLoading ? (
         <div className="muted" style={{ marginTop: "var(--space-6)" }}>

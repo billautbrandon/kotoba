@@ -16,23 +16,30 @@ import {
   createWord,
   evaluateConjugation,
   evaluateJlptAnswer,
+  evaluateListening,
   evaluatePhrase,
   fetchGeminiQuota,
+  fetchGrammarNote,
   fetchSeriesWords,
   fetchTags,
   generateConjugationExercises,
   generateConstructionPhrases,
   generateJlptExercises,
+  generateListeningExercises,
   generatePhrases,
+  savePhrase,
   submitBulkReviews,
+  type ListeningExercise,
+  type GrammarNote,
 } from "../../api";
 import { AnswerDiff } from "../components/AnswerDiff";
+import { AudioButton } from "../components/AudioButton";
 import { QuotaBar } from "../components/QuotaBar";
 import { SentenceBuilder, joinBlocks } from "../components/SentenceBuilder";
 import { TeacherChat } from "../components/TeacherChat";
 import { VoiceButton } from "../components/VoiceButton";
 
-type PratiqueTab = "phrases" | "jlpt" | "conjugaison" | "construction";
+type PratiqueTab = "phrases" | "jlpt" | "conjugaison" | "construction" | "ecoute";
 type PratiquePhase = "setup" | "training" | "recap";
 type SentenceLength = "short" | "medium" | "long";
 
@@ -204,6 +211,31 @@ export function PratiquePage() {
   const [conjEvaluationCache, setConjEvaluationCache] = useState<
     Map<number, ConjugationEvaluation>
   >(new Map());
+
+  // Listening state
+  const [listeningTagIds, setListeningTagIds] = useState<number[]>([]);
+  const [listeningDifficulty, setListeningDifficulty] = useState<"debutant" | "intermediaire">("debutant");
+  const [listeningCount, setListeningCount] = useState(5);
+  const [listeningExercises, setListeningExercises] = useState<ListeningExercise[]>([]);
+  const [listeningIndex, setListeningIndex] = useState(0);
+  const [listeningTranscript, setListeningTranscript] = useState("");
+  const [listeningRevealed, setListeningRevealed] = useState(false);
+  const [listeningResults, setListeningResults] = useState<Array<{
+    exercise: ListeningExercise;
+    userTranscript: string;
+    isCorrect: boolean | null;
+    feedback: string | null;
+    revealed: boolean;
+  }>>([]);
+  const [listeningSpeed, setListeningSpeed] = useState(1.0);
+  const [listeningIsPlaying, setListeningIsPlaying] = useState(false);
+  const [listeningIsPaused, setListeningIsPaused] = useState(false);
+  const listeningUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Grammar drawer state
+  const [grammarNote, setGrammarNote] = useState<GrammarNote | null>(null);
+  const [isLoadingGrammar, setIsLoadingGrammar] = useState(false);
+  const [showGrammarDrawer, setShowGrammarDrawer] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -482,10 +514,104 @@ export function PratiquePage() {
     }
   }
 
+  async function handleGenerateListening() {
+    if (listeningTagIds.length === 0) return;
+    setIsGenerating(true);
+    setErrorMessage(null);
+    try {
+      const result = await generateListeningExercises({
+        tagIds: listeningTagIds,
+        difficulty: listeningDifficulty,
+        count: listeningCount,
+      });
+      setListeningExercises(result.exercises);
+      setQuota(result.quota);
+      setListeningIndex(0);
+      setListeningTranscript("");
+      setListeningRevealed(false);
+      setListeningResults([]);
+      setPhase("training");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  function playListeningAudio(text: string) {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "ja-JP";
+    utterance.rate = listeningSpeed;
+    utterance.onstart = () => { setListeningIsPlaying(true); setListeningIsPaused(false); };
+    utterance.onend = () => { setListeningIsPlaying(false); setListeningIsPaused(false); listeningUtteranceRef.current = null; };
+    utterance.onerror = () => { setListeningIsPlaying(false); setListeningIsPaused(false); listeningUtteranceRef.current = null; };
+    listeningUtteranceRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function pauseListeningAudio() {
+    if (listeningIsPlaying && !listeningIsPaused) {
+      window.speechSynthesis.pause();
+      setListeningIsPaused(true);
+    } else if (listeningIsPaused) {
+      window.speechSynthesis.resume();
+      setListeningIsPaused(false);
+    }
+  }
+
+  async function handleListeningCheck() {
+    const currentListeningExercise = listeningExercises[listeningIndex];
+    if (!currentListeningExercise || !listeningTranscript.trim()) return;
+    setIsEvaluating(true);
+    try {
+      const evaluation = await evaluateListening(
+        listeningTranscript.trim(),
+        currentListeningExercise.japanese,
+        currentListeningExercise.french,
+      );
+      refreshQuota();
+      setListeningResults((previous) => [...previous, {
+        exercise: currentListeningExercise,
+        userTranscript: listeningTranscript.trim(),
+        isCorrect: evaluation.isCorrect ?? false,
+        feedback: evaluation.feedback ?? null,
+        revealed: listeningRevealed,
+      }]);
+      if (listeningIndex + 1 < listeningExercises.length) {
+        setListeningIndex(listeningIndex + 1);
+        setListeningTranscript("");
+        setListeningRevealed(false);
+      } else {
+        setPhase("recap");
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur de vérification");
+    } finally {
+      setIsEvaluating(false);
+    }
+  }
+
+  async function handleGrammarLink(errorType: string, context?: string) {
+    const topic = context ? `${errorType} : ${context}` : errorType;
+    setIsLoadingGrammar(true);
+    setShowGrammarDrawer(true);
+    try {
+      const note = await fetchGrammarNote(topic);
+      setGrammarNote(note);
+    } catch {
+      setGrammarNote(null);
+    } finally {
+      setIsLoadingGrammar(false);
+    }
+  }
+
   function handleGenerate() {
     if (activeTab === "phrases") handleGeneratePhrases();
     else if (activeTab === "construction") handleGenerateConstruction();
     else if (activeTab === "jlpt") handleGenerateJlpt();
+    else if (activeTab === "ecoute") handleGenerateListening();
     else handleGenerateConjugation();
   }
 
@@ -741,7 +867,7 @@ export function PratiquePage() {
     return (
       <div className="pratique">
         <div className="pratique__tabs">
-          {(["phrases", "construction", "jlpt", "conjugaison"] as const).map((tab) => (
+          {(["phrases", "construction", "jlpt", "conjugaison", "ecoute"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -754,7 +880,9 @@ export function PratiquePage() {
                   ? "Construction"
                   : tab === "jlpt"
                     ? "JLPT N5"
-                    : "Conjugaison"}
+                    : tab === "conjugaison"
+                      ? "Conjugaison"
+                      : "Écoute"}
             </button>
           ))}
         </div>
@@ -1382,6 +1510,48 @@ export function PratiquePage() {
               </div>
             </>
           )}
+
+          {activeTab === "ecoute" && (
+            <>
+              <div className="pratique__field">
+                <div className="pratique__label">Tags</div>
+                <div className="pratique__chipGrid">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      className={`pratique__chip ${listeningTagIds.includes(tag.id) ? "pratique__chip--active" : ""}`}
+                      onClick={() => setListeningTagIds((previous) =>
+                        previous.includes(tag.id) ? previous.filter((id) => id !== tag.id) : [...previous, tag.id]
+                      )}
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pratique__row">
+                <div className="pratique__field">
+                  <div className="pratique__label">Difficulté</div>
+                  <div className="pratique__toggleRow">
+                    <button type="button" className={`pratique__toggle ${listeningDifficulty === "debutant" ? "pratique__toggle--active" : ""}`} onClick={() => setListeningDifficulty("debutant")}>Débutant</button>
+                    <button type="button" className={`pratique__toggle ${listeningDifficulty === "intermediaire" ? "pratique__toggle--active" : ""}`} onClick={() => setListeningDifficulty("intermediaire")}>Intermédiaire</button>
+                  </div>
+                </div>
+                <div className="pratique__field">
+                  <div className="pratique__label">Nombre de phrases</div>
+                  <div className="pratique__toggleRow">
+                    {[3, 5, 8].map((count) => (
+                      <button key={count} type="button" className={`pratique__toggle pratique__toggle--sm ${listeningCount === count ? "pratique__toggle--active" : ""}`} onClick={() => setListeningCount(count)}>
+                        {count}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {errorMessage && <div className="formError">{errorMessage}</div>}
@@ -1395,12 +1565,100 @@ export function PratiquePage() {
               isGenerating ||
               ((activeTab === "phrases" || activeTab === "construction") &&
                 (selectedTagIds.length === 0 || selectedParticles.length === 0)) ||
-              (activeTab === "conjugaison" && (!conjTagId || conjForms.size === 0))
+              (activeTab === "conjugaison" && (!conjTagId || conjForms.size === 0)) ||
+              (activeTab === "ecoute" && listeningTagIds.length === 0)
             }
           >
             {isGenerating ? "Génération…" : "Générer"}
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // ===================== LISTENING TRAINING =====================
+  if (phase === "training" && activeTab === "ecoute") {
+    const currentListeningExercise = listeningExercises[listeningIndex];
+    if (!currentListeningExercise) return null;
+
+    return (
+      <div className="phrasesTraining">
+        <div className="phrasesTraining__progressBar">
+          <div className="phrasesTraining__progressFill" style={{ width: `${((listeningIndex) / listeningExercises.length) * 100}%` }} />
+        </div>
+        <div className="phrasesTraining__counter">
+          {listeningIndex + 1} / {listeningExercises.length}
+        </div>
+
+        <div className="phrasesTraining__card" style={{ textAlign: "center" }}>
+          <p style={{ fontSize: "14px", color: "var(--color-text-soft)", marginBottom: "var(--space-4)" }}>
+            Écoute et transcris en japonais
+          </p>
+
+          <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "center", alignItems: "center", marginBottom: "var(--space-5)" }}>
+            <button type="button" className="button" onClick={() => playListeningAudio(currentListeningExercise.japanese)}>
+              {listeningIsPlaying && !listeningIsPaused ? "Rejouer" : "Écouter"}
+            </button>
+            {listeningIsPlaying && (
+              <button type="button" className="button" onClick={pauseListeningAudio}>
+                {listeningIsPaused ? "Reprendre" : "Pause"}
+              </button>
+            )}
+            <div style={{ display: "flex", gap: "var(--space-1)", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "var(--color-text-soft)" }}>Vitesse :</span>
+              {[0.8, 1.0, 1.2].map((speed) => (
+                <button
+                  key={speed}
+                  type="button"
+                  className={`pratique__toggle pratique__toggle--sm ${listeningSpeed === speed ? "pratique__toggle--active" : ""}`}
+                  onClick={() => setListeningSpeed(speed)}
+                  style={{ padding: "2px 6px", fontSize: "12px" }}
+                >
+                  {speed}x
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <textarea
+            className="pratique__textarea"
+            placeholder="Écris ce que tu as entendu..."
+            value={listeningTranscript}
+            onChange={(event) => setListeningTranscript(event.target.value)}
+            rows={3}
+            style={{ marginBottom: "var(--space-4)" }}
+          />
+
+          {listeningRevealed && (
+            <div style={{ marginBottom: "var(--space-4)", padding: "var(--space-3)", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)" }}>
+              <p style={{ fontSize: "13px", color: "var(--color-text-soft)", margin: "0 0 var(--space-1)" }}>Texte attendu :</p>
+              <p style={{ fontSize: "16px", fontWeight: 600, margin: "0 0 var(--space-1)" }}>{currentListeningExercise.japanese}</p>
+              <p style={{ fontSize: "13px", color: "var(--color-text-soft)", margin: 0 }}>{currentListeningExercise.french}</p>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "center" }}>
+            {!listeningRevealed && (
+              <button type="button" className="button" onClick={() => setListeningRevealed(true)}>
+                Révéler le texte
+              </button>
+            )}
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={!listeningTranscript.trim() || isEvaluating}
+              onClick={handleListeningCheck}
+            >
+              {isEvaluating ? "Vérification…" : "Vérifier"}
+            </button>
+          </div>
+        </div>
+
+        <div className="phrasesTraining__footActions">
+          <button type="button" className="button" onClick={resetSession}>Quitter</button>
+        </div>
+
+        {errorMessage && <div className="formError" style={{ marginTop: "var(--space-3)" }}>{errorMessage}</div>}
       </div>
     );
   }
@@ -1568,6 +1826,17 @@ export function PratiquePage() {
                 </div>
               )}
 
+              {!currentIsCorrect && (
+                <button
+                  type="button"
+                  className="button"
+                  style={{ marginTop: "var(--space-3)", fontSize: "13px" }}
+                  onClick={() => handleGrammarLink(currentFeedback ?? "erreur", currentExercise.prompt)}
+                >
+                  Comprendre cette erreur
+                </button>
+              )}
+
               {currentExercise.explanation && (
                 <div className="phrasesTraining__explanation">{currentExercise.explanation}</div>
               )}
@@ -1583,6 +1852,84 @@ export function PratiquePage() {
               </button>
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  // ===================== LISTENING RECAP =====================
+  if (phase === "recap" && activeTab === "ecoute") {
+    const listeningCorrectCount = listeningResults.filter((result) => result.isCorrect).length;
+    const listeningIncorrectCount = listeningResults.filter((result) => result.isCorrect === false).length;
+
+    return (
+      <div className="phrasesRecap">
+        <h2 className="phrasesRecap__title">Récapitulatif — Écoute</h2>
+
+        <div className="phrasesRecap__summary">
+          <span className="phrasesRecap__stat phrasesRecap__stat--success">
+            ✓ {listeningCorrectCount} réussie(s)
+          </span>
+          <span className="phrasesRecap__stat phrasesRecap__stat--error">
+            ✗ {listeningIncorrectCount} incorrecte(s)
+          </span>
+        </div>
+
+        {listeningResults.length > 0 && (
+          <div className="phrasesRecap__tableWrap">
+            <table className="table table--compact">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Japonais attendu</th>
+                  <th>Ta transcription</th>
+                  <th>Résultat</th>
+                  <th>Sauvegarder</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listeningResults.map((result, index) => (
+                  <tr key={index}>
+                    <td className="muted">{index + 1}</td>
+                    <td>
+                      {result.exercise.japanese}
+                      <AudioButton text={result.exercise.japanese} size="small" />
+                      <div style={{ fontSize: "12px", color: "var(--color-text-soft)" }}>{result.exercise.french}</div>
+                    </td>
+                    <td>{result.userTranscript || <span className="muted">—</span>}</td>
+                    <td>
+                      {result.revealed && <span style={{ fontSize: "11px", color: "var(--color-text-soft)" }}>(révélé) </span>}
+                      {result.isCorrect ? (
+                        <span style={{ color: "var(--color-success)" }}>✓</span>
+                      ) : (
+                        <span style={{ color: "var(--color-danger)" }}>✗</span>
+                      )}
+                      {result.feedback && (
+                        <div style={{ fontSize: "12px", color: "var(--color-text-soft)", marginTop: "2px" }}>{result.feedback}</div>
+                      )}
+                    </td>
+                    <td>
+                      <SavePhraseButton
+                        french={result.exercise.french}
+                        japanese={result.exercise.japanese}
+                        japaneseKana={result.exercise.japanese_kana}
+                        source="ecoute"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="phrasesRecap__actions">
+          <button className="button button--primary" type="button" onClick={resetSession}>
+            Recommencer
+          </button>
+          <Link className="button" to="/">
+            Retour
+          </Link>
         </div>
       </div>
     );
@@ -1617,6 +1964,7 @@ export function PratiquePage() {
                 <th>Ta réponse</th>
                 <th>Attendue</th>
                 <th>Résultat</th>
+                <th>Phrase</th>
                 {activeTab === "jlpt" && <th>Vocab</th>}
               </tr>
             </thead>
@@ -1635,6 +1983,13 @@ export function PratiquePage() {
                     ) : (
                       <span style={{ color: "var(--color-danger)" }}>✗</span>
                     )}
+                  </td>
+                  <td>
+                    <SavePhraseButton
+                      french={result.exercise.frenchPrompt ?? (direction === "jp-to-fr" ? result.exercise.answer : result.exercise.prompt)}
+                      japanese={direction === "jp-to-fr" ? result.exercise.prompt : result.exercise.answer}
+                      source={activeTab}
+                    />
                   </td>
                   {activeTab === "jlpt" && (
                     <td>
@@ -1738,6 +2093,61 @@ export function PratiquePage() {
           Retour
         </Link>
       </div>
+
+      {showGrammarDrawer && (
+        <div style={{
+          position: "fixed", top: 0, right: 0, bottom: 0, width: "400px", maxWidth: "90vw",
+          background: "var(--color-bg)", borderLeft: "2px solid var(--color-border)",
+          boxShadow: "-4px 0 12px rgba(0,0,0,0.1)", zIndex: 100, overflow: "auto",
+          padding: "var(--space-5)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)" }}>
+            <h3 style={{ margin: 0 }}>Explication grammaticale</h3>
+            <button type="button" className="button" onClick={() => setShowGrammarDrawer(false)} style={{ padding: "2px 8px" }}>Fermer</button>
+          </div>
+          {isLoadingGrammar ? (
+            <div className="muted">Chargement…</div>
+          ) : grammarNote ? (
+            <div style={{ fontSize: "14px", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              <h4 style={{ marginTop: 0 }}>{grammarNote.topic}</h4>
+              {grammarNote.content}
+            </div>
+          ) : (
+            <div className="muted">Impossible de charger la note de grammaire.</div>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function SavePhraseButton({ french, japanese, japaneseKana, source }: {
+  french: string; japanese: string; japaneseKana?: string; source: string;
+}) {
+  const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  if (isSaved) return <span className="muted" style={{ fontSize: "12px" }}>✓ Sauvé</span>;
+
+  return (
+    <button
+      type="button"
+      className="button"
+      style={{ padding: "2px 8px", fontSize: 12 }}
+      disabled={isSaving}
+      onClick={async () => {
+        setIsSaving(true);
+        try {
+          await savePhrase({ french, japanese, japanese_kana: japaneseKana, source });
+          setIsSaved(true);
+        } catch {
+          // ignore
+        } finally {
+          setIsSaving(false);
+        }
+      }}
+    >
+      {isSaving ? "..." : "Sauvegarder"}
+    </button>
   );
 }

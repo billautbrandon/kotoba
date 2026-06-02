@@ -7,16 +7,27 @@ import { z } from "zod";
 
 import type { Request } from "express";
 
+import { SchemaType } from "@google/generative-ai";
 import { type PublicUser, hashPassword, verifyPassword } from "./auth.js";
 import {
+  type BadgeDefinition,
   type ReviewResult,
   type WordStatsRow,
   applyReviewToStats,
   avatarsDirectoryPath,
+  awardEventBadge,
+  checkAndAwardBadges,
+  computeSrsSchedule,
   getGeminiQuota,
   incrementGeminiUsage,
 } from "./db.js";
-import { GeminiApiError, GeminiQuotaError, callGeminiJson, isGeminiConfigured } from "./gemini.js";
+import {
+  GeminiApiError,
+  type GeminiJsonOptions,
+  GeminiQuotaError,
+  callGeminiJson,
+  isGeminiConfigured,
+} from "./gemini.js";
 import { downloadKanjiSvgsFromText, downloadMissingKanjiSvgs } from "./kanji-downloader.js";
 
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
@@ -748,7 +759,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
 
     trackDailyActivity(database, userId, 1);
 
-    res.json({ stats: updatedStats });
+    const newBadges = checkAndAwardBadges(database, userId);
+    res.json({ stats: updatedStats, newBadges });
   });
 
   app.post("/api/reviews/bulk", (req, res) => {
@@ -852,7 +864,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       return;
     }
 
-    res.status(201).json({ appliedCount });
+    const newBadges = checkAndAwardBadges(database, userId);
+    res.status(201).json({ appliedCount, newBadges });
   });
 
   app.get("/api/series", (_req, res) => {
@@ -1624,17 +1637,36 @@ Réponds UNIQUEMENT au format JSON, un tableau d'objets (un objet par ${outputUn
 ${isParagraph ? `Le tableau doit contenir exactement ${body.count} objets représentant chacun une phrase de la mini-histoire, dans l'ordre narratif.` : ""}
 Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qui ont été utilisés.`;
 
-      type GeminiPhrase = {
-        fr: string;
-        jp_kanji: string;
-        jp_kana: string;
-        explanation: string;
-        used_words_fr?: string[];
+      const geminiPhraseSchema = z.object({
+        fr: z.string(),
+        jp_kanji: z.string(),
+        jp_kana: z.string(),
+        explanation: z.string(),
+        used_words_fr: z.array(z.string()).optional(),
+      });
+      type GeminiPhrase = z.infer<typeof geminiPhraseSchema>;
+
+      const phraseOptions: GeminiJsonOptions<GeminiPhrase[]> = {
+        responseSchema: {
+          type: SchemaType.ARRAY,
+          items: {
+            type: SchemaType.OBJECT,
+            properties: {
+              fr: { type: SchemaType.STRING },
+              jp_kanji: { type: SchemaType.STRING },
+              jp_kana: { type: SchemaType.STRING },
+              explanation: { type: SchemaType.STRING },
+              used_words_fr: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+            },
+            required: ["fr", "jp_kanji", "jp_kana", "explanation"],
+          },
+        },
+        zodSchema: z.array(geminiPhraseSchema),
       };
 
       let generatedPhrases: GeminiPhrase[];
       try {
-        generatedPhrases = await callGeminiJson<GeminiPhrase[]>(prompt);
+        generatedPhrases = await callGeminiJson<GeminiPhrase[]>(prompt, phraseOptions);
         incrementGeminiUsage(database);
       } catch (error) {
         if (error instanceof GeminiQuotaError) {
@@ -1682,7 +1714,7 @@ Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qu
   app.post(
     "/api/phrases/evaluate",
     wrapAsync(async (req, res) => {
-      getRequiredUserId(req);
+      const userId = getRequiredUserId(req);
 
       if (!isGeminiConfigured()) {
         res
@@ -1757,15 +1789,36 @@ Règles de classification :
 
 ${pedagogicalRules}`;
 
-      type EvalResult = {
-        isCorrect: boolean;
-        errorType: "particle" | "conjugation" | "kanji" | "other" | null;
-        feedback: string | null;
+      const phraseEvalSchema = z.object({
+        isCorrect: z.boolean(),
+        errorType: z.string().nullable().optional(),
+        feedback: z.string().nullable().optional(),
+      });
+      type EvalResult = z.infer<typeof phraseEvalSchema>;
+
+      const evalOptions: GeminiJsonOptions<EvalResult> = {
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            isCorrect: { type: SchemaType.BOOLEAN },
+            errorType: { type: SchemaType.STRING, nullable: true },
+            feedback: { type: SchemaType.STRING, nullable: true },
+          },
+          required: ["isCorrect"],
+        },
+        zodSchema: phraseEvalSchema,
       };
 
       try {
-        const evaluation = await callGeminiJson<EvalResult>(prompt);
+        const evaluation = await callGeminiJson<EvalResult>(prompt, evalOptions);
         incrementGeminiUsage(database);
+
+        if (!(evaluation.isCorrect ?? false) && evaluation.errorType) {
+          database
+            .prepare("INSERT INTO error_logs (user_id, error_type, exercise_mode) VALUES (?, ?, ?)")
+            .run(userId, evaluation.errorType, "phrases");
+        }
+
         res.json({
           isCorrect: evaluation.isCorrect ?? false,
           feedback: evaluation.feedback ?? null,
@@ -2092,10 +2145,24 @@ Règles de réponse :
 Réponds UNIQUEMENT au format JSON avec cette structure exacte :
 {"answer": "Ta réponse pédagogique ici"}`;
 
-      type AskResult = { answer?: string };
+      const askResultSchema = z.object({
+        answer: z.string().optional(),
+      });
+      type AskResult = z.infer<typeof askResultSchema>;
+
+      const askOptions: GeminiJsonOptions<AskResult> = {
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            answer: { type: SchemaType.STRING },
+          },
+          required: ["answer"],
+        },
+        zodSchema: askResultSchema,
+      };
 
       try {
-        const result = await callGeminiJson<AskResult>(askPrompt);
+        const result = await callGeminiJson<AskResult>(askPrompt, askOptions);
         incrementGeminiUsage(database);
         const answer = (result.answer ?? "").trim();
         if (answer.length === 0) {
@@ -2203,17 +2270,36 @@ Réponds UNIQUEMENT au format JSON, un tableau de ${body.count} objets avec cett
 
 Le champ used_words_fr contient les mots français du vocabulaire cible utilisés dans expected_jp.`;
 
-      type GeminiDialogueTurn = {
-        context: string;
-        fr: string;
-        expected_jp: string;
-        expected_kana: string;
-        used_words_fr?: string[];
+      const dialogueTurnSchema = z.object({
+        context: z.string(),
+        fr: z.string(),
+        expected_jp: z.string(),
+        expected_kana: z.string(),
+        used_words_fr: z.array(z.string()).optional(),
+      });
+      type GeminiDialogueTurn = z.infer<typeof dialogueTurnSchema>;
+
+      const dialogueOptions: GeminiJsonOptions<GeminiDialogueTurn[]> = {
+        responseSchema: {
+          type: SchemaType.ARRAY,
+          items: {
+            type: SchemaType.OBJECT,
+            properties: {
+              context: { type: SchemaType.STRING },
+              fr: { type: SchemaType.STRING },
+              expected_jp: { type: SchemaType.STRING },
+              expected_kana: { type: SchemaType.STRING },
+              used_words_fr: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+            },
+            required: ["context", "fr", "expected_jp", "expected_kana"],
+          },
+        },
+        zodSchema: z.array(dialogueTurnSchema),
       };
 
       let generatedTurns: GeminiDialogueTurn[];
       try {
-        generatedTurns = await callGeminiJson<GeminiDialogueTurn[]>(prompt);
+        generatedTurns = await callGeminiJson<GeminiDialogueTurn[]>(prompt, dialogueOptions);
         incrementGeminiUsage(database);
       } catch (error) {
         if (error instanceof GeminiQuotaError) {
@@ -2260,7 +2346,7 @@ Le champ used_words_fr contient les mots français du vocabulaire cible utilisé
   app.post(
     "/api/dialogue/evaluate",
     wrapAsync(async (req, res) => {
-      getRequiredUserId(req);
+      const userId = getRequiredUserId(req);
 
       if (!isGeminiConfigured()) {
         res
@@ -2310,15 +2396,36 @@ Règles de classification :
 
 ${pedagogicalRules}`;
 
-      type EvalResult = {
-        isCorrect: boolean;
-        errorType: "particle" | "conjugation" | "vocabulary" | "pronunciation" | "other" | null;
-        feedback: string | null;
+      const dialogueEvalSchema = z.object({
+        isCorrect: z.boolean(),
+        errorType: z.string().nullable().optional(),
+        feedback: z.string().nullable().optional(),
+      });
+      type EvalResult = z.infer<typeof dialogueEvalSchema>;
+
+      const dialogueEvalOptions: GeminiJsonOptions<EvalResult> = {
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            isCorrect: { type: SchemaType.BOOLEAN },
+            errorType: { type: SchemaType.STRING, nullable: true },
+            feedback: { type: SchemaType.STRING, nullable: true },
+          },
+          required: ["isCorrect"],
+        },
+        zodSchema: dialogueEvalSchema,
       };
 
       try {
-        const evaluation = await callGeminiJson<EvalResult>(prompt);
+        const evaluation = await callGeminiJson<EvalResult>(prompt, dialogueEvalOptions);
         incrementGeminiUsage(database);
+
+        if (!(evaluation.isCorrect ?? false) && evaluation.errorType) {
+          database
+            .prepare("INSERT INTO error_logs (user_id, error_type, exercise_mode) VALUES (?, ?, ?)")
+            .run(userId, evaluation.errorType, "dialogue");
+        }
+
         res.json({
           isCorrect: evaluation.isCorrect ?? false,
           feedback: evaluation.feedback ?? null,
@@ -2439,7 +2546,7 @@ ${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le a
   app.post(
     "/api/jlpt/evaluate",
     wrapAsync(async (req, res) => {
-      getRequiredUserId(req);
+      const userId = getRequiredUserId(req);
 
       if (!isGeminiConfigured()) {
         res
@@ -2514,6 +2621,13 @@ ${jlptPedagogicalRules}`;
       try {
         const evaluation = await callGeminiJson<EvalResult>(evalPrompt);
         incrementGeminiUsage(database);
+
+        if (!(evaluation.isCorrect ?? false) && evaluation.errorType) {
+          database
+            .prepare("INSERT INTO error_logs (user_id, error_type, exercise_mode) VALUES (?, ?, ?)")
+            .run(userId, evaluation.errorType, "jlpt");
+        }
+
         res.json({
           isCorrect: evaluation.isCorrect ?? false,
           feedback: evaluation.feedback ?? null,
@@ -2797,6 +2911,779 @@ Règles pour le champ explanation :
       const evaluation = await callGeminiJson(geminiPrompt);
 
       res.json({ evaluation, quota: getGeminiQuota(database) });
+    }),
+  );
+
+  // --- Badges ---
+
+  app.get("/api/badges", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const allBadges = database
+      .prepare(
+        `SELECT bd.*, ub.earned_at FROM badge_definitions bd
+       LEFT JOIN user_badges ub ON ub.badge_id = bd.id AND ub.user_id = ?
+       ORDER BY ub.earned_at IS NULL, ub.earned_at DESC, bd.category, bd.id`,
+      )
+      .all(userId);
+    res.json({ badges: allBadges });
+  });
+
+  app.get("/api/badges/recent", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const recentBadges = database
+      .prepare(
+        `SELECT bd.*, ub.earned_at FROM badge_definitions bd
+       INNER JOIN user_badges ub ON ub.badge_id = bd.id AND ub.user_id = ?
+       WHERE ub.earned_at >= datetime('now', '-7 days')
+       ORDER BY ub.earned_at DESC`,
+      )
+      .all(userId);
+    res.json({ badges: recentBadges });
+  });
+
+  // --- Weak points ---
+
+  app.get("/api/stats/weak-points", (req, res) => {
+    const userId = getRequiredUserId(req);
+
+    const byErrorType = database
+      .prepare(
+        `SELECT error_type, COUNT(*) as count FROM error_logs
+       WHERE user_id = ? AND created_at >= datetime('now', '-30 days')
+       GROUP BY error_type ORDER BY count DESC LIMIT 5`,
+      )
+      .all(userId) as Array<{ error_type: string; count: number }>;
+
+    const byMode = database
+      .prepare(
+        `SELECT exercise_mode, COUNT(*) as count FROM error_logs
+       WHERE user_id = ? AND created_at >= datetime('now', '-30 days')
+       GROUP BY exercise_mode ORDER BY count DESC`,
+      )
+      .all(userId) as Array<{ exercise_mode: string; count: number }>;
+
+    const thisWeek = (
+      database
+        .prepare(
+          `SELECT COUNT(*) as count FROM error_logs
+       WHERE user_id = ? AND created_at >= datetime('now', '-7 days')`,
+        )
+        .get(userId) as { count: number }
+    ).count;
+
+    const lastWeek = (
+      database
+        .prepare(
+          `SELECT COUNT(*) as count FROM error_logs
+       WHERE user_id = ? AND created_at >= datetime('now', '-14 days')
+         AND created_at < datetime('now', '-7 days')`,
+        )
+        .get(userId) as { count: number }
+    ).count;
+
+    res.json({ byErrorType, byMode, thisWeek, lastWeek });
+  });
+
+  // --- Saved phrases ---
+
+  app.post(
+    "/api/saved-phrases",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const bodySchema = z.object({
+        french: z.string().min(1).max(1000),
+        japanese: z.string().min(1).max(1000),
+        japanese_kana: z.string().max(1000).optional(),
+        explanation: z.string().max(2000).optional(),
+        source: z.string().min(1).max(50),
+        word_ids: z.array(z.number().int()).optional(),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const result = database
+        .prepare(
+          `INSERT INTO saved_phrases (user_id, french, japanese, japanese_kana, explanation, source, word_ids)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          userId,
+          body.french,
+          body.japanese,
+          body.japanese_kana ?? null,
+          body.explanation ?? null,
+          body.source,
+          body.word_ids ? JSON.stringify(body.word_ids) : null,
+        );
+
+      const newBadges = checkAndAwardBadges(database, userId);
+      res.status(201).json({ id: result.lastInsertRowid, newBadges });
+    }),
+  );
+
+  app.get("/api/saved-phrases", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const source = (req.query.source as string) || null;
+
+    let query = "SELECT * FROM saved_phrases WHERE user_id = ?";
+    const params: unknown[] = [userId];
+    if (source) {
+      query += " AND source = ?";
+      params.push(source);
+    }
+    query += " ORDER BY created_at DESC";
+
+    const phrases = database.prepare(query).all(...params);
+    res.json({ phrases });
+  });
+
+  app.get("/api/saved-phrases/due", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const duePhrases = database
+      .prepare(
+        `SELECT * FROM saved_phrases
+       WHERE user_id = ? AND (srs_next_review_at IS NULL OR srs_next_review_at <= datetime('now'))
+       ORDER BY srs_next_review_at ASC NULLS FIRST LIMIT 50`,
+      )
+      .all(userId);
+    res.json({ phrases: duePhrases, dueCount: duePhrases.length });
+  });
+
+  app.post("/api/saved-phrases/:id/review", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const phraseId = Number(req.params.id);
+    const bodySchema = z.object({
+      result: z.enum(["success", "fail"]),
+    });
+    const body = bodySchema.parse(req.body);
+
+    const phrase = database
+      .prepare("SELECT * FROM saved_phrases WHERE id = ? AND user_id = ?")
+      .get(phraseId, userId) as
+      | {
+          srs_step: number;
+          srs_interval: number;
+          srs_ease_factor: number;
+          success_count: number;
+          fail_count: number;
+        }
+      | undefined;
+
+    if (!phrase) {
+      res.status(404).json({ error: "Phrase non trouvée" });
+      return;
+    }
+
+    const reviewResult = body.result === "success" ? ("success" as const) : ("fail" as const);
+    const srsResult = computeSrsSchedule(
+      phrase.srs_step,
+      phrase.srs_interval,
+      phrase.srs_ease_factor,
+      reviewResult,
+    );
+
+    database
+      .prepare(
+        `UPDATE saved_phrases SET
+        srs_step = ?, srs_interval = ?, srs_ease_factor = ?, srs_next_review_at = ?,
+        success_count = success_count + ?, fail_count = fail_count + ?,
+        last_reviewed_at = datetime('now')
+       WHERE id = ?`,
+      )
+      .run(
+        srsResult.srs_step,
+        srsResult.srs_interval,
+        srsResult.srs_ease_factor,
+        srsResult.srs_next_review_at,
+        reviewResult === "success" ? 1 : 0,
+        reviewResult === "fail" ? 1 : 0,
+        phraseId,
+      );
+
+    res.json({ updated: true });
+  });
+
+  app.delete("/api/saved-phrases/:id", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const phraseId = Number(req.params.id);
+    database
+      .prepare("DELETE FROM saved_phrases WHERE id = ? AND user_id = ?")
+      .run(phraseId, userId);
+    res.json({ deleted: true });
+  });
+
+  // --- Grammar notes ---
+
+  app.get(
+    "/api/grammar/note",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const topic = (req.query.topic as string) || "";
+      if (!topic) {
+        res.status(400).json({ error: "Le paramètre topic est requis" });
+        return;
+      }
+
+      const existing = database
+        .prepare("SELECT * FROM grammar_notes WHERE user_id = ? AND topic = ?")
+        .get(userId, topic) as { id: number; content: string; view_count: number } | undefined;
+
+      if (existing) {
+        database
+          .prepare("UPDATE grammar_notes SET view_count = view_count + 1 WHERE id = ?")
+          .run(existing.id);
+        res.json({ note: { ...existing, view_count: existing.view_count + 1 } });
+        return;
+      }
+
+      if (!isGeminiConfigured()) {
+        res.status(503).json({ error: "Service IA non configuré." });
+        return;
+      }
+
+      const prompt = `Tu es un professeur de japonais expérimenté. Rédige une fiche de grammaire concise sur le sujet suivant : "${topic}".
+
+La fiche doit contenir :
+1. Une explication claire du point grammatical (2-3 phrases)
+2. La règle principale avec la structure
+3. 2-3 exemples avec traduction français-japonais
+4. Une erreur fréquente à éviter
+
+Style : clair, direct, sans emoji ni exclamation. Maximum 15 phrases.
+
+Réponds UNIQUEMENT au format JSON : {"content": "ton explication ici"}`;
+
+      try {
+        const result = await callGeminiJson<{ content: string }>(prompt);
+        incrementGeminiUsage(database);
+        const content = result.content ?? "";
+
+        database
+          .prepare(
+            `INSERT INTO grammar_notes (user_id, topic, content, error_type, view_count)
+           VALUES (?, ?, ?, ?, 1)
+           ON CONFLICT(user_id, topic) DO UPDATE SET content = ?, view_count = view_count + 1`,
+          )
+          .run(userId, topic, content, null, content);
+
+        const inserted = database
+          .prepare("SELECT * FROM grammar_notes WHERE user_id = ? AND topic = ?")
+          .get(userId, topic);
+
+        res.json({ note: inserted });
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        res.status(502).json({ error: `Erreur IA : ${message}` });
+      }
+    }),
+  );
+
+  app.get("/api/grammar/notes", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const notes = database
+      .prepare(
+        "SELECT * FROM grammar_notes WHERE user_id = ? ORDER BY view_count DESC, created_at DESC",
+      )
+      .all(userId);
+    res.json({ notes });
+  });
+
+  app.delete("/api/grammar/notes/:id", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const noteId = Number(req.params.id);
+    database.prepare("DELETE FROM grammar_notes WHERE id = ? AND user_id = ?").run(noteId, userId);
+    res.json({ deleted: true });
+  });
+
+  // --- Daily challenge ---
+
+  app.get(
+    "/api/daily-challenge",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const today = new Date().toISOString().slice(0, 10);
+
+      const existing = database
+        .prepare("SELECT * FROM daily_challenges WHERE user_id = ? AND challenge_date = ?")
+        .get(userId, today) as
+        | {
+            id: number;
+            challenge_type: string;
+            challenge_data: string;
+            completed: number;
+            is_correct: number | null;
+          }
+        | undefined;
+
+      if (existing) {
+        res.json({
+          challenge: {
+            ...existing,
+            challenge_data: JSON.parse(existing.challenge_data),
+          },
+        });
+        return;
+      }
+
+      type WeakWord = { id: number; french: string; kana: string | null; kanji: string | null };
+      const weakWords = database
+        .prepare(
+          `SELECT w.id, w.french, w.kana, w.kanji FROM words w
+         INNER JOIN word_stats ws ON ws.word_id = w.id
+         WHERE w.user_id = ? AND (ws.score <= -5 OR (ws.success_count + ws.partial_count + ws.fail_count >= 3 AND CAST(ws.fail_count AS REAL) / (ws.success_count + ws.partial_count + ws.fail_count) > 0.3))
+         ORDER BY ws.score ASC LIMIT 20`,
+        )
+        .all(userId) as WeakWord[];
+
+      let targetWords: WeakWord[];
+      if (weakWords.length >= 1) {
+        targetWords = weakWords;
+      } else {
+        targetWords = database
+          .prepare(
+            "SELECT id, french, kana, kanji FROM words WHERE user_id = ? ORDER BY RANDOM() LIMIT 20",
+          )
+          .all(userId) as WeakWord[];
+      }
+
+      if (targetWords.length === 0) {
+        res.json({ challenge: null });
+        return;
+      }
+
+      const randomWord = targetWords[Math.floor(Math.random() * targetWords.length)];
+      const japanese = randomWord.kanji ?? randomWord.kana ?? "";
+
+      const challengeTypes = ["translate_fr_jp", "translate_jp_fr"] as const;
+      const challengeType = challengeTypes[Math.floor(Math.random() * challengeTypes.length)];
+
+      const challengeData =
+        challengeType === "translate_fr_jp"
+          ? {
+              prompt: randomWord.french,
+              answer: japanese,
+              hint: randomWord.kana,
+              wordId: randomWord.id,
+            }
+          : {
+              prompt: japanese,
+              answer: randomWord.french,
+              hint: randomWord.kana,
+              wordId: randomWord.id,
+            };
+
+      const result = database
+        .prepare(
+          `INSERT INTO daily_challenges (user_id, challenge_date, challenge_type, challenge_data)
+         VALUES (?, ?, ?, ?)`,
+        )
+        .run(userId, today, challengeType, JSON.stringify(challengeData));
+
+      res.json({
+        challenge: {
+          id: result.lastInsertRowid,
+          challenge_date: today,
+          challenge_type: challengeType,
+          challenge_data: challengeData,
+          completed: 0,
+          is_correct: null,
+        },
+      });
+    }),
+  );
+
+  app.post(
+    "/api/daily-challenge/submit",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const today = new Date().toISOString().slice(0, 10);
+      const bodySchema = z.object({ answer: z.string().min(1).max(500) });
+      const body = bodySchema.parse(req.body);
+
+      const challenge = database
+        .prepare("SELECT * FROM daily_challenges WHERE user_id = ? AND challenge_date = ?")
+        .get(userId, today) as
+        | {
+            id: number;
+            challenge_data: string;
+            completed: number;
+          }
+        | undefined;
+
+      if (!challenge) {
+        res.status(404).json({ error: "Pas de défi aujourd'hui" });
+        return;
+      }
+      if (challenge.completed) {
+        res.json({ alreadyCompleted: true });
+        return;
+      }
+
+      const data = JSON.parse(challenge.challenge_data) as { answer: string; wordId?: number };
+      const normalizedUser = body.answer.trim().normalize("NFKC").toLowerCase();
+      const normalizedExpected = data.answer.trim().normalize("NFKC").toLowerCase();
+      const isCorrect = normalizedUser === normalizedExpected;
+
+      database
+        .prepare("UPDATE daily_challenges SET completed = 1, is_correct = ? WHERE id = ?")
+        .run(isCorrect ? 1 : 0, challenge.id);
+
+      if (data.wordId) {
+        database.prepare("INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)").run(data.wordId);
+        const existingStats = database
+          .prepare(
+            "SELECT word_id, COALESCE(success_count,0) AS success_count, COALESCE(partial_count,0) AS partial_count, COALESCE(fail_count,0) AS fail_count, COALESCE(score,0) AS score, last_reviewed_at, COALESCE(consecutive_success_count,0) AS consecutive_success_count, COALESCE(srs_interval,0) AS srs_interval, COALESCE(srs_ease_factor,2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step,0) AS srs_step FROM word_stats WHERE word_id = ?",
+          )
+          .get(data.wordId) as WordStatsRow | undefined;
+        if (existingStats) {
+          const reviewResult: ReviewResult = isCorrect ? "success" : "fail";
+          const updated = applyReviewToStats(existingStats, reviewResult);
+          database
+            .prepare(
+              "UPDATE word_stats SET success_count=?, partial_count=?, fail_count=?, score=?, last_reviewed_at=?, consecutive_success_count=?, srs_interval=?, srs_ease_factor=?, srs_next_review_at=?, srs_step=? WHERE word_id=?",
+            )
+            .run(
+              updated.success_count,
+              updated.partial_count,
+              updated.fail_count,
+              updated.score,
+              updated.last_reviewed_at,
+              updated.consecutive_success_count,
+              updated.srs_interval,
+              updated.srs_ease_factor,
+              updated.srs_next_review_at,
+              updated.srs_step,
+              updated.word_id,
+            );
+          trackDailyActivity(database, userId, 1);
+        }
+      }
+
+      const newBadges = checkAndAwardBadges(database, userId);
+      res.json({ isCorrect, expectedAnswer: data.answer, newBadges });
+    }),
+  );
+
+  // --- Listening / Dictée ---
+
+  app.post(
+    "/api/listening/generate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        tagIds: z.array(z.number().int().positive()).min(1),
+        difficulty: z.enum(["debutant", "intermediaire"]),
+        count: z.number().int().min(3).max(8),
+      });
+      const body = bodySchema.parse(req.body);
+
+      type VocabRow = { id: number; french: string; kana: string | null; kanji: string | null };
+      const placeholders = body.tagIds.map(() => "?").join(",");
+      const vocabularyRows = database
+        .prepare(
+          `SELECT DISTINCT w.id, w.french, w.kana, w.kanji FROM words w
+         INNER JOIN word_tags wt ON wt.word_id = w.id
+         WHERE wt.tag_id IN (${placeholders}) AND w.user_id = ?
+         ORDER BY RANDOM()`,
+        )
+        .all(...body.tagIds, userId) as VocabRow[];
+
+      if (vocabularyRows.length === 0) {
+        res.status(400).json({ error: "Aucun mot trouvé pour les tags sélectionnés." });
+        return;
+      }
+
+      const vocabularyPool = vocabularyRows.map((row) => ({
+        id: row.id,
+        fr: row.french,
+        jp: row.kanji ?? row.kana ?? "",
+        kana: row.kana ?? "",
+      }));
+
+      const difficultyLabel =
+        body.difficulty === "debutant"
+          ? "débutant (phrases courtes et simples, vocabulaire courant, politesse en -masu)"
+          : "intermédiaire (phrases un peu plus longues, structures variées)";
+
+      const prompt = `Tu es un professeur de japonais qui crée des phrases pour un exercice de dictée orale.
+
+Niveau : ${difficultyLabel}
+Vocabulaire disponible :
+${JSON.stringify(
+  vocabularyPool.slice(0, 30).map((v) => ({ fr: v.fr, jp: v.jp, kana: v.kana })),
+  null,
+  2,
+)}
+
+Génère exactement ${body.count} phrases courtes et naturelles en japonais, adaptées à l'écoute et la transcription.
+Chaque phrase doit être simple et prononçable clairement.
+
+Réponds UNIQUEMENT au format JSON :
+[{"japanese": "日本語の文", "japanese_kana": "にほんごのぶん", "french": "La traduction en français", "used_words_fr": ["mot1"]}]`;
+
+      try {
+        const sentences =
+          await callGeminiJson<
+            Array<{
+              japanese: string;
+              japanese_kana: string;
+              french: string;
+              used_words_fr?: string[];
+            }>
+          >(prompt);
+        incrementGeminiUsage(database);
+
+        if (!Array.isArray(sentences) || sentences.length === 0) {
+          res.status(502).json({ error: "L'IA n'a pas généré de phrases valides." });
+          return;
+        }
+
+        const vocabByFrench = new Map<string, number>();
+        for (const vocab of vocabularyPool) {
+          vocabByFrench.set(vocab.fr.toLowerCase(), vocab.id);
+        }
+
+        const exercises = sentences.map((sentence) => {
+          const wordIds: number[] = [];
+          for (const usedFr of sentence.used_words_fr ?? []) {
+            const wordId = vocabByFrench.get(usedFr.toLowerCase());
+            if (wordId !== undefined && !wordIds.includes(wordId)) wordIds.push(wordId);
+          }
+          return { ...sentence, wordIds };
+        });
+
+        res.json({ exercises, quota: getGeminiQuota(database) });
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Listening generation failed:", message);
+        res.status(502).json({ error: `Erreur de génération IA : ${message}` });
+      }
+    }),
+  );
+
+  app.post(
+    "/api/listening/evaluate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      if (!isGeminiConfigured()) {
+        res.status(503).json({ error: "Service IA non configuré." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        userTranscript: z.string().max(1000),
+        expectedJapanese: z.string().max(1000),
+        frenchTranslation: z.string().max(1000),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const normalizedUser = body.userTranscript.trim().normalize("NFKC");
+      const normalizedExpected = body.expectedJapanese.trim().normalize("NFKC");
+      if (normalizedUser === normalizedExpected) {
+        res.json({ isCorrect: true, feedback: null, errorType: null });
+        return;
+      }
+
+      const prompt = `Tu es un professeur de japonais. Un élève a fait un exercice de dictée.
+
+Phrase japonaise attendue : "${body.expectedJapanese}"
+Traduction française : "${body.frenchTranslation}"
+Ce que l'élève a écrit : "${body.userTranscript}"
+
+Analyse et réponds UNIQUEMENT au format JSON :
+{"isCorrect": false, "errorType": "kanji|kana|vocabulary|other", "feedback": "Ton conseil"}
+
+Règles :
+- Si la réponse est correcte ou quasi-identique, mets isCorrect à true.
+- Sois tolérant sur les espaces et la ponctuation.
+- Si l'élève a écrit en kana au lieu de kanji mais le contenu est correct, considère comme correct.
+- Feedback : 1-2 phrases max, ton professoral, pas d'emoji.`;
+
+      try {
+        const evaluation = await callGeminiJson<{
+          isCorrect: boolean;
+          errorType: string | null;
+          feedback: string | null;
+        }>(prompt);
+        incrementGeminiUsage(database);
+
+        if (!evaluation.isCorrect && evaluation.errorType) {
+          database
+            .prepare(
+              "INSERT INTO error_logs (user_id, error_type, exercise_mode) VALUES (?, ?, 'ecoute')",
+            )
+            .run(userId, evaluation.errorType);
+        }
+
+        res.json({
+          isCorrect: evaluation.isCorrect ?? false,
+          feedback: evaluation.feedback ?? null,
+          errorType: evaluation.errorType ?? null,
+        });
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        res.status(502).json({ error: `Erreur d'évaluation IA : ${message}` });
+      }
+    }),
+  );
+
+  // --- Reading / Lecture ---
+
+  app.post(
+    "/api/reading/generate",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      if (!isGeminiConfigured()) {
+        res.status(503).json({ error: "Service IA non configuré." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        tagIds: z.array(z.number().int().positive()).min(1),
+        difficulty: z.enum(["debutant", "intermediaire"]),
+        length: z.enum(["short", "medium", "long"]),
+      });
+      const body = bodySchema.parse(req.body);
+
+      type VocabRow = { id: number; french: string; kana: string | null; kanji: string | null };
+      const placeholders = body.tagIds.map(() => "?").join(",");
+      const vocabularyRows = database
+        .prepare(
+          `SELECT DISTINCT w.id, w.french, w.kana, w.kanji FROM words w
+         INNER JOIN word_tags wt ON wt.word_id = w.id
+         WHERE wt.tag_id IN (${placeholders}) AND w.user_id = ?
+         ORDER BY RANDOM()`,
+        )
+        .all(...body.tagIds, userId) as VocabRow[];
+
+      if (vocabularyRows.length === 0) {
+        res.status(400).json({ error: "Aucun mot trouvé." });
+        return;
+      }
+
+      const vocabularyPool = vocabularyRows.slice(0, 30).map((row) => ({
+        id: row.id,
+        fr: row.french,
+        jp: row.kanji ?? row.kana ?? "",
+        kana: row.kana ?? "",
+      }));
+
+      const lengthLabels = { short: "3-4 phrases", medium: "5-6 phrases", long: "7-8 phrases" };
+      const difficultyLabel =
+        body.difficulty === "debutant"
+          ? "débutant (N5, phrases simples)"
+          : "intermédiaire (N4/N3, structures variées)";
+
+      const prompt = `Tu es un professeur de japonais. Génère un texte court de lecture adapté au niveau ${difficultyLabel}, composé de ${lengthLabels[body.length]}.
+
+Vocabulaire de l'élève à utiliser au maximum :
+${JSON.stringify(
+  vocabularyPool.map((v) => ({ fr: v.fr, jp: v.jp })),
+  null,
+  2,
+)}
+
+Le texte doit raconter une petite histoire cohérente du quotidien.
+
+Après le texte, pose 2 questions de compréhension en français.
+
+Réponds UNIQUEMENT au format JSON :
+{
+  "paragraphs": [
+    {
+      "japanese": "日本語の文",
+      "french": "Traduction française",
+      "words": [{"text": "日本語", "reading": "にほんご", "meaning": "japonais"}]
+    }
+  ],
+  "questions": [
+    {"question": "Question en français ?", "answer": "Réponse attendue"}
+  ]
+}`;
+
+      try {
+        const result = await callGeminiJson<{
+          paragraphs: Array<{
+            japanese: string;
+            french: string;
+            words: Array<{ text: string; reading: string; meaning: string }>;
+          }>;
+          questions: Array<{ question: string; answer: string }>;
+        }>(prompt);
+        incrementGeminiUsage(database);
+
+        if (!result.paragraphs || !Array.isArray(result.paragraphs)) {
+          res.status(502).json({ error: "L'IA n'a pas généré de texte valide." });
+          return;
+        }
+
+        res.json({ ...result, quota: getGeminiQuota(database) });
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        res.status(502).json({ error: `Erreur de génération IA : ${message}` });
+      }
+    }),
+  );
+
+  app.post(
+    "/api/reading/check-answer",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      if (!isGeminiConfigured()) {
+        res.status(503).json({ error: "Service IA non configuré." });
+        return;
+      }
+
+      const bodySchema = z.object({
+        question: z.string().max(500),
+        expectedAnswer: z.string().max(500),
+        userAnswer: z.string().max(500),
+      });
+      const body = bodySchema.parse(req.body);
+
+      const prompt = `Tu es un professeur. L'élève a lu un texte japonais et répond à une question de compréhension.
+
+Question : "${body.question}"
+Réponse attendue : "${body.expectedAnswer}"
+Réponse de l'élève : "${body.userAnswer}"
+
+Évalue si la réponse est correcte (même formulée différemment).
+Réponds au format JSON : {"isCorrect": true/false, "feedback": "commentaire bref"}`;
+
+      try {
+        const evaluation = await callGeminiJson<{ isCorrect: boolean; feedback: string }>(prompt);
+        incrementGeminiUsage(database);
+        res.json(evaluation);
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        res.status(502).json({ error: `Erreur IA : ${message}` });
+      }
     }),
   );
 }

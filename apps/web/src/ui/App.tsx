@@ -18,11 +18,14 @@ import { AdminPage } from "./pages/AdminPage";
 import { DialoguePage } from "./pages/DialoguePage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
+import { GrammarPage } from "./pages/GrammarPage";
 import { HomePage } from "./pages/HomePage";
 import { KanjiLearningPage } from "./pages/KanjiLearningPage";
 import { KanjiQuizPage } from "./pages/KanjiQuizPage";
 import { LoginPage } from "./pages/LoginPage";
+import { PhraseBankPage } from "./pages/PhraseBankPage";
 import { PratiquePage } from "./pages/PratiquePage";
+import { ReadingPage } from "./pages/ReadingPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SrsPage } from "./pages/SrsPage";
 import { StatsPage } from "./pages/StatsPage";
@@ -198,6 +201,14 @@ export function App() {
               className={({ isActive }) =>
                 `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
               }
+              to="/lecture"
+            >
+              Lecture
+            </NavLink>
+            <NavLink
+              className={({ isActive }) =>
+                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
+              }
               to="/dictionary"
             >
               Dico
@@ -263,10 +274,30 @@ export function App() {
                   type="button"
                   onClick={() => {
                     setIsDropdownOpen(false);
+                    navigate("/phrases-bank");
+                  }}
+                >
+                  Banque de phrases
+                </button>
+                <button
+                  className="dropdown__item"
+                  type="button"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
                     navigate("/words");
                   }}
                 >
                   Mots
+                </button>
+                <button
+                  className="dropdown__item"
+                  type="button"
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    navigate("/grammaire");
+                  }}
+                >
+                  Grammaire
                 </button>
                 <button
                   className="dropdown__item"
@@ -378,6 +409,9 @@ export function App() {
           <Route path="/words" element={requireAuth(<WordsPage />)} />
           <Route path="/stats" element={requireAuth(<StatsPage />)} />
           <Route path="/kanji-quiz" element={requireAuth(<KanjiQuizPage />)} />
+          <Route path="/phrases-bank" element={requireAuth(<PhraseBankPage />)} />
+          <Route path="/grammaire" element={requireAuth(<GrammarPage />)} />
+          <Route path="/lecture" element={requireAuth(<ReadingPage />)} />
           <Route path="/profile" element={<Navigate to="/settings" replace />} />
           <Route path="/admin" element={requireAuth(<AdminPage />)} />
           <Route path="/settings" element={requireAuth(<SettingsPage />)} />
