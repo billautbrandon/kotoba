@@ -27,6 +27,18 @@ export function SessionHeroCard({
   const now = new Date();
   const displayName = currentUser?.display_name ?? currentUser?.username ?? "";
   const estimatedMinutes = Math.max(1, Math.round(dueCount * 0.5));
+  const sessionMeta =
+    dueCount > 0
+      ? [
+          `${dueCount} cartes`,
+          estimatedMinutes <= 60 ? `environ ${estimatedMinutes} min` : null,
+          `${todayReviews} déjà faites`,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : todayReviews > 0
+        ? `Rien à réviser · ${todayReviews} déjà faites aujourd'hui`
+        : "Aucune carte due pour le moment";
   const dateLabel = now.toLocaleDateString("fr-FR", {
     weekday: "long",
     day: "numeric",
@@ -50,13 +62,7 @@ export function SessionHeroCard({
           <PlayIcon className="sessionHero__startIcon" />
           Commencer la session
         </button>
-        <div className="sessionHero__meta">
-          {dueCount > 0
-            ? `${dueCount} cartes · environ ${estimatedMinutes} min · ${todayReviews} déjà faites`
-            : todayReviews > 0
-              ? `Rien à réviser · ${todayReviews} déjà faites aujourd'hui`
-              : "Aucune carte due pour le moment"}
-        </div>
+        <div className="sessionHero__meta">{sessionMeta}</div>
         <div>
           <div className="sessionHero__firstUpLabel">À venir</div>
           {previewWords.length > 0 ? (

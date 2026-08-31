@@ -18,10 +18,10 @@ type StudyQueueCardProps = {
 export function StudyQueueCard({ weakest, dueToday, newWords }: StudyQueueCardProps) {
   const navigate = useNavigate();
   const rows = [weakest, dueToday, newWords];
-  const canPractice = dueToday.count > 0 || weakest.count > 0;
+  const canPractice = dueToday.count > 0 || weakest.count > 0 || newWords.count > 0;
 
   function handlePractice() {
-    if (dueToday.count > 0) {
+    if (dueToday.count > 0 || newWords.count > 0) {
       navigate("/train/srs/due");
       return;
     }
