@@ -9,7 +9,7 @@ import {
   fetchDifficultWords,
   fetchDueWords,
   fetchGeminiQuota,
-  fetchSeriesWords,
+  fetchSeriesWordsByTagIds,
   fetchSrsWords,
   submitBulkReviews,
 } from "../../api";
@@ -47,6 +47,18 @@ export function TrainPage(props: { mode: TrainMode }) {
   const tagId = props.mode === "tag" ? Number(routeParams.tagId) : null;
   const srsCategory = (routeParams.category as SrsCategory | undefined) ?? "hard";
   const tagName = searchParams.get("name") ?? null;
+  const requestedTagIds = useMemo(() => {
+    if (props.mode !== "tag") return [];
+    const fromQuery = searchParams.get("ids");
+    if (fromQuery) {
+      return fromQuery
+        .split(",")
+        .map((value) => Number(value.trim()))
+        .filter((id) => Number.isInteger(id) && id > 0);
+    }
+    if (tagId && Number.isFinite(tagId) && tagId > 0) return [tagId];
+    return [];
+  }, [props.mode, searchParams, tagId]);
 
   const [phase, setPhase] = useState<TrainPhase>(props.mode === "srs" ? "setup" : "setup");
 
@@ -107,10 +119,13 @@ export function TrainPage(props: { mode: TrainMode }) {
   const modeLabel = useMemo(() => {
     if (props.mode === "difficult") return "Mots difficiles";
     if (props.mode === "srs") return `SRS — ${srsCategoryLabels[srsCategory]}`;
+    if (requestedTagIds.length > 1) {
+      return tagName ? tagName : `${requestedTagIds.length} séries`;
+    }
     if (tagName) return tagName;
-    if (tagId) return `Tag ${tagId}`;
+    if (requestedTagIds[0]) return `Tag ${requestedTagIds[0]}`;
     return "Série";
-  }, [props.mode, srsCategory, tagId, tagName]);
+  }, [props.mode, srsCategory, requestedTagIds, tagName]);
 
   async function startSession() {
     sessionMode.current = configSessionMode;
@@ -143,10 +158,10 @@ export function TrainPage(props: { mode: TrainMode }) {
         const bucketCategory = srsCategory as "hard" | "medium" | "easy";
         loadedWords = srsData[bucketCategory] ?? [];
       } else {
-        if (!tagId || !Number.isFinite(tagId)) {
+        if (requestedTagIds.length === 0) {
           throw new Error("Tag invalide");
         }
-        loadedWords = await fetchSeriesWords(tagId);
+        loadedWords = await fetchSeriesWordsByTagIds(requestedTagIds);
       }
 
       const shuffledWords = shuffleWords(loadedWords);

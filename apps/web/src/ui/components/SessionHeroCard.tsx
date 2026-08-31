@@ -1,13 +1,10 @@
-import type { User, WordWithStats } from "../../api";
-import { formatWordJp } from "../utils/wordDisplay";
-import { DailyChallengeCard } from "./DailyChallengeCard";
+import type { User } from "../../api";
 import { PlayIcon } from "./NavIcons";
 
 type SessionHeroCardProps = {
   currentUser: User | null;
   dueCount: number;
   todayReviews: number;
-  previewWords: WordWithStats[];
   onStartSession: () => void;
 };
 
@@ -21,7 +18,6 @@ export function SessionHeroCard({
   currentUser,
   dueCount,
   todayReviews,
-  previewWords,
   onStartSession,
 }: SessionHeroCardProps) {
   const now = new Date();
@@ -63,21 +59,6 @@ export function SessionHeroCard({
           Commencer la session
         </button>
         <div className="sessionHero__meta">{sessionMeta}</div>
-        <div>
-          <div className="sessionHero__firstUpLabel">À venir</div>
-          {previewWords.length > 0 ? (
-            <div className="sessionHero__chips">
-              {previewWords.slice(0, 4).map((word) => (
-                <span key={word.id} className="sessionHero__chip">
-                  {formatWordJp(word)}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div className="sessionHero__empty">Ajoute du vocabulaire pour lancer une session.</div>
-          )}
-        </div>
-        <DailyChallengeCard variant="hero" />
       </div>
     </div>
   );

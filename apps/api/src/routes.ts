@@ -910,6 +910,68 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     });
   });
 
+  app.get("/api/series/words", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const rawTagIds = typeof req.query.tagIds === "string" ? req.query.tagIds : "";
+    const tagIds = rawTagIds
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((tagId) => Number.isInteger(tagId) && tagId > 0);
+
+    if (tagIds.length === 0) {
+      res.status(400).json({ error: "Au moins une série est requise" });
+      return;
+    }
+
+    const uniqueTagIds = [...new Set(tagIds)];
+    const ownedCount = (
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM tags WHERE user_id = ? AND id IN (${uniqueTagIds.map(() => "?").join(",")})`,
+        )
+        .get(userId, ...uniqueTagIds) as { count: number }
+    ).count;
+
+    if (ownedCount !== uniqueTagIds.length) {
+      res.status(403).json({ error: "Série introuvable" });
+      return;
+    }
+
+    const placeholders = uniqueTagIds.map(() => "?").join(",");
+    const rows = database
+      .prepare(
+        `
+        SELECT
+          w.id,
+          w.french,
+          w.romaji,
+          w.kana,
+          w.kanji,
+          w.note,
+          w.examples,
+          w.created_at,
+          COALESCE(s.success_count, 0) AS success_count,
+          COALESCE(s.partial_count, 0) AS partial_count,
+          COALESCE(s.fail_count, 0) AS fail_count,
+          COALESCE(s.score, 0) AS score,
+          s.last_reviewed_at AS last_reviewed_at
+        FROM words w
+        INNER JOIN word_tags wt ON wt.word_id = w.id
+        INNER JOIN tags t ON t.id = wt.tag_id
+        LEFT JOIN word_stats s ON s.word_id = w.id
+        WHERE wt.tag_id IN (${placeholders}) AND w.user_id = ? AND t.user_id = ?
+        GROUP BY w.id
+        ORDER BY w.id DESC
+      `,
+      )
+      .all(...uniqueTagIds, userId, userId) as Array<
+      Record<string, unknown> & { examples: string | null }
+    >;
+
+    const words = rows.map((row) => ({ ...row, examples: parseExamples(row.examples) }));
+    res.json({ words });
+  });
+
   app.get("/api/series/:tagId/words", (req, res) => {
     const userId = getRequiredUserId(req);
     const tagId = Number(req.params.tagId);

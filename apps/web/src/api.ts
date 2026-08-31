@@ -80,11 +80,7 @@ async function apiGet<T>(url: string): Promise<T> {
   return safeJson<T>(response);
 }
 
-async function apiPost<T = void>(
-  url: string,
-  body?: unknown,
-  errorFallback?: string,
-): Promise<T> {
+async function apiPost<T = void>(url: string, body?: unknown, errorFallback?: string): Promise<T> {
   const options: RequestInit = { method: "POST", credentials: "include" };
   if (body !== undefined) {
     options.headers = { "Content-Type": "application/json" };
@@ -101,11 +97,7 @@ async function apiPost<T = void>(
   return safeJson<T>(response);
 }
 
-async function apiPut<T = void>(
-  url: string,
-  body: unknown,
-  errorFallback?: string,
-): Promise<T> {
+async function apiPut<T = void>(url: string, body: unknown, errorFallback?: string): Promise<T> {
   const response = await fetch(url, {
     method: "PUT",
     credentials: "include",
@@ -292,6 +284,18 @@ export async function fetchSeries(): Promise<
 
 export async function fetchSeriesWords(tagId: number): Promise<WordWithStats[]> {
   const payload = await apiGet<{ words: WordWithStats[] }>(`/api/series/${tagId}/words`);
+  return payload.words;
+}
+
+export async function fetchSeriesWordsByTagIds(tagIds: number[]): Promise<WordWithStats[]> {
+  const uniqueTagIds = [...new Set(tagIds.filter((tagId) => Number.isInteger(tagId) && tagId > 0))];
+  if (uniqueTagIds.length === 0) return [];
+  if (uniqueTagIds.length === 1) return fetchSeriesWords(uniqueTagIds[0]);
+  const params = new URLSearchParams();
+  params.set("tagIds", uniqueTagIds.join(","));
+  const payload = await apiGet<{ words: WordWithStats[] }>(
+    `/api/series/words?${params.toString()}`,
+  );
   return payload.words;
 }
 
@@ -807,7 +811,9 @@ export type SavedPhrase = {
 };
 
 export async function fetchSavedPhrases(source?: string): Promise<SavedPhrase[]> {
-  const url = source ? `/api/saved-phrases?source=${encodeURIComponent(source)}` : "/api/saved-phrases";
+  const url = source
+    ? `/api/saved-phrases?source=${encodeURIComponent(source)}`
+    : "/api/saved-phrases";
   const payload = await apiGet<{ phrases: SavedPhrase[] }>(url);
   return payload.phrases;
 }
