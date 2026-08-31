@@ -25,7 +25,7 @@ export function DashboardActivityCard({
   overview,
 }: DashboardActivityCardProps) {
   return (
-    <div className="dashCard">
+    <div className="dashCard dashCard--span2">
       <h2 className="dashCard__title">Activité</h2>
       <ActivityHeatmap activity={activity} weekCount={16} compact />
       <div className="heatmapStats">

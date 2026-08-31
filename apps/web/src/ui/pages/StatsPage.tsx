@@ -64,8 +64,10 @@ export function StatsPage() {
   return (
     <div>
       <div className="pageHeader">
-        <h1 className="pageTitle">Statistiques</h1>
-        <p className="pageSubtitle">Vue d'ensemble de ta progression</p>
+        <div>
+          <h1 className="pageTitle">Statistiques</h1>
+          <p className="pageSubtitle">Vue d'ensemble de ta progression</p>
+        </div>
       </div>
 
       {overview && (

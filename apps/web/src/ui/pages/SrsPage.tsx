@@ -65,10 +65,12 @@ export function SrsPage() {
   return (
     <div>
       <div className="pageHeader">
-        <h1 className="pageTitle">SRS</h1>
-        <p className="pageSubtitle">
-          Révision espacée : les mots reviennent au bon moment pour une mémorisation durable.
-        </p>
+        <div>
+          <h1 className="pageTitle">SRS</h1>
+          <p className="pageSubtitle">
+            Révision espacée : les mots reviennent au bon moment pour une mémorisation durable.
+          </p>
+        </div>
       </div>
 
       {isLoading ? (
@@ -193,7 +195,7 @@ function SrsSection({
                 </span>
               </div>
             ))}
-            {words.length > 5 && <div className="srsCard__more">+{words.length - 5} autres</div>}
+            {words.length > 3 && <div className="srsCard__more">+{words.length - 3} autres</div>}
           </div>
         ) : (
           <div className="srsCard__empty">Aucun mot</div>

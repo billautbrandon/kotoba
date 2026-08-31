@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type Tag,
@@ -29,6 +29,7 @@ export function WordsPage() {
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
   const [jsonImportStatus, setJsonImportStatus] = useState<string | null>(null);
+  const importSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -158,6 +159,19 @@ export function WordsPage() {
 
   const hasWords = (words?.length ?? 0) > 0;
 
+  useEffect(() => {
+    if (!isLoading && !hasWords) {
+      setShowAdvanced(true);
+    }
+  }, [isLoading, hasWords]);
+
+  function openImport() {
+    setShowAdvanced(true);
+    window.requestAnimationFrame(() => {
+      importSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
   return (
     <div className="wordsPage">
       <div className="pageHeader wordsPage__header">
@@ -217,11 +231,19 @@ export function WordsPage() {
       ) : null}
 
       {!isLoading && !hasWords ? (
-        <div className="wordsPage__empty">
-          <p className="muted">Aucun mot pour l'instant.</p>
-          <button className="button button--primary" type="button" onClick={openAddModal}>
-            + Ajouter ton premier mot
-          </button>
+        <div className="wordsPage__empty emptyState emptyState--center">
+          <p className="emptyState__title">Aucun mot pour l'instant</p>
+          <p className="emptyState__text">
+            Ajoute tes premiers mots à la main, ou importe un fichier JSON pour démarrer plus vite.
+          </p>
+          <div className="emptyState__actions">
+            <button className="button button--primary" type="button" onClick={openAddModal}>
+              + Ajouter un mot
+            </button>
+            <button className="button" type="button" onClick={openImport}>
+              Importer un fichier
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -241,7 +263,7 @@ export function WordsPage() {
         </div>
       ) : null}
 
-      <div className="wordsPage__advanced">
+      <div className="wordsPage__advanced" ref={importSectionRef}>
         <button
           type="button"
           className="sectionHeader"

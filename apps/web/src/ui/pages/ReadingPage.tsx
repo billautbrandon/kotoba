@@ -118,8 +118,10 @@ export function ReadingPage() {
     return (
       <div>
         <div className="pageHeader">
-          <h1 className="pageTitle">Mode lecture</h1>
-          <p className="pageSubtitle">Lis un texte adapté à ton vocabulaire</p>
+          <div>
+            <h1 className="pageTitle">Mode lecture</h1>
+            <p className="pageSubtitle">Lis un texte adapté à ton vocabulaire</p>
+          </div>
         </div>
 
         {quota && <QuotaBar quota={quota} />}

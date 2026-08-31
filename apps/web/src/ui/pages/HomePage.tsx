@@ -178,7 +178,21 @@ export function HomePage({ currentUser }: HomePageProps) {
 
         {!isLoading && series && series.length === 0 ? (
           <div className="seriesCard__empty">
-            Aucune série : crée des tags et assigne-les à des mots dans « Mots ».
+            <div className="emptyState">
+              <p className="emptyState__title">Aucune série pour l'instant</p>
+              <p className="emptyState__text">
+                Crée des tags et assigne-les à tes mots pour réviser par série.
+              </p>
+              <div className="emptyState__actions">
+                <button
+                  className="button button--primary"
+                  type="button"
+                  onClick={() => navigate("/words")}
+                >
+                  Aller aux mots
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -203,7 +217,7 @@ export function HomePage({ currentUser }: HomePageProps) {
             </thead>
             <tbody>
               {series.map((row) => (
-                <tr key={row.tagId} className="tableRowLink">
+                <tr key={row.tagId}>
                   <td className="seriesCard__checkCol">
                     <input
                       type="checkbox"

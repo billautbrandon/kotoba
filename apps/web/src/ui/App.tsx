@@ -3,13 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import type { User } from "../api";
-import {
-  type SrsSummary,
-  downloadMissingKanjiSvgs,
-  fetchMe,
-  fetchSrsSummary,
-  logoutUser,
-} from "../api";
+import { type SrsSummary, fetchMe, fetchSrsSummary, logoutUser } from "../api";
 import {
   HomeNavIcon,
   PracticeNavIcon,
@@ -36,6 +30,19 @@ import { StatsPage } from "./pages/StatsPage";
 import { TrainPage } from "./pages/TrainPage";
 import { WordsPage } from "./pages/WordsPage";
 
+const MORE_PATH_PREFIXES = [
+  "/dialogue",
+  "/kanji-quiz",
+  "/kanji",
+  "/words",
+  "/difficult",
+  "/phrases-bank",
+  "/grammaire",
+  "/stats",
+  "/settings",
+  "/admin",
+];
+
 function getInitials(name: string): string {
   return name
     .split(" ")
@@ -43,6 +50,37 @@ function getInitials(name: string): string {
     .join("")
     .toUpperCase()
     .slice(0, 2);
+}
+
+function isMorePath(pathname: string): boolean {
+  return MORE_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function getMobilePageTitle(pathname: string): string {
+  if (pathname.startsWith("/train/")) return "Session";
+  if (pathname === "/" || pathname.startsWith("/series/")) return "Accueil";
+  const titles: Array<[string, string]> = [
+    ["/dictionary", "Dictionnaire"],
+    ["/srs", "SRS"],
+    ["/pratique", "Pratique"],
+    ["/lecture", "Lecture"],
+    ["/dialogue", "Dialogue"],
+    ["/kanji-quiz", "Quiz kanji"],
+    ["/kanji", "Kanji"],
+    ["/words", "Mots"],
+    ["/difficult", "Mots difficiles"],
+    ["/phrases-bank", "Phrases"],
+    ["/grammaire", "Grammaire"],
+    ["/stats", "Statistiques"],
+    ["/settings", "Paramètres"],
+    ["/admin", "Administration"],
+  ];
+  for (const [prefix, title] of titles) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return title;
+  }
+  return "Kotoba";
 }
 
 type SidebarLinkProps = {
@@ -75,9 +113,15 @@ export function App() {
   const location = useLocation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [isDownloadingKanji, setIsDownloadingKanji] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const stored = window.localStorage.getItem("kotoba.sidebarMore");
+    if (stored === "closed") return false;
+    if (stored === "open") return true;
+    return isMorePath(window.location.pathname);
+  });
   const [srsSummary, setSrsSummary] = useState<SrsSummary | null>(null);
 
   useEffect(() => {
@@ -121,7 +165,7 @@ export function App() {
   const isAuthenticated = Boolean(currentUser);
 
   const requireAuth = (element: React.ReactElement) => {
-    if (isAuthLoading) return <div className="muted">Chargement...</div>;
+    if (isAuthLoading) return <div className="muted">Chargement…</div>;
     if (!currentUser) return <Navigate to="/login" replace state={{ from: location }} />;
     return element;
   };
@@ -153,12 +197,20 @@ export function App() {
     location.pathname.startsWith("/train/tags") ||
     location.pathname.startsWith("/train/srs/");
 
+  useEffect(() => {
+    if (isMorePath(location.pathname)) setIsMoreOpen(true);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    window.localStorage.setItem("kotoba.sidebarMore", isMoreOpen ? "open" : "closed");
+  }, [isMoreOpen]);
+
   function closeMobileNav() {
     setIsMobileNavOpen(false);
   }
 
   const sidebar = isAuthenticated ? (
-    <aside className={`sidebar${isMobileNavOpen ? " sidebar--open" : ""}`}>
+    <aside id="app-sidebar" className={`sidebar${isMobileNavOpen ? " sidebar--open" : ""}`}>
       <Link className="sidebar__brand" to="/" onClick={closeMobileNav}>
         <span className="sidebar__brandName">Kotoba</span>
         <span className="sidebar__brandKana">言葉</span>
@@ -202,27 +254,41 @@ export function App() {
           onNavigate={closeMobileNav}
         />
 
-        <div className="sidebar__section">Pratique</div>
-        <SidebarLink to="/dialogue" label="Dialogue" onNavigate={closeMobileNav} />
-        <SidebarLink to="/kanji" label="Kanji" onNavigate={closeMobileNav} />
-        <SidebarLink to="/kanji-quiz" label="Quiz kanji" onNavigate={closeMobileNav} />
+        <button
+          className="sidebar__moreToggle"
+          type="button"
+          aria-expanded={isMoreOpen}
+          aria-controls="sidebar-more"
+          onClick={() => setIsMoreOpen((previous) => !previous)}
+        >
+          Plus
+          <span className="sidebar__moreChevron">{isMoreOpen ? "▾" : "▸"}</span>
+        </button>
+        {isMoreOpen ? (
+          <div id="sidebar-more" className="sidebar__more">
+            <div className="sidebar__section">Pratique</div>
+            <SidebarLink to="/dialogue" label="Dialogue" onNavigate={closeMobileNav} />
+            <SidebarLink to="/kanji" label="Kanji" onNavigate={closeMobileNav} />
+            <SidebarLink to="/kanji-quiz" label="Quiz kanji" onNavigate={closeMobileNav} />
 
-        <div className="sidebar__section">Vocabulaire</div>
-        <SidebarLink to="/words" label="Mots" onNavigate={closeMobileNav} />
-        <SidebarLink to="/difficult" label="Mots difficiles" onNavigate={closeMobileNav} />
-        <SidebarLink to="/phrases-bank" label="Banque de phrases" onNavigate={closeMobileNav} />
-        <SidebarLink to="/grammaire" label="Grammaire" onNavigate={closeMobileNav} />
+            <div className="sidebar__section">Vocabulaire</div>
+            <SidebarLink to="/words" label="Mots" onNavigate={closeMobileNav} />
+            <SidebarLink to="/difficult" label="Mots difficiles" onNavigate={closeMobileNav} />
+            <SidebarLink to="/phrases-bank" label="Banque de phrases" onNavigate={closeMobileNav} />
+            <SidebarLink to="/grammaire" label="Grammaire" onNavigate={closeMobileNav} />
 
-        <div className="sidebar__section">Compte</div>
-        <SidebarLink to="/stats" label="Statistiques" onNavigate={closeMobileNav} />
-        <SidebarLink to="/settings" label="Paramètres" onNavigate={closeMobileNav} />
-        {currentUser?.is_admin === 1 ? (
-          <SidebarLink to="/admin" label="Administration" onNavigate={closeMobileNav} />
+            <div className="sidebar__section">Compte</div>
+            <SidebarLink to="/stats" label="Statistiques" onNavigate={closeMobileNav} />
+            <SidebarLink to="/settings" label="Paramètres" onNavigate={closeMobileNav} />
+            {currentUser?.is_admin === 1 ? (
+              <SidebarLink to="/admin" label="Administration" onNavigate={closeMobileNav} />
+            ) : null}
+          </div>
         ) : null}
       </nav>
 
       <div className="sidebar__footer">
-        <div className="sidebar__user">
+        <Link className="sidebar__user" to="/settings" onClick={closeMobileNav}>
           <div className="sidebar__avatar">
             {currentUser?.avatar_url ? (
               <img src={currentUser.avatar_url} alt="" className="sidebar__avatarImg" />
@@ -233,27 +299,7 @@ export function App() {
           <div className="sidebar__userName">
             {currentUser?.display_name ?? currentUser?.username}
           </div>
-        </div>
-        <button
-          className="sidebar__footerButton"
-          type="button"
-          disabled={isDownloadingKanji}
-          onClick={async () => {
-            setIsDownloadingKanji(true);
-            try {
-              const result = await downloadMissingKanjiSvgs();
-              alert(
-                `Terminé: ${result.downloaded} kanji téléchargé(s) sur ${result.missingCount} manquant(s). ${result.failed} échec(s).`,
-              );
-            } catch (error) {
-              alert(`Erreur: ${error instanceof Error ? error.message : "Erreur inconnue"}`);
-            } finally {
-              setIsDownloadingKanji(false);
-            }
-          }}
-        >
-          {isDownloadingKanji ? "Téléchargement..." : "Télécharger les kanji"}
-        </button>
+        </Link>
         <button
           className="sidebar__footerButton sidebar__footerButton--danger"
           type="button"
@@ -288,14 +334,14 @@ export function App() {
             <button
               className="mobileBar__menu"
               type="button"
-              aria-label="Ouvrir le menu"
+              aria-label={isMobileNavOpen ? "Fermer le menu" : "Ouvrir le menu"}
+              aria-expanded={isMobileNavOpen}
+              aria-controls="app-sidebar"
               onClick={() => setIsMobileNavOpen(true)}
             >
               Menu
             </button>
-            <Link className="mobileBar__brand" to="/">
-              Kotoba
-            </Link>
+            <span className="mobileBar__title">{getMobilePageTitle(location.pathname)}</span>
           </div>
         ) : null}
 
@@ -305,7 +351,7 @@ export function App() {
               path="/login"
               element={
                 isAuthLoading ? (
-                  <div className="muted">Chargement...</div>
+                  <div className="muted">Chargement…</div>
                 ) : currentUser ? (
                   <Navigate
                     to={

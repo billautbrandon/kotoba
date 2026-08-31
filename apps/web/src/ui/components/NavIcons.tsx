@@ -5,7 +5,7 @@ type NavIconProps = {
 export function HomeNavIcon({ className }: NavIconProps) {
   return (
     <svg
-      className={className ?? "topbar__navIcon"}
+      className={className ?? "sidebar__icon"}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -23,7 +23,7 @@ export function HomeNavIcon({ className }: NavIconProps) {
 export function VocabNavIcon({ className }: NavIconProps) {
   return (
     <svg
-      className={className ?? "topbar__navIcon"}
+      className={className ?? "sidebar__icon"}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -42,7 +42,7 @@ export function VocabNavIcon({ className }: NavIconProps) {
 export function SrsNavIcon({ className }: NavIconProps) {
   return (
     <svg
-      className={className ?? "topbar__navIcon"}
+      className={className ?? "sidebar__icon"}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -61,7 +61,7 @@ export function SrsNavIcon({ className }: NavIconProps) {
 export function PracticeNavIcon({ className }: NavIconProps) {
   return (
     <svg
-      className={className ?? "topbar__navIcon"}
+      className={className ?? "sidebar__icon"}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -80,7 +80,7 @@ export function PracticeNavIcon({ className }: NavIconProps) {
 export function ReadingNavIcon({ className }: NavIconProps) {
   return (
     <svg
-      className={className ?? "topbar__navIcon"}
+      className={className ?? "sidebar__icon"}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

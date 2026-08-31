@@ -54,6 +54,7 @@ export function PhraseBankPage() {
   }, [sourceFilter]);
 
   async function handleDelete(phraseId: number) {
+    if (!window.confirm("Supprimer cette phrase ?")) return;
     try {
       await deleteSavedPhrase(phraseId);
       setPhrases((previous) => previous.filter((phrase) => phrase.id !== phraseId));
@@ -215,15 +216,20 @@ export function PhraseBankPage() {
       {isLoading ? (
         <div className="muted">Chargement…</div>
       ) : phrases.length === 0 ? (
-        <div className="muted">
-          Aucune phrase sauvegardée. Sauvegarde des phrases depuis tes sessions d'entraînement !
+        <div className="emptyState">
+          <p className="emptyState__title">Aucune phrase sauvegardée</p>
+          <p className="emptyState__text">
+            Enregistre des phrases depuis tes sessions de pratique pour les revoir ici.
+          </p>
         </div>
       ) : (
-        <div style={{
-          border: "2px solid var(--color-border)",
-          borderRadius: "var(--radius-lg)",
-          overflow: "hidden",
-        }}>
+        <div
+          style={{
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            overflow: "hidden",
+          }}
+        >
           <table className="table">
             <thead>
               <tr>

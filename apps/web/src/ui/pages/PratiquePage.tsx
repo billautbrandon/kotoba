@@ -866,6 +866,14 @@ export function PratiquePage() {
   if (phase === "setup") {
     return (
       <div className="pratique">
+        <div className="pageHeader">
+          <div>
+            <h1 className="pageTitle">Pratique</h1>
+            <p className="pageSubtitle">
+              Phrases, construction, JLPT, conjugaison et écoute — générés à partir de ton vocabulaire.
+            </p>
+          </div>
+        </div>
         <div className="pratique__tabs">
           {(["phrases", "construction", "jlpt", "conjugaison", "ecoute"] as const).map((tab) => (
             <button

@@ -17,10 +17,13 @@ export function GrammarPage() {
       .finally(() => {
         if (!isCancelled) setIsLoading(false);
       });
-    return () => { isCancelled = true; };
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   async function handleDelete(noteId: number) {
+    if (!window.confirm("Supprimer cette fiche de grammaire ?")) return;
     try {
       await deleteGrammarNote(noteId);
       setNotes((previous) => previous.filter((note) => note.id !== noteId));
@@ -58,10 +61,15 @@ export function GrammarPage() {
       {isLoading ? (
         <div className="muted">Chargement…</div>
       ) : filteredNotes.length === 0 ? (
-        <div className="muted">
-          {searchQuery
-            ? "Aucune fiche trouvée pour cette recherche."
-            : "Aucune fiche de grammaire. Elles seront créées automatiquement quand tu cliqueras sur \"Comprendre cette erreur\" dans tes exercices."}
+        <div className="emptyState">
+          <p className="emptyState__title">
+            {searchQuery ? "Aucune fiche trouvée" : "Aucune fiche de grammaire"}
+          </p>
+          <p className="emptyState__text">
+            {searchQuery
+              ? "Essaie un autre mot-clé."
+              : "Les fiches sont créées automatiquement quand tu cliques sur « Comprendre cette erreur » dans tes exercices."}
+          </p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
@@ -69,7 +77,7 @@ export function GrammarPage() {
             <div
               key={note.id}
               style={{
-                border: "2px solid var(--color-border)",
+                border: "1px solid var(--color-border)",
                 borderRadius: "var(--radius-lg)",
                 overflow: "hidden",
               }}
@@ -95,7 +103,13 @@ export function GrammarPage() {
               >
                 <div>
                   <span style={{ fontWeight: 600, fontSize: "15px" }}>{note.topic}</span>
-                  <span style={{ marginLeft: "var(--space-3)", fontSize: "12px", color: "var(--color-text-soft)" }}>
+                  <span
+                    style={{
+                      marginLeft: "var(--space-3)",
+                      fontSize: "12px",
+                      color: "var(--color-text-soft)",
+                    }}
+                  >
                     {note.view_count} consultation{note.view_count !== 1 ? "s" : ""}
                   </span>
                 </div>
@@ -105,7 +119,12 @@ export function GrammarPage() {
               </div>
 
               {expandedNoteId === note.id && (
-                <div style={{ padding: "0 var(--space-4) var(--space-4)", borderTop: "1px solid var(--color-border)" }}>
+                <div
+                  style={{
+                    padding: "0 var(--space-4) var(--space-4)",
+                    borderTop: "1px solid var(--color-border)",
+                  }}
+                >
                   <div
                     style={{
                       fontSize: "14px",
@@ -116,12 +135,21 @@ export function GrammarPage() {
                   >
                     {note.content}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "var(--space-3)" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      marginTop: "var(--space-3)",
+                    }}
+                  >
                     <button
                       type="button"
                       className="button"
                       style={{ fontSize: "12px", padding: "2px 8px" }}
-                      onClick={(event) => { event.stopPropagation(); handleDelete(note.id); }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDelete(note.id);
+                      }}
                     >
                       Supprimer
                     </button>
