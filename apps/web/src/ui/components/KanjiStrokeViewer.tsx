@@ -86,11 +86,9 @@ export function KanjiStrokeViewer({
             }
           }
 
-          // Utiliser la couleur primaire directement (rouge vermillon) car les variables CSS ne fonctionnent pas dans SVG
-          // Numéros plus petits (rayon 4.5px, texte 4.5px) pour une meilleure lisibilité et ne pas masquer les traits
-          // Ajouter une bordure blanche fine pour mieux voir le numéro
+          // Couleur primaire pastel (les variables CSS ne sont pas fiables dans ce SVG inline)
           return `<g transform="${transform}">
-              <circle cx="${x}" cy="${y}" r="4.5" fill="#c73e1d" opacity="0.95" stroke="#ffffff" stroke-width="0.3"/>
+              <circle cx="${x}" cy="${y}" r="4.5" fill="#7b8cde" opacity="0.95" stroke="#ffffff" stroke-width="0.3"/>
               <text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-size="4.5" font-weight="700">${num}</text>
             </g>`;
         });

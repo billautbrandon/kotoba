@@ -5,14 +5,18 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from
 import type { User } from "../api";
 import {
   type SrsSummary,
-  type StreakInfo,
   downloadMissingKanjiSvgs,
   fetchMe,
-  fetchSeries,
   fetchSrsSummary,
-  fetchStreak,
   logoutUser,
 } from "../api";
+import {
+  HomeNavIcon,
+  PracticeNavIcon,
+  ReadingNavIcon,
+  SrsNavIcon,
+  VocabNavIcon,
+} from "./components/NavIcons";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { AdminPage } from "./pages/AdminPage";
 import { DialoguePage } from "./pages/DialoguePage";
@@ -47,11 +51,9 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [hasSeries, setHasSeries] = useState<boolean>(false);
   const [isDownloadingKanji, setIsDownloadingKanji] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [srsSummary, setSrsSummary] = useState<SrsSummary | null>(null);
-  const [streakInfo, setStreakInfo] = useState<StreakInfo | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,11 +75,6 @@ export function App() {
     window.addEventListener("keydown", handleShortcutKey);
     return () => window.removeEventListener("keydown", handleShortcutKey);
   }, []);
-
-  const isSeriesPage =
-    location.pathname.startsWith("/series/") ||
-    location.pathname.startsWith("/train/tag/") ||
-    location.pathname.startsWith("/train/srs/");
 
   useEffect(() => {
     let isMounted = true;
@@ -117,236 +114,212 @@ export function App() {
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setHasSeries(false);
       setSrsSummary(null);
-      setStreakInfo(null);
       return;
     }
     let isMounted = true;
-    async function checkSeries() {
+    async function loadSrsSummary() {
       try {
-        const series = await fetchSeries();
-        if (isMounted) setHasSeries(series.length > 0);
-      } catch {
-        if (isMounted) setHasSeries(false);
-      }
-    }
-    async function loadSrsAndStreak() {
-      try {
-        const [summary, streak] = await Promise.all([fetchSrsSummary(), fetchStreak()]);
-        if (isMounted) {
-          setSrsSummary(summary);
-          setStreakInfo(streak);
-        }
+        const summary = await fetchSrsSummary();
+        if (isMounted) setSrsSummary(summary);
       } catch {
         /* ignore */
       }
     }
-    checkSeries();
-    loadSrsAndStreak();
+    loadSrsSummary();
     return () => {
       isMounted = false;
     };
   }, [isAuthenticated]);
 
+  function goTo(path: string) {
+    setIsDropdownOpen(false);
+    navigate(path);
+  }
+
+  const isHomeActive =
+    location.pathname === "/" ||
+    location.pathname.startsWith("/series/") ||
+    location.pathname.startsWith("/train/tag/") ||
+    location.pathname.startsWith("/train/srs/");
+
   return (
     <div className="app">
       {isAuthenticated && (
         <header className="topbar">
-          <Link className="topbar__brand" to="/">
-            <span className="topbar__brandName">Kotoba</span>
-            <span className="topbar__brandKana">言葉</span>
-          </Link>
+          <div className="topbar__inner">
+            <Link className="topbar__brand" to="/">
+              <span className="topbar__brandName">Kotoba</span>
+              <span className="topbar__brandKana">言葉</span>
+            </Link>
 
-          <nav className="topbar__nav">
-            <NavLink
-              className={() =>
-                `topbar__navLink ${location.pathname === "/" || isSeriesPage ? "topbar__navLink--active" : ""} ${!hasSeries ? "topbar__navLink--disabled" : ""}`
-              }
-              to="/"
-              onClick={(e) => {
-                if (!hasSeries) e.preventDefault();
-              }}
-            >
-              Series
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
-              }
-              to="/srs"
-            >
-              SRS
-              {srsSummary && srsSummary.dueCount > 0 && (
-                <span className="topbar__badge">{srsSummary.dueCount}</span>
-              )}
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
-              }
-              to="/pratique"
-            >
-              Pratique
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
-              }
-              to="/dialogue"
-            >
-              Dialogue
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
-              }
-              to="/lecture"
-            >
-              Lecture
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
-              }
-              to="/dictionary"
-            >
-              Dico
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `topbar__navLink ${isActive || location.pathname === "/kanji-quiz" ? "topbar__navLink--active" : ""}`
-              }
-              to="/kanji"
-            >
-              Kanji
-            </NavLink>
-          </nav>
-
-          <div className="topbar__right" ref={dropdownRef}>
-            {streakInfo && (
-              <div
-                className="topbar__streak"
-                title={`${streakInfo.todayReviews}/${streakInfo.dailyGoal} révisions aujourd'hui`}
+            <nav className="topbar__nav">
+              <NavLink
+                className={() => `topbar__navLink ${isHomeActive ? "topbar__navLink--active" : ""}`}
+                to="/"
               >
-                <span className="topbar__streakIcon">🔥</span>
-                <span className="topbar__streakCount">{streakInfo.currentStreak}</span>
-                <div className="topbar__streakBar">
-                  <div
-                    className="topbar__streakBarFill"
-                    style={{
-                      width: `${Math.min(100, (streakInfo.todayReviews / Math.max(1, streakInfo.dailyGoal)) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-            <button
-              className="topbar__avatar"
-              type="button"
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              aria-label="Menu utilisateur"
-            >
-              {currentUser?.avatar_url ? (
-                <img src={currentUser.avatar_url} alt="" className="topbar__avatarImg" />
-              ) : (
-                getInitials(currentUser?.display_name ?? currentUser?.username ?? "?")
-              )}
-            </button>
+                <HomeNavIcon />
+                <span className="topbar__navLabel">Accueil</span>
+              </NavLink>
+              <NavLink
+                className={({ isActive }) =>
+                  `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
+                }
+                to="/dictionary"
+              >
+                <VocabNavIcon />
+                <span className="topbar__navLabel">Vocabulaire</span>
+              </NavLink>
+              <NavLink
+                className={({ isActive }) =>
+                  `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
+                }
+                to="/srs"
+              >
+                <SrsNavIcon />
+                <span className="topbar__navLabel">SRS</span>
+                {srsSummary && srsSummary.dueCount > 0 && (
+                  <span className="topbar__badge">{srsSummary.dueCount}</span>
+                )}
+              </NavLink>
+              <NavLink
+                className={({ isActive }) =>
+                  `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
+                }
+                to="/pratique"
+              >
+                <PracticeNavIcon />
+                <span className="topbar__navLabel">Pratique</span>
+              </NavLink>
+              <NavLink
+                className={({ isActive }) =>
+                  `topbar__navLink ${isActive ? "topbar__navLink--active" : ""}`
+                }
+                to="/lecture"
+              >
+                <ReadingNavIcon />
+                <span className="topbar__navLabel">Lecture</span>
+              </NavLink>
+            </nav>
 
-            {isDropdownOpen && (
-              <div className="dropdown">
-                <div className="dropdown__header">
-                  {currentUser?.display_name ?? currentUser?.username}
+            <div className="topbar__right" ref={dropdownRef}>
+              <button
+                className="topbar__avatar"
+                type="button"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                aria-label="Menu utilisateur"
+              >
+                {currentUser?.avatar_url ? (
+                  <img src={currentUser.avatar_url} alt="" className="topbar__avatarImg" />
+                ) : (
+                  getInitials(currentUser?.display_name ?? currentUser?.username ?? "?")
+                )}
+              </button>
+
+              {isDropdownOpen && (
+                <div className="dropdown">
+                  <div className="dropdown__header">
+                    {currentUser?.display_name ?? currentUser?.username}
+                  </div>
+                  <div className="dropdown__section">Pratique</div>
+                  <button
+                    className="dropdown__item"
+                    type="button"
+                    onClick={() => goTo("/dialogue")}
+                  >
+                    Dialogue
+                  </button>
+                  <button className="dropdown__item" type="button" onClick={() => goTo("/kanji")}>
+                    Kanji
+                  </button>
+                  <button
+                    className="dropdown__item"
+                    type="button"
+                    onClick={() => goTo("/kanji-quiz")}
+                  >
+                    Quiz kanji
+                  </button>
+                  <div className="dropdown__separator" />
+                  <div className="dropdown__section">Vocabulaire</div>
+                  <button className="dropdown__item" type="button" onClick={() => goTo("/words")}>
+                    Mots
+                  </button>
+                  <button
+                    className="dropdown__item"
+                    type="button"
+                    onClick={() => goTo("/difficult")}
+                  >
+                    Mots difficiles
+                  </button>
+                  <button
+                    className="dropdown__item"
+                    type="button"
+                    onClick={() => goTo("/phrases-bank")}
+                  >
+                    Banque de phrases
+                  </button>
+                  <button
+                    className="dropdown__item"
+                    type="button"
+                    onClick={() => goTo("/grammaire")}
+                  >
+                    Grammaire
+                  </button>
+                  <div className="dropdown__separator" />
+                  <button className="dropdown__item" type="button" onClick={() => goTo("/stats")}>
+                    Statistiques
+                  </button>
+                  <button
+                    className="dropdown__item"
+                    type="button"
+                    onClick={() => goTo("/settings")}
+                  >
+                    Paramètres
+                  </button>
+                  {currentUser?.is_admin === 1 && (
+                    <button className="dropdown__item" type="button" onClick={() => goTo("/admin")}>
+                      Administration
+                    </button>
+                  )}
+                  <button
+                    className="dropdown__item"
+                    type="button"
+                    disabled={isDownloadingKanji}
+                    onClick={async () => {
+                      setIsDropdownOpen(false);
+                      setIsDownloadingKanji(true);
+                      try {
+                        const result = await downloadMissingKanjiSvgs();
+                        alert(
+                          `Terminé: ${result.downloaded} kanji téléchargé(s) sur ${result.missingCount} manquant(s). ${result.failed} échec(s).`,
+                        );
+                      } catch (error) {
+                        alert(
+                          `Erreur: ${error instanceof Error ? error.message : "Erreur inconnue"}`,
+                        );
+                      } finally {
+                        setIsDownloadingKanji(false);
+                      }
+                    }}
+                  >
+                    {isDownloadingKanji ? "Téléchargement..." : "Télécharger les kanji"}
+                  </button>
+                  <div className="dropdown__separator" />
+                  <button
+                    className="dropdown__item dropdown__item--danger"
+                    type="button"
+                    onClick={async () => {
+                      await logoutUser();
+                      setCurrentUser(null);
+                      setIsDropdownOpen(false);
+                      navigate("/login", { replace: true });
+                    }}
+                  >
+                    Déconnexion
+                  </button>
                 </div>
-                <button
-                  className="dropdown__item"
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    navigate("/stats");
-                  }}
-                >
-                  Statistiques
-                </button>
-                <button
-                  className="dropdown__item"
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    navigate("/phrases-bank");
-                  }}
-                >
-                  Banque de phrases
-                </button>
-                <button
-                  className="dropdown__item"
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    navigate("/words");
-                  }}
-                >
-                  Mots
-                </button>
-                <button
-                  className="dropdown__item"
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    navigate("/grammaire");
-                  }}
-                >
-                  Grammaire
-                </button>
-                <button
-                  className="dropdown__item"
-                  type="button"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    navigate("/settings");
-                  }}
-                >
-                  Parametres
-                </button>
-                <button
-                  className="dropdown__item"
-                  type="button"
-                  disabled={isDownloadingKanji}
-                  onClick={async () => {
-                    setIsDropdownOpen(false);
-                    setIsDownloadingKanji(true);
-                    try {
-                      const result = await downloadMissingKanjiSvgs();
-                      alert(
-                        `Terminé: ${result.downloaded} kanji téléchargé(s) sur ${result.missingCount} manquant(s). ${result.failed} échec(s).`,
-                      );
-                    } catch (error) {
-                      alert(
-                        `Erreur: ${error instanceof Error ? error.message : "Erreur inconnue"}`,
-                      );
-                    } finally {
-                      setIsDownloadingKanji(false);
-                    }
-                  }}
-                >
-                  {isDownloadingKanji ? "Telechargement..." : "Telecharger les kanji"}
-                </button>
-                <div className="dropdown__separator" />
-                <button
-                  className="dropdown__item dropdown__item--danger"
-                  type="button"
-                  onClick={async () => {
-                    await logoutUser();
-                    setCurrentUser(null);
-                    setIsDropdownOpen(false);
-                    navigate("/login", { replace: true });
-                  }}
-                >
-                  Deconnexion
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </header>
       )}
@@ -389,7 +362,7 @@ export function App() {
               )
             }
           />
-          <Route path="/" element={requireAuth(<HomePage />)} />
+          <Route path="/" element={requireAuth(<HomePage currentUser={currentUser} />)} />
           <Route path="/train" element={<Navigate to="/" replace />} />
           <Route path="/train/difficult" element={requireAuth(<TrainPage mode="difficult" />)} />
           <Route path="/train/tag/:tagId" element={requireAuth(<TrainPage mode="tag" />)} />

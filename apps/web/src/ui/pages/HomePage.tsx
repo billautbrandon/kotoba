@@ -1,8 +1,30 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { fetchSeries } from "../../api";
-import { DailyChallengeCard } from "../components/DailyChallengeCard";
+import type {
+  ActivityDay,
+  SrsSummary,
+  SrsWords,
+  StatsOverview,
+  StreakInfo,
+  User,
+  WordWithStats,
+} from "../../api";
+import {
+  fetchActivityData,
+  fetchDueWords,
+  fetchSeries,
+  fetchSrsSummary,
+  fetchSrsWords,
+  fetchStatsOverview,
+  fetchStreak,
+} from "../../api";
+import { BadgeGrid } from "../components/BadgeGrid";
+import { DashboardActivityCard } from "../components/DashboardActivityCard";
+import { SessionHeroCard } from "../components/SessionHeroCard";
+import { SrsProgressCard } from "../components/SrsProgressCard";
+import { StudyQueueCard } from "../components/StudyQueueCard";
+import { VocabProgressCard } from "../components/VocabProgressCard";
 
 type SeriesRow = {
   tagId: number;
@@ -10,6 +32,10 @@ type SeriesRow = {
   wordsCount: number;
   totalScore: number;
   lastReviewedAt: string | null;
+};
+
+type HomePageProps = {
+  currentUser: User | null;
 };
 
 function formatRelativeDate(isoDate: string): string {
@@ -27,10 +53,16 @@ function formatRelativeDate(isoDate: string): string {
   return date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 }
 
-export function HomePage() {
+export function HomePage({ currentUser }: HomePageProps) {
   const navigate = useNavigate();
   const [series, setSeries] = useState<SeriesRow[] | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [srsSummary, setSrsSummary] = useState<SrsSummary | null>(null);
+  const [srsWords, setSrsWords] = useState<SrsWords | null>(null);
+  const [dueWords, setDueWords] = useState<WordWithStats[]>([]);
+  const [overview, setOverview] = useState<StatsOverview | null>(null);
+  const [activity, setActivity] = useState<ActivityDay[]>([]);
+  const [streakInfo, setStreakInfo] = useState<StreakInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,19 +71,31 @@ export function HomePage() {
       setIsLoading(true);
       setErrorMessage(null);
       try {
-        const loadedSeries = await fetchSeries();
+        const [loadedSeries, summary, words, due, overviewData, activityData, streak] =
+          await Promise.all([
+            fetchSeries(),
+            fetchSrsSummary(),
+            fetchSrsWords(),
+            fetchDueWords(),
+            fetchStatsOverview(),
+            fetchActivityData(),
+            fetchStreak(),
+          ]);
         if (!isCancelled) {
           setSeries(loadedSeries);
+          setSrsSummary(summary);
+          setSrsWords(words);
+          setDueWords(due.words);
+          setOverview(overviewData);
+          setActivity(activityData.activity);
+          setStreakInfo(streak);
         }
       } catch (error) {
         if (!isCancelled) {
           setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-          setSeries([]);
         }
       } finally {
-        if (!isCancelled) {
-          setIsLoading(false);
-        }
+        if (!isCancelled) setIsLoading(false);
       }
     }
 
@@ -66,49 +110,74 @@ export function HomePage() {
     return series.reduce((accumulator, row) => accumulator + row.wordsCount, 0);
   }, [series]);
 
-  return (
-    <div>
-      <div className="pageHeader">
-        <div>
-          <h1 className="pageTitle">Séries</h1>
-          <p className="pageSubtitle">
-            Lance une session d'entraînement par tag. ({totalWords} mots au total, tags inclus)
-          </p>
-        </div>
-        <button className="button button--primary" type="button" onClick={() => navigate("/words")}>
-          + Ajouter du vocabulaire
-        </button>
-      </div>
+  const newCount = srsSummary?.newCount ?? 0;
+  const dueTodayCount = Math.max(0, (srsSummary?.dueCount ?? 0) - newCount);
+  const duePreview = dueWords.slice(0, dueTodayCount);
+  const newPreview = dueWords.slice(dueTodayCount);
 
-      <DailyChallengeCard />
+  return (
+    <div className="dashboard">
+      {errorMessage ? <div className="formError">{errorMessage}</div> : null}
 
       {isLoading ? (
-        <div className="muted" style={{ marginTop: "var(--space-6)" }}>
-          Chargement…
+        <div className="muted">Chargement du tableau de bord…</div>
+      ) : (
+        <div className="dashboard__grid">
+          <SessionHeroCard
+            currentUser={currentUser}
+            dueCount={srsSummary?.dueCount ?? 0}
+            todayReviews={streakInfo?.todayReviews ?? 0}
+            previewWords={dueWords}
+            onStartSession={() => navigate("/train/srs/due")}
+          />
+          <VocabProgressCard overview={overview} streakInfo={streakInfo} activity={activity} />
+          <SrsProgressCard summary={srsSummary} overview={overview} />
+          <StudyQueueCard
+            weakest={{
+              label: "Plus faibles",
+              count: srsWords?.hard.length ?? 0,
+              words: srsWords?.hard ?? [],
+            }}
+            dueToday={{
+              label: "Due aujourd'hui",
+              count: dueTodayCount,
+              words: duePreview,
+            }}
+            newWords={{
+              label: "Nouveaux",
+              count: newCount,
+              words: newPreview,
+            }}
+          />
+          <DashboardActivityCard activity={activity} streakInfo={streakInfo} overview={overview} />
+          <BadgeGrid variant="compact" />
         </div>
-      ) : null}
+      )}
 
-      {errorMessage ? (
-        <div className="formError" style={{ marginTop: "var(--space-6)" }}>
-          {errorMessage}
+      <div className="dashCard dashCard--wide">
+        <div className="seriesCard__header">
+          <div>
+            <h2 className="seriesCard__title">Séries</h2>
+            <p className="seriesCard__subtitle">
+              Lance une session d'entraînement par tag ({totalWords} mots au total).
+            </p>
+          </div>
+          <button
+            className="button button--primary"
+            type="button"
+            onClick={() => navigate("/words")}
+          >
+            + Ajouter du vocabulaire
+          </button>
         </div>
-      ) : null}
 
-      {!isLoading && series && series.length === 0 ? (
-        <div className="muted" style={{ marginTop: "var(--space-6)" }}>
-          Aucune série: crée des tags et assigne-les à des mots dans "Mots".
-        </div>
-      ) : null}
+        {!isLoading && series && series.length === 0 ? (
+          <div className="seriesCard__empty">
+            Aucune série : crée des tags et assigne-les à des mots dans « Mots ».
+          </div>
+        ) : null}
 
-      {series && series.length > 0 ? (
-        <div
-          style={{
-            marginTop: "var(--space-8)",
-            border: "2px solid var(--color-border)",
-            borderRadius: "var(--radius-lg)",
-            overflow: "hidden",
-          }}
-        >
+        {series && series.length > 0 ? (
           <table className="table">
             <thead>
               <tr>
@@ -148,8 +217,8 @@ export function HomePage() {
               ))}
             </tbody>
           </table>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   type ActivityDay,
@@ -10,6 +10,7 @@ import {
   fetchStatsOverview,
   fetchStreak,
 } from "../../api";
+import { ActivityHeatmap } from "../components/ActivityHeatmap";
 import { BadgeGrid } from "../components/BadgeGrid";
 import { WeakPointsPanel } from "../components/WeakPointsPanel";
 
@@ -108,9 +109,9 @@ function OverviewCard({ label, value }: { label: string; value: string | number 
 function SrsDistributionChart({ summary }: { summary: SrsSummary }) {
   const categories = [
     { label: "Nouveaux", value: summary.newCount, color: "var(--color-muted)" },
-    { label: "En cours", value: summary.learningCount, color: "#f59e0b" },
-    { label: "Gradués", value: summary.graduatedCount, color: "#3b82f6" },
-    { label: "Maîtrisés", value: summary.masteredCount, color: "#22c55e" },
+    { label: "En cours", value: summary.learningCount, color: "var(--color-warning)" },
+    { label: "Gradués", value: summary.graduatedCount, color: "var(--color-primary)" },
+    { label: "Maîtrisés", value: summary.masteredCount, color: "var(--color-success)" },
   ];
   const maxValue = Math.max(1, ...categories.map((category) => category.value));
 
@@ -131,96 +132,6 @@ function SrsDistributionChart({ summary }: { summary: SrsSummary }) {
           <div className="srsDistribution__count">{category.value}</div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function ActivityHeatmap({ activity }: { activity: ActivityDay[] }) {
-  const heatmapData = useMemo(() => {
-    const activityMap = new Map(activity.map((day) => [day.activity_date, day.reviews_count]));
-
-    const today = new Date();
-    const dayOfWeek = today.getDay();
-    const endDate = new Date(today);
-    endDate.setDate(endDate.getDate() + (6 - dayOfWeek));
-
-    const startDate = new Date(endDate);
-    startDate.setDate(startDate.getDate() - 364);
-
-    const weeks: { date: string; count: number; dayOfWeek: number }[][] = [];
-    let currentWeek: { date: string; count: number; dayOfWeek: number }[] = [];
-    const cursor = new Date(startDate);
-
-    while (cursor <= endDate) {
-      const dateStr = cursor.toISOString().slice(0, 10);
-      const count = activityMap.get(dateStr) ?? 0;
-      const weekDay = cursor.getDay();
-
-      currentWeek.push({ date: dateStr, count, dayOfWeek: weekDay });
-
-      if (weekDay === 6) {
-        weeks.push(currentWeek);
-        currentWeek = [];
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    if (currentWeek.length > 0) weeks.push(currentWeek);
-
-    return weeks;
-  }, [activity]);
-
-  const maxCount = useMemo(() => {
-    let maximum = 1;
-    for (const week of heatmapData) {
-      for (const day of week) {
-        if (day.count > maximum) maximum = day.count;
-      }
-    }
-    return maximum;
-  }, [heatmapData]);
-
-  function getIntensity(count: number): string {
-    if (count === 0) return "var(--color-heatmap-0, #ebedf0)";
-    const ratio = count / maxCount;
-    if (ratio < 0.25) return "var(--color-heatmap-1, #9be9a8)";
-    if (ratio < 0.5) return "var(--color-heatmap-2, #40c463)";
-    if (ratio < 0.75) return "var(--color-heatmap-3, #30a14e)";
-    return "var(--color-heatmap-4, #216e39)";
-  }
-
-  const dayLabels = [
-    { key: "dim", label: "Dim" },
-    { key: "lun", label: "" },
-    { key: "mar", label: "Mar" },
-    { key: "mer", label: "" },
-    { key: "jeu", label: "Jeu" },
-    { key: "ven", label: "" },
-    { key: "sam", label: "Sam" },
-  ];
-
-  return (
-    <div className="heatmap">
-      <div className="heatmap__labels">
-        {dayLabels.map((day) => (
-          <div key={day.key} className="heatmap__dayLabel">
-            {day.label}
-          </div>
-        ))}
-      </div>
-      <div className="heatmap__grid">
-        {heatmapData.map((week) => (
-          <div key={week[0]?.date ?? "empty"} className="heatmap__week">
-            {week.map((day) => (
-              <div
-                key={day.date}
-                className="heatmap__cell"
-                style={{ backgroundColor: getIntensity(day.count) }}
-                title={`${day.date}: ${day.count} révisions`}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

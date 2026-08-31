@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+
 import { type BadgeDefinition, fetchBadges } from "../../api";
 
-export function BadgeGrid() {
+type BadgeGridProps = {
+  variant?: "full" | "compact";
+};
+
+export function BadgeGrid({ variant = "full" }: BadgeGridProps) {
   const [badges, setBadges] = useState<BadgeDefinition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -15,7 +21,9 @@ export function BadgeGrid() {
       .finally(() => {
         if (!isCancelled) setIsLoading(false);
       });
-    return () => { isCancelled = true; };
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   if (isLoading) return null;
@@ -23,50 +31,60 @@ export function BadgeGrid() {
   const earned = badges.filter((badge) => badge.earned_at !== null);
   const locked = badges.filter((badge) => badge.earned_at === null);
 
+  if (variant === "compact") {
+    const preview = [...earned, ...locked].slice(0, 9);
+    return (
+      <div className="dashCard">
+        <div className="dashCard__titleRow">
+          <h2 className="dashCard__title">
+            {earned.length} sur {badges.length} badges
+          </h2>
+          <Link className="dashCard__link" to="/stats">
+            Voir tout
+          </Link>
+        </div>
+        <div className="badgeCompact">
+          {preview.map((badge) => {
+            const isEarned = badge.earned_at !== null;
+            return (
+              <div
+                key={badge.id}
+                className={`badgeCompact__item${isEarned ? "" : " badgeCompact__item--locked"}`}
+                title={badge.description}
+              >
+                <div className="badgeCompact__icon">{isEarned ? badge.icon : "🔒"}</div>
+                <div className="badgeCompact__name">{badge.title}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="statsSection">
       <h2 className="statsSection__title">
         Badges ({earned.length}/{badges.length})
       </h2>
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-        gap: "var(--space-3)",
-      }}>
+      <div className="badgeGrid">
         {earned.map((badge) => (
-          <div key={badge.id} style={{
-            padding: "var(--space-3)",
-            border: "2px solid var(--color-border)",
-            borderRadius: "var(--radius-md)",
-            textAlign: "center",
-            background: "var(--color-surface)",
-          }}>
-            <div style={{ fontSize: "28px", marginBottom: "var(--space-1)" }}>{badge.icon}</div>
-            <div style={{ fontSize: "13px", fontWeight: 600 }}>{badge.title}</div>
-            <div style={{ fontSize: "11px", color: "var(--color-text-soft)", marginTop: "2px" }}>
-              {badge.description}
-            </div>
+          <div key={badge.id} className="badgeTile">
+            <div className="badgeTile__icon">{badge.icon}</div>
+            <div className="badgeTile__title">{badge.title}</div>
+            <div className="badgeTile__description">{badge.description}</div>
             {badge.earned_at && (
-              <div style={{ fontSize: "10px", color: "var(--color-text-soft)", marginTop: "var(--space-1)" }}>
+              <div className="badgeTile__date">
                 {new Date(badge.earned_at).toLocaleDateString("fr-FR")}
               </div>
             )}
           </div>
         ))}
         {locked.map((badge) => (
-          <div key={badge.id} style={{
-            padding: "var(--space-3)",
-            border: "2px solid var(--color-border)",
-            borderRadius: "var(--radius-md)",
-            textAlign: "center",
-            opacity: 0.4,
-            filter: "grayscale(1)",
-          }}>
-            <div style={{ fontSize: "28px", marginBottom: "var(--space-1)" }}>{badge.icon}</div>
-            <div style={{ fontSize: "13px", fontWeight: 600 }}>{badge.title}</div>
-            <div style={{ fontSize: "11px", color: "var(--color-text-soft)", marginTop: "2px" }}>
-              {badge.description}
-            </div>
+          <div key={badge.id} className="badgeTile badgeTile--locked">
+            <div className="badgeTile__icon">{badge.icon}</div>
+            <div className="badgeTile__title">{badge.title}</div>
+            <div className="badgeTile__description">{badge.description}</div>
           </div>
         ))}
       </div>
