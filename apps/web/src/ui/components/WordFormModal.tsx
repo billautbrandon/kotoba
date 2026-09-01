@@ -37,14 +37,23 @@ const emptyWordFormState: WordFormState = {
 type WordFormModalProps = {
   editingWord: WordWithTags | null;
   tags: Tag[];
+  defaultTagIds?: number[];
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onCreateTag: (name: string) => Promise<Tag>;
   onDeleteTag: (tag: Tag) => Promise<void>;
 };
 
-function buildInitialState(editingWord: WordWithTags | null): WordFormState {
-  if (!editingWord) return emptyWordFormState;
+function buildInitialState(
+  editingWord: WordWithTags | null,
+  defaultTagIds: number[] = [],
+): WordFormState {
+  if (!editingWord) {
+    return {
+      ...emptyWordFormState,
+      selectedTagIds: defaultTagIds,
+    };
+  }
   return {
     french: editingWord.french,
     romaji: editingWord.romaji ?? "",
@@ -66,8 +75,11 @@ export function WordFormModal({
   onSaved,
   onCreateTag,
   onDeleteTag,
+  defaultTagIds = [],
 }: WordFormModalProps) {
-  const [formState, setFormState] = useState<WordFormState>(() => buildInitialState(editingWord));
+  const [formState, setFormState] = useState<WordFormState>(() =>
+    buildInitialState(editingWord, defaultTagIds),
+  );
   const [newTagName, setNewTagName] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -75,10 +87,12 @@ export function WordFormModal({
   const baseId = useId();
   const isEditing = editingWord !== null;
 
+  const defaultTagKey = defaultTagIds.join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: defaultTagIds compared by value via defaultTagKey
   useEffect(() => {
-    setFormState(buildInitialState(editingWord));
+    setFormState(buildInitialState(editingWord, defaultTagIds));
     setErrorMessage(null);
-  }, [editingWord]);
+  }, [editingWord, defaultTagKey]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

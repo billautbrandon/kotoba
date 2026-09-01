@@ -1,70 +1,25 @@
-import type React from "react";
-import { useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 
-import { importWordsFromJson } from "../../api";
+import { type GeminiQuota, fetchGeminiQuota, generateWordsFromList } from "../../api";
+import { QuotaBar } from "./QuotaBar";
 
-const EXAMPLE_WORDS = [
-  {
-    french: "bonjour",
-    romaji: "konnichiwa",
-    kana: "こんにちは",
-    kanji: "今日は",
-    examples: [
-      {
-        jp: "今日は良い天気ですね。",
-        kana: "きょうはいいてんきですね。",
-        fr: "Il fait beau aujourd'hui.",
-      },
-    ],
-    tags: ["salutations"],
-  },
-  {
-    french: "merci",
-    romaji: "arigatou",
-    kana: "ありがとう",
-    kanji: "有難う",
-    tags: ["salutations"],
-  },
-];
+const MAX_IMPORT_WORDS = 40;
 
-type ImportableWord = {
-  french: string;
-  romaji?: string | null;
-  kana?: string | null;
-  kanji?: string | null;
-  note?: string | null;
-  examples?: Array<{ jp: string; kana: string; fr: string }>;
-  tags?: string[];
-};
+export function parseWordList(rawText: string): string[] {
+  const tokens = rawText
+    .split(/[\n,;、，]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
 
-type ImportPreview = {
-  words: ImportableWord[];
-  tagNames: string[];
-  sourceLabel: string;
-};
-
-function extractWords(parsed: unknown): ImportableWord[] {
-  const wordsToImport = Array.isArray(parsed)
-    ? parsed
-    : typeof parsed === "object" && parsed !== null && "words" in parsed
-      ? (parsed as { words: unknown }).words
-      : null;
-  if (!Array.isArray(wordsToImport)) {
-    throw new Error(
-      "Format invalide : un tableau de mots ou un objet { words: [...] } est attendu.",
-    );
+  const seenKeys = new Set<string>();
+  const uniqueWords: string[] = [];
+  for (const token of tokens) {
+    const normalizedKey = token.toLowerCase();
+    if (seenKeys.has(normalizedKey)) continue;
+    seenKeys.add(normalizedKey);
+    uniqueWords.push(token);
   }
-  return wordsToImport as ImportableWord[];
-}
-
-function collectTagNames(words: ImportableWord[]): string[] {
-  const tagNames = new Set<string>();
-  for (const word of words) {
-    for (const tagName of word.tags ?? []) {
-      if (tagName.trim()) tagNames.add(tagName.trim());
-    }
-  }
-  return [...tagNames].sort((first, second) => first.localeCompare(second));
+  return uniqueWords;
 }
 
 type ImportPanelProps = {
@@ -73,177 +28,138 @@ type ImportPanelProps = {
 };
 
 export function ImportPanel({ onImported, onError }: ImportPanelProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const [tagName, setTagName] = useState("");
+  const [wordListText, setWordListText] = useState("");
   const [isImporting, setIsImporting] = useState(false);
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [showPaste, setShowPaste] = useState(false);
-  const [pasteText, setPasteText] = useState("");
+  const [warningMessages, setWarningMessages] = useState<string[]>([]);
+  const [quota, setQuota] = useState<GeminiQuota | null>(null);
 
-  function resetPreview() {
-    setPreview(null);
-    setPasteText("");
-  }
+  useEffect(() => {
+    let isCancelled = false;
+    fetchGeminiQuota()
+      .then((loadedQuota) => {
+        if (!isCancelled) setQuota(loadedQuota);
+      })
+      .catch(() => {
+        if (!isCancelled) setQuota(null);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
-  function loadFromParsed(parsed: unknown, sourceLabel: string) {
-    const words = extractWords(parsed);
-    if (words.length === 0) {
-      throw new Error("Aucun mot trouvé dans ce JSON.");
-    }
-    setPreview({
-      words,
-      tagNames: collectTagNames(words),
-      sourceLabel,
-    });
-    setStatusMessage(null);
-    onError(null);
-  }
+  const parsedWords = useMemo(() => parseWordList(wordListText), [wordListText]);
+  const trimmedTagName = tagName.trim();
+  const isOverLimit = parsedWords.length > MAX_IMPORT_WORDS;
+  const canSubmit =
+    trimmedTagName.length > 0 && parsedWords.length > 0 && !isOverLimit && !isImporting;
 
-  async function loadFromText(text: string, sourceLabel: string) {
-    try {
-      const parsed: unknown = JSON.parse(text);
-      loadFromParsed(parsed, sourceLabel);
-    } catch (error) {
-      resetPreview();
-      onError(error instanceof Error ? error.message : "JSON invalide");
-    }
-  }
-
-  async function loadFromFile(file: File) {
-    const fileText = await file.text();
-    await loadFromText(fileText, file.name);
-  }
-
-  async function handleDrop(event: React.DragEvent<HTMLElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsDragging(false);
-    const file = event.dataTransfer.files?.[0];
-    if (!file) return;
-    await loadFromFile(file);
-  }
+    if (!canSubmit) return;
 
-  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    await loadFromFile(file);
-  }
+    if (!trimmedTagName) {
+      onError("Indique un titre de tag / série.");
+      return;
+    }
+    if (parsedWords.length === 0) {
+      onError("Colle au moins un mot.");
+      return;
+    }
+    if (isOverLimit) {
+      onError(`Limite de ${MAX_IMPORT_WORDS} mots par import. Réduis la liste.`);
+      return;
+    }
 
-  async function handleImport() {
-    if (!preview || isImporting) return;
     setIsImporting(true);
+    setStatusMessage(null);
+    setWarningMessages([]);
     onError(null);
+
     try {
-      const result = await importWordsFromJson(preview.words);
+      const result = await generateWordsFromList(trimmedTagName, parsedWords);
       await onImported();
-      setStatusMessage(
-        `${result.importedWordsCount} mot(s) importé(s), ${result.importedTagsCount} nouveau(x) tag(s).`,
-      );
-      resetPreview();
+      if (result.quota) {
+        setQuota(result.quota);
+      } else {
+        const refreshedQuota = await fetchGeminiQuota().catch(() => null);
+        if (refreshedQuota) setQuota(refreshedQuota);
+      }
+
+      const tagLabel = result.tag?.name ?? trimmedTagName;
+      setStatusMessage(`${result.createdCount} mot(s) créé(s) dans « ${tagLabel} ».`);
+      setWarningMessages(result.errors ?? []);
+      setWordListText("");
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Erreur pendant l'import");
+      onError(error instanceof Error ? error.message : "Erreur pendant l'import IA");
     } finally {
       setIsImporting(false);
     }
   }
 
   return (
-    <div className="importPanel">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json,application/json"
-        onChange={(event) => void handleFileChange(event)}
-        hidden
-      />
+    <form className="importPanel" onSubmit={(event) => void handleSubmit(event)}>
+      <div className="importPanel__header">
+        <h2 className="importPanel__title">Importer une liste avec l’IA</h2>
+        <p className="importPanel__lead">
+          Colle des mots (français ou japonais), donne un nom de série, et l’IA complète les fiches
+          (français, rōmaji, kana, kanji).
+        </p>
+      </div>
 
-      <button
-        type="button"
-        className={`importDropzone${isDragging ? " importDropzone--active" : ""}`}
-        onClick={() => fileInputRef.current?.click()}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setIsDragging(true);
-        }}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setIsDragging(true);
-        }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={(event) => void handleDrop(event)}
-      >
-        <div className="importDropzone__title">Glisse un fichier JSON ici</div>
-        <div className="importDropzone__hint">
-          ou clique pour choisir un fichier de backup / mots
-        </div>
-      </button>
+      {quota ? <QuotaBar quota={quota} /> : null}
 
-      {preview ? (
-        <div className="importPreview">
-          <div>
-            <div className="importPreview__title">{preview.sourceLabel}</div>
-            <div className="importPreview__meta">
-              {preview.words.length} mot{preview.words.length > 1 ? "s" : ""}
-              {preview.tagNames.length > 0 ? ` · ${preview.tagNames.join(", ")}` : ""}
-            </div>
-          </div>
-          <div className="importPreview__actions">
-            <button
-              className="button button--primary"
-              type="button"
-              onClick={() => void handleImport()}
-              disabled={isImporting}
-            >
-              {isImporting ? "Import…" : `Importer ${preview.words.length} mot(s)`}
-            </button>
-            <button className="button" type="button" onClick={resetPreview} disabled={isImporting}>
-              Annuler
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <label className="field">
+        <span className="field__label">Titre du tag / de la série</span>
+        <input
+          className="input"
+          type="text"
+          value={tagName}
+          onChange={(event) => setTagName(event.target.value)}
+          placeholder="Ex. Salutations, JLPT N5, Voyage…"
+          maxLength={80}
+          required
+          disabled={isImporting}
+        />
+      </label>
+
+      <label className="field">
+        <span className="field__label">Liste de mots</span>
+        <textarea
+          className="textarea importPanel__textarea"
+          value={wordListText}
+          onChange={(event) => setWordListText(event.target.value)}
+          placeholder={"bonjour\nmerci\n水\n食べる"}
+          disabled={isImporting}
+        />
+        <span className={`importPanel__count${isOverLimit ? " importPanel__count--error" : ""}`}>
+          {parsedWords.length === 0
+            ? "Un mot par ligne, ou séparés par des virgules."
+            : isOverLimit
+              ? `${parsedWords.length} mots — maximum ${MAX_IMPORT_WORDS} par import.`
+              : `${parsedWords.length} mot${parsedWords.length > 1 ? "s" : ""} prêt${parsedWords.length > 1 ? "s" : ""} à importer.`}
+        </span>
+      </label>
+
+      <div className="importPanel__actions">
+        <button className="button button--primary" type="submit" disabled={!canSubmit}>
+          {isImporting
+            ? "Génération…"
+            : parsedWords.length > 0
+              ? `Créer ${Math.min(parsedWords.length, MAX_IMPORT_WORDS)} mot(s)`
+              : "Créer les mots"}
+        </button>
+      </div>
 
       {statusMessage ? <div className="importPanel__status">{statusMessage}</div> : null}
-
-      <button
-        className="importPanel__toggle"
-        type="button"
-        onClick={() => setShowPaste((previous) => !previous)}
-      >
-        {showPaste ? "Masquer le collage JSON" : "Coller du JSON à la place"}
-      </button>
-
-      {showPaste ? (
-        <div className="importPanel__paste">
-          <textarea
-            className="textarea"
-            value={pasteText}
-            onChange={(event) => setPasteText(event.target.value)}
-            placeholder='[{"french":"bonjour","kana":"こんにちは","tags":["salutations"]}]'
-          />
-          <div className="importPreview__actions">
-            <button
-              className="button button--primary"
-              type="button"
-              disabled={!pasteText.trim()}
-              onClick={() => void loadFromText(pasteText, "Texte collé")}
-            >
-              Prévisualiser
-            </button>
-            <button
-              className="button"
-              type="button"
-              onClick={async () => {
-                await navigator.clipboard.writeText(JSON.stringify(EXAMPLE_WORDS, null, 2));
-                setStatusMessage("Exemple copié dans le presse-papier.");
-              }}
-            >
-              Copier un exemple
-            </button>
-          </div>
-        </div>
+      {warningMessages.length > 0 ? (
+        <ul className="importPanel__warnings">
+          {warningMessages.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
       ) : null}
-    </div>
+    </form>
   );
 }

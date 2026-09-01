@@ -1,10 +1,29 @@
-import React, { useEffect, useMemo, useState } from "react";
+import type React from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import type { WordWithTags } from "../../api";
-import { downloadTagAudio, fetchWordsWithTags } from "../../api";
+import type { Tag, WordWithStatsAndTags, WordWithTags } from "../../api";
+import { createTag, deleteTag, downloadTagAudio, fetchTags, fetchWordsWithTags } from "../../api";
 import { AudioButton } from "../components/AudioButton";
+import { EyeIcon, LayersIcon, PlayIcon } from "../components/NavIcons";
+import { WordFormModal } from "../components/WordFormModal";
 
 type DictionaryLanguage = "fr" | "romaji" | "kana" | "kanji";
+type ViewMode = "cards" | "list";
+type SeriesSort = "recent" | "alpha";
+
+type VocabSeries = {
+  key: string;
+  tagId: number | null;
+  tagName: string;
+  wordsCount: number;
+  reviewedCount: number;
+  masteredCount: number;
+  lastReviewedAt: string | null;
+  words: WordWithStatsAndTags[];
+};
+
+const MASTERY_STREAK = 10;
 
 const dictionaryLanguageLabels: Record<DictionaryLanguage, string> = {
   fr: "FR",
@@ -12,6 +31,8 @@ const dictionaryLanguageLabels: Record<DictionaryLanguage, string> = {
   kana: "Kana",
   kanji: "Kanji",
 };
+
+const UNTAGGED_KEY = "sans-serie";
 
 function getWordField(word: WordWithTags, language: DictionaryLanguage): string {
   if (language === "fr") return word.french;
@@ -35,8 +56,6 @@ function saveDictionaryLanguage(language: DictionaryLanguage) {
   window.localStorage.setItem("kotoba.dictionary.language", language);
 }
 
-type ViewMode = "cards" | "list";
-
 function loadViewMode(): ViewMode {
   const value = window.localStorage.getItem("kotoba.dictionary.viewMode");
   if (value === "cards" || value === "list") return value;
@@ -45,6 +64,16 @@ function loadViewMode(): ViewMode {
 
 function saveViewMode(mode: ViewMode) {
   window.localStorage.setItem("kotoba.dictionary.viewMode", mode);
+}
+
+function loadSeriesSort(): SeriesSort {
+  const value = window.localStorage.getItem("kotoba.dictionary.seriesSort");
+  if (value === "recent" || value === "alpha") return value;
+  return "recent";
+}
+
+function saveSeriesSort(sort: SeriesSort) {
+  window.localStorage.setItem("kotoba.dictionary.seriesSort", sort);
 }
 
 function renderWithFurigana(kanji: string, kana: string | null | undefined): React.ReactNode {
@@ -59,20 +88,82 @@ function renderWithFurigana(kanji: string, kana: string | null | undefined): Rea
   );
 }
 
+function formatRelativeDate(isoDate: string): string {
+  const date = new Date(isoDate);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+  const diffDays = Math.floor(diffMs / 86_400_000);
+
+  if (diffMinutes < 1) return "À l'instant";
+  if (diffMinutes < 60) return `Il y a ${diffMinutes} min`;
+  if (diffHours < 24) return `Il y a ${diffHours} h`;
+  if (diffDays < 7) return `Il y a ${diffDays} j`;
+  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+function wordMatchesQuery(word: WordWithTags, query: string): boolean {
+  const fields = [word.french, word.romaji, word.kana, word.kanji, word.note];
+  return fields.some((field) => field?.toLowerCase().includes(query));
+}
+
+function isMasteredWord(word: WordWithStatsAndTags): boolean {
+  return (word.consecutive_success_count ?? 0) >= MASTERY_STREAK;
+}
+
+function laterDate(left: string | null, right: string | null): string | null {
+  if (!left) return right;
+  if (!right) return left;
+  return new Date(left).getTime() >= new Date(right).getTime() ? left : right;
+}
+
+function emptySeries(key: string, tagId: number | null, tagName: string): VocabSeries {
+  return {
+    key,
+    tagId,
+    tagName,
+    wordsCount: 0,
+    reviewedCount: 0,
+    masteredCount: 0,
+    lastReviewedAt: null,
+    words: [],
+  };
+}
+
+function addWordToSeries(series: VocabSeries, word: WordWithStatsAndTags): VocabSeries {
+  series.words.push(word);
+  series.wordsCount = series.words.length;
+  if (word.last_reviewed_at) series.reviewedCount += 1;
+  if (isMasteredWord(word)) series.masteredCount += 1;
+  series.lastReviewedAt = laterDate(series.lastReviewedAt, word.last_reviewed_at);
+  return series;
+}
+
+function pluralize(count: number, singular: string, plural: string): string {
+  return `${count} ${count > 1 ? plural : singular}`;
+}
+
 export function DictionaryPage() {
-  const [words, setWords] = useState<WordWithTags[]>([]);
+  const navigate = useNavigate();
+  const [words, setWords] = useState<WordWithStatsAndTags[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [frontLanguage, setFrontLanguage] = useState<DictionaryLanguage>(() =>
     loadDictionaryLanguage(),
   );
   const [flippedWordIds, setFlippedWordIds] = useState<Set<number>>(() => new Set());
-  const [collapsedTags, setCollapsedTags] = useState<Record<string, boolean>>(() => ({}));
   const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode());
+  const [seriesSort, setSeriesSort] = useState<SeriesSort>(() => loadSeriesSort());
   const [searchQuery, setSearchQuery] = useState("");
   const [downloadingTagId, setDownloadingTagId] = useState<number | null>(null);
   const [showFurigana, setShowFurigana] = useState(false);
   const [expandedWord, setExpandedWord] = useState<WordWithTags | null>(null);
+  const [openSeriesKey, setOpenSeriesKey] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     saveDictionaryLanguage(frontLanguage);
@@ -83,36 +174,41 @@ export function DictionaryPage() {
   }, [viewMode]);
 
   useEffect(() => {
+    saveSeriesSort(seriesSort);
+  }, [seriesSort]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset flips when navigating between series
+  useEffect(() => {
+    setFlippedWordIds(new Set());
+  }, [openSeriesKey]);
+
+  async function reloadVocabulary() {
+    const [fetchedWords, fetchedTags] = await Promise.all([
+      fetchWordsWithTags(true) as Promise<WordWithStatsAndTags[]>,
+      fetchTags(),
+    ]);
+    setWords(fetchedWords);
+    setTags(fetchedTags);
+  }
+
+  useEffect(() => {
     let isMounted = true;
     async function load() {
       setIsLoading(true);
       setErrorMessage(null);
       try {
-        const fetched = (await fetchWordsWithTags(false)) as WordWithTags[];
+        const [fetchedWords, fetchedTags] = await Promise.all([
+          fetchWordsWithTags(true) as Promise<WordWithStatsAndTags[]>,
+          fetchTags(),
+        ]);
         if (isMounted) {
-          setWords(fetched);
-          const initialCollapsed: Record<string, boolean> = {};
-          const tagSet = new Set<string>();
-          fetched.forEach((word) => {
-            if (word.tags.length === 0) {
-              tagSet.add("Sans tag");
-            } else {
-              word.tags.forEach((tag) => tagSet.add(tag.name));
-            }
-          });
-          Array.from(tagSet).forEach((tag) => {
-            initialCollapsed[tag] = true;
-          });
-          setCollapsedTags(initialCollapsed);
+          setWords(fetchedWords);
+          setTags(fetchedTags);
         }
       } catch {
-        if (isMounted) {
-          setErrorMessage("Impossible de charger le dictionnaire.");
-        }
+        if (isMounted) setErrorMessage("Impossible de charger le vocabulaire.");
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        if (isMounted) setIsLoading(false);
       }
     }
     load();
@@ -121,56 +217,132 @@ export function DictionaryPage() {
     };
   }, []);
 
-  const otherLanguages = useMemo(() => getOtherLanguages(frontLanguage), [frontLanguage]);
+  const seriesList = useMemo(() => {
+    const grouped = new Map<string, VocabSeries>();
 
-  const filteredWords = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return words;
-    return words.filter((word) => {
-      const fields = [word.french, word.romaji, word.kana, word.kanji, word.note];
-      return fields.some((field) => field?.toLowerCase().includes(query));
-    });
-  }, [words, searchQuery]);
-
-  const isSearchActive = searchQuery.trim().length > 0;
-
-  const allWordIds = useMemo(() => new Set(filteredWords.map((word) => word.id)), [filteredWords]);
-  const allFlipped = useMemo(
-    () => allWordIds.size > 0 && Array.from(allWordIds).every((id) => flippedWordIds.has(id)),
-    [allWordIds, flippedWordIds],
-  );
-
-  const wordsByTag = useMemo(() => {
-    const grouped = new Map<string, { tagId: number | null; words: WordWithTags[] }>();
-    filteredWords.forEach((word) => {
+    for (const word of words) {
       if (word.tags.length === 0) {
-        const existing = grouped.get("Sans tag") ?? { tagId: null, words: [] };
-        existing.words.push(word);
-        grouped.set("Sans tag", existing);
-      } else {
-        word.tags.forEach((tag) => {
-          const existing = grouped.get(tag.name) ?? { tagId: tag.id, words: [] };
-          existing.words.push(word);
-          grouped.set(tag.name, existing);
-        });
+        const existing = grouped.get(UNTAGGED_KEY) ?? emptySeries(UNTAGGED_KEY, null, "Sans série");
+        grouped.set(UNTAGGED_KEY, addWordToSeries(existing, word));
+        continue;
       }
-    });
-    const sortedTags = Array.from(grouped.keys()).sort((a, b) => {
-      if (a === "Sans tag") return 1;
-      if (b === "Sans tag") return -1;
-      return a.localeCompare(b);
-    });
-    return sortedTags.map((tagName) => {
-      const group = grouped.get(tagName);
-      return { tag: tagName, tagId: group?.tagId ?? null, words: group?.words ?? [] };
-    });
-  }, [filteredWords]);
+      for (const tag of word.tags) {
+        const key = String(tag.id);
+        const existing = grouped.get(key) ?? emptySeries(key, tag.id, tag.name);
+        grouped.set(key, addWordToSeries(existing, word));
+      }
+    }
 
-  function toggleTag(tag: string) {
-    setCollapsedTags((prev) => ({
-      ...prev,
-      [tag]: !(prev[tag] ?? false),
-    }));
+    return Array.from(grouped.values());
+  }, [words]);
+
+  const query = searchQuery.trim().toLowerCase();
+  const visibleSeries = useMemo(() => {
+    const filtered = !query
+      ? seriesList
+      : seriesList
+          .map((series) => {
+            const nameMatches = series.tagName.toLowerCase().includes(query);
+            const matchingWords = series.words.filter((word) => wordMatchesQuery(word, query));
+            if (!nameMatches && matchingWords.length === 0) return null;
+            if (nameMatches) return series;
+            return {
+              ...series,
+              words: matchingWords,
+              wordsCount: matchingWords.length,
+              reviewedCount: matchingWords.filter((word) => Boolean(word.last_reviewed_at)).length,
+              masteredCount: matchingWords.filter((word) => isMasteredWord(word)).length,
+            };
+          })
+          .filter((series): series is VocabSeries => series !== null);
+
+    return [...filtered].sort((left, right) => {
+      if (left.key === UNTAGGED_KEY) return 1;
+      if (right.key === UNTAGGED_KEY) return -1;
+      if (seriesSort === "alpha") {
+        return left.tagName.localeCompare(right.tagName, "fr");
+      }
+      const leftTime = left.lastReviewedAt ? new Date(left.lastReviewedAt).getTime() : 0;
+      const rightTime = right.lastReviewedAt ? new Date(right.lastReviewedAt).getTime() : 0;
+      if (leftTime !== rightTime) return rightTime - leftTime;
+      return left.tagName.localeCompare(right.tagName, "fr");
+    });
+  }, [query, seriesList, seriesSort]);
+
+  const openSeries = seriesList.find((series) => series.key === openSeriesKey) ?? null;
+  const openSeriesWords = useMemo(() => {
+    if (!openSeries) return [];
+    if (!query) return openSeries.words;
+    if (openSeries.tagName.toLowerCase().includes(query)) return openSeries.words;
+    return openSeries.words.filter((word) => wordMatchesQuery(word, query));
+  }, [openSeries, query]);
+
+  const selectedSeries = visibleSeries.filter(
+    (series) => selectedKeys.has(series.key) && series.tagId !== null,
+  );
+  const selectedWordsCount = selectedSeries.reduce((total, series) => total + series.wordsCount, 0);
+  const totalWordsCount = words.length;
+  const taggedSeriesCount = seriesList.filter((series) => series.tagId !== null).length;
+
+  useEffect(() => {
+    if (isModalOpen || expandedWord) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (openSeries) {
+        setOpenSeriesKey(null);
+        return;
+      }
+      if (isSelecting) exitSelectMode();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [openSeries, isModalOpen, expandedWord, isSelecting]);
+
+  function toggleSelected(key: string) {
+    setSelectedKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setIsSelecting(false);
+    setSelectedKeys(new Set());
+  }
+
+  function toggleSelectMode() {
+    if (isSelecting) {
+      exitSelectMode();
+      return;
+    }
+    setIsSelecting(true);
+  }
+
+  function startSeries(series: VocabSeries) {
+    if (!series.tagId) return;
+    navigate(`/train/tag/${series.tagId}?name=${encodeURIComponent(series.tagName)}`);
+  }
+
+  function handleSeriesCardClick(series: VocabSeries) {
+    if (isSelecting) {
+      if (series.tagId === null) return;
+      toggleSelected(series.key);
+      return;
+    }
+    if (series.tagId) {
+      startSeries(series);
+      return;
+    }
+    setOpenSeriesKey(series.key);
+  }
+
+  function startSelectedSeries() {
+    if (selectedSeries.length === 0) return;
+    const ids = selectedSeries.map((series) => series.tagId).join(",");
+    const names = selectedSeries.map((series) => series.tagName).join(", ");
+    navigate(`/train/tags?ids=${ids}&name=${encodeURIComponent(names)}`);
   }
 
   async function handleDownloadAudio(tagId: number, tagName: string) {
@@ -186,562 +358,474 @@ export function DictionaryPage() {
     }
   }
 
+  async function handleCreateTag(name: string): Promise<Tag> {
+    const createdTag = await createTag(name);
+    setTags((previous) => [...previous, createdTag]);
+    return createdTag;
+  }
+
+  async function handleDeleteTag(tag: Tag): Promise<void> {
+    await deleteTag(tag.id);
+    await reloadVocabulary();
+  }
+
+  function toggleFlipped(wordId: number) {
+    setFlippedWordIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(wordId)) next.delete(wordId);
+      else next.add(wordId);
+      return next;
+    });
+  }
+
+  const otherLanguages = getOtherLanguages(frontLanguage);
+
   return (
-    <div>
+    <div
+      className={`vocabPage${openSeries ? " vocabPage--detail" : ""}${
+        isSelecting && !openSeries ? " vocabPage--selecting" : ""
+      }`}
+    >
       <div className="pageHeader">
         <div>
-          <h1 className="pageTitle">Dictionnaire</h1>
+          {openSeries ? (
+            <button
+              className="vocabPage__back"
+              type="button"
+              onClick={() => setOpenSeriesKey(null)}
+            >
+              ← Toutes les séries
+            </button>
+          ) : null}
+          <h1 className="pageTitle">{openSeries ? openSeries.tagName : "Vocabulaire"}</h1>
           <p className="pageSubtitle">
-            {viewMode === "cards"
-              ? "Toutes tes cartes, en grille. Clique pour retourner."
-              : "Tous tes mots en liste. Clique pour voir les détails."}
+            {openSeries
+              ? `${pluralize(openSeries.wordsCount, "mot", "mots")}${
+                  openSeries.lastReviewedAt
+                    ? ` · révisée ${formatRelativeDate(openSeries.lastReviewedAt).toLowerCase()}`
+                    : " · pas encore révisée"
+                }`
+              : isLoading
+                ? "Tes collections de mots."
+                : `${pluralize(taggedSeriesCount, "série", "séries")} · ${pluralize(totalWordsCount, "mot", "mots")}`}
           </p>
         </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: "var(--space-5)",
-            alignItems: "flex-end",
-            flexWrap: "wrap",
-          }}
-        >
-          <div className="field field--inline">
-            <div className="field__label">Langue</div>
-            <fieldset className="segmented">
-              <legend className="srOnly">Langue du dictionnaire</legend>
-              {(Object.keys(dictionaryLanguageLabels) as DictionaryLanguage[]).map((language) => {
-                const isSelected = language === frontLanguage;
-                return (
-                  <button
-                    key={language}
-                    type="button"
-                    className={`segmented__button ${isSelected ? "segmented__button--active" : ""}`}
-                    aria-pressed={isSelected}
-                    onClick={() => setFrontLanguage(language)}
-                  >
-                    {dictionaryLanguageLabels[language]}
-                  </button>
-                );
-              })}
-            </fieldset>
-          </div>
-
-          <div className="field field--inline">
-            <div className="field__label">Vue</div>
-            <div
-              style={{
-                display: "flex",
-                gap: "var(--space-2)",
-                border: "2px solid var(--color-border)",
-                borderRadius: "var(--radius-md)",
-                padding: "4px",
-                background: "var(--color-panel)",
-              }}
-            >
+        <div className="vocabPage__headerActions">
+          {openSeries?.tagId ? (
+            <>
               <button
+                className="button button--primary vocabPage__reviewBtn"
                 type="button"
-                onClick={() => setViewMode("cards")}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: "calc(var(--radius-md) - 2px)",
-                  border: "none",
-                  background: viewMode === "cards" ? "var(--color-primary)" : "transparent",
-                  color: viewMode === "cards" ? "#ffffff" : "var(--color-text-soft)",
-                  cursor: "pointer",
-                  fontWeight: viewMode === "cards" ? 700 : 600,
-                  fontSize: "16px",
-                  transition: "all 0.2s ease",
-                }}
-                aria-label="Vue en cartes"
+                onClick={() => startSeries(openSeries)}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ display: "block" }}
-                >
-                  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                  <path d="M5 3m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z" />
-                </svg>
+                <PlayIcon className="vocabPage__playIcon" />
+                Réviser
               </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("list")}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: "calc(var(--radius-md) - 2px)",
-                  border: "none",
-                  background: viewMode === "list" ? "var(--color-primary)" : "transparent",
-                  color: viewMode === "list" ? "#ffffff" : "var(--color-text-soft)",
-                  cursor: "pointer",
-                  fontWeight: viewMode === "list" ? 700 : 600,
-                  fontSize: "16px",
-                  transition: "all 0.2s ease",
-                }}
-                aria-label="Vue en liste"
-              >
-                ☰
-              </button>
-            </div>
-          </div>
-
-          {words.length > 0 && (
-            <div className="field field--inline">
-              <button
-                className={`button ${showFurigana ? "button--primary" : ""}`}
-                type="button"
-                onClick={() => setShowFurigana((previous) => !previous)}
-                style={{ whiteSpace: "nowrap" }}
-              >
-                {showFurigana ? "Masquer furigana" : "Furigana"}
-              </button>
-            </div>
-          )}
-
-          {viewMode === "cards" && words.length > 0 && (
-            <div className="field field--inline">
               <button
                 className="button"
                 type="button"
-                onClick={() => {
-                  if (allFlipped) {
-                    setFlippedWordIds(new Set());
-                  } else {
-                    setFlippedWordIds(allWordIds);
-                  }
-                }}
-                style={{ whiteSpace: "nowrap" }}
+                disabled={downloadingTagId !== null}
+                onClick={() => handleDownloadAudio(openSeries.tagId as number, openSeries.tagName)}
               >
-                {allFlipped ? "Masquer toutes les cartes" : "Afficher toutes les cartes"}
+                {downloadingTagId === openSeries.tagId ? "Audio…" : "Audio MP3"}
               </button>
-            </div>
-          )}
+            </>
+          ) : null}
+          <button
+            className={`button${openSeries ? "" : " button--primary"}`}
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+          >
+            + Ajouter un mot
+          </button>
         </div>
       </div>
 
-      {!isLoading && words.length > 0 && (
-        <div className="dictionarySearch">
+      <div className="vocabToolbar">
+        <div className="dictionarySearch vocabToolbar__search">
           <svg
             className="dictionarySearch__icon"
-            xmlns="http://www.w3.org/2000/svg"
             width="18"
             height="18"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            role="img"
-            aria-label="Rechercher"
+            aria-hidden="true"
           >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <circle cx="11" cy="11" r="7" />
+            <path d="M20 20l-3.2-3.2" />
           </svg>
           <input
             className="dictionarySearch__input"
             type="text"
-            placeholder="Rechercher un mot (français, kana, kanji, romaji, note)…"
+            placeholder={
+              openSeries ? "Filtrer les mots de cette série…" : "Rechercher une série ou un mot…"
+            }
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
           />
-          {searchQuery && (
+          {searchQuery ? (
             <button
-              type="button"
               className="dictionarySearch__clear"
-              onClick={() => setSearchQuery("")}
+              type="button"
               aria-label="Effacer la recherche"
+              onClick={() => setSearchQuery("")}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                role="img"
-                aria-label="Effacer"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              ×
             </button>
-          )}
-          {isSearchActive && (
+          ) : null}
+          {query ? (
             <span className="dictionarySearch__count">
-              {filteredWords.length} résultat{filteredWords.length !== 1 ? "s" : ""}
+              {openSeries
+                ? pluralize(openSeriesWords.length, "mot", "mots")
+                : pluralize(visibleSeries.length, "série", "séries")}
             </span>
-          )}
+          ) : null}
         </div>
-      )}
-
-      {isLoading ? <div className="muted">Chargement…</div> : null}
-      {errorMessage ? <div className="formError">{errorMessage}</div> : null}
-
-      <div style={{ marginTop: "var(--space-8)" }}>
-        {wordsByTag.map(({ tag, tagId, words: tagWords }) => {
-          const isCollapsed = isSearchActive ? false : (collapsedTags[tag] ?? false);
-          return (
-            <div key={tag} style={{ marginBottom: "var(--space-2)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+        {openSeries ? (
+          <div className="vocabToolbar__side vocabPage__filters">
+            <fieldset className="segmented" aria-label="Langue de face">
+              {(Object.keys(dictionaryLanguageLabels) as DictionaryLanguage[]).map((language) => (
                 <button
-                  className="sectionHeader"
+                  key={language}
                   type="button"
-                  onClick={() => toggleTag(tag)}
-                  style={{ flex: 1 }}
+                  className={`segmented__button ${frontLanguage === language ? "segmented__button--active" : ""}`}
+                  onClick={() => setFrontLanguage(language)}
                 >
-                  <span className="sectionHeader__chevron">{isCollapsed ? "▸" : "▾"}</span>
-                  <span className="sectionHeader__title">{tag}</span>
-                  <span className="sectionHeader__meta muted">{tagWords.length} mot(s)</span>
+                  {dictionaryLanguageLabels[language]}
                 </button>
-                {tagId !== null && (
-                  <button
-                    type="button"
-                    title={`Télécharger MP3 — ${tag}`}
-                    disabled={downloadingTagId !== null}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleDownloadAudio(tagId, tag);
-                    }}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: "transparent",
-                      border: "none",
-                      cursor: downloadingTagId !== null ? "wait" : "pointer",
-                      opacity: downloadingTagId === tagId ? 0.5 : 0.7,
-                      padding: "6px",
-                      borderRadius: "var(--radius-md)",
-                      transition: "opacity 0.2s ease",
-                      color: "var(--color-text-soft)",
-                    }}
-                  >
-                    {downloadingTagId === tagId ? (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        role="img"
-                        aria-label="Chargement"
-                      >
-                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                      </svg>
-                    ) : (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        role="img"
-                        aria-label="Télécharger MP3"
-                      >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </svg>
-                    )}
-                  </button>
-                )}
-              </div>
-              {!isCollapsed &&
-                (viewMode === "cards" ? (
-                  <div className="dictionaryGrid" style={{ marginTop: "var(--space-4)" }}>
-                    {tagWords.map((word) => {
-                      const isFlipped = flippedWordIds.has(word.id);
-                      const frontValue = getWordField(word, frontLanguage).trim();
-                      const safeFrontValue = frontValue || "—";
-                      const tagsText = word.tags.map((t) => t.name).join(" · ");
-
-                      return (
-                        <button
-                          key={word.id}
-                          type="button"
-                          className={`dictionaryCard ${isFlipped ? "dictionaryCard--flipped" : ""}`}
-                          onClick={() => {
-                            setFlippedWordIds((previous) => {
-                              const next = new Set(previous);
-                              if (next.has(word.id)) {
-                                next.delete(word.id);
-                              } else {
-                                next.add(word.id);
-                              }
-                              return next;
-                            });
-                          }}
-                        >
-                          <div className="dictionaryCard__inner">
-                            <div className="dictionaryCard__face">
-                              <span
-                                className="dictionaryCard__expand"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setExpandedWord(word);
-                                }}
-                                onKeyDown={(event) => event.stopPropagation()}
-                                title="Voir en grand"
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  role="img"
-                                  aria-label="Agrandir"
-                                >
-                                  <polyline points="15 3 21 3 21 9" />
-                                  <polyline points="9 21 3 21 3 15" />
-                                  <line x1="21" y1="3" x2="14" y2="10" />
-                                  <line x1="3" y1="21" x2="10" y2="14" />
-                                </svg>
-                              </span>
-                              <div className="dictionaryCard__lang">
-                                {dictionaryLanguageLabels[frontLanguage]}
-                              </div>
-                              <div
-                                className="dictionaryCard__main"
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  gap: "6px",
-                                }}
-                              >
-                                {showFurigana && frontLanguage === "kanji"
-                                  ? renderWithFurigana(safeFrontValue, word.kana)
-                                  : safeFrontValue}
-                                {word.kana && (
-                                  <span
-                                    onClick={(e) => e.stopPropagation()}
-                                    onKeyDown={(e) => e.stopPropagation()}
-                                  >
-                                    <AudioButton text={word.kana} size="small" />
-                                  </span>
-                                )}
-                              </div>
-                              <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
-                            </div>
-                            <div className="dictionaryCard__face dictionaryCard__face--back">
-                              <span
-                                className="dictionaryCard__expand"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setExpandedWord(word);
-                                }}
-                                onKeyDown={(event) => event.stopPropagation()}
-                                title="Voir en grand"
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  role="img"
-                                  aria-label="Agrandir"
-                                >
-                                  <polyline points="15 3 21 3 21 9" />
-                                  <polyline points="9 21 3 21 3 15" />
-                                  <line x1="21" y1="3" x2="14" y2="10" />
-                                  <line x1="3" y1="21" x2="10" y2="14" />
-                                </svg>
-                              </span>
-                              <div className="dictionaryCard__backGrid">
-                                {otherLanguages.map((language) => {
-                                  const value = getWordField(word, language).trim() || "—";
-                                  const displayValue =
-                                    showFurigana && language === "kanji"
-                                      ? renderWithFurigana(value, word.kana)
-                                      : value;
-                                  return (
-                                    <div key={language} className="dictionaryCard__row">
-                                      <div className="dictionaryCard__rowLabel">
-                                        {dictionaryLanguageLabels[language]}
-                                      </div>
-                                      <div
-                                        className="dictionaryCard__rowValue"
-                                        style={{
-                                          display: "flex",
-                                          alignItems: "center",
-                                          gap: "4px",
-                                        }}
-                                      >
-                                        {displayValue}
-                                        {language === "kana" && (
-                                          <span
-                                            onClick={(e) => e.stopPropagation()}
-                                            onKeyDown={(e) => e.stopPropagation()}
-                                          >
-                                            <AudioButton text={value} size="small" />
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                              {word.note ? (
-                                <div className="dictionaryCard__note">{word.note}</div>
-                              ) : null}
-                              <div className="dictionaryCard__meta">{tagsText || "Sans tag"}</div>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>{dictionaryLanguageLabels[frontLanguage]}</th>
-                        {otherLanguages.map((lang) => (
-                          <th key={lang}>{dictionaryLanguageLabels[lang]}</th>
-                        ))}
-                        <th>Tags</th>
-                        <th>Note</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tagWords.map((word) => {
-                        const frontValue = getWordField(word, frontLanguage).trim();
-                        const safeFrontValue = frontValue || "—";
-                        const tagsText = word.tags.map((t) => t.name).join(", ");
-                        return (
-                          <React.Fragment key={word.id}>
-                            <tr
-                              style={{ cursor: "pointer" }}
-                              onClick={() => setExpandedWord(word)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") setExpandedWord(word);
-                              }}
-                            >
-                              <td style={{ fontWeight: 600, fontSize: "18px" }}>
-                                <span
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "6px",
-                                  }}
-                                >
-                                  {showFurigana && frontLanguage === "kanji"
-                                    ? renderWithFurigana(safeFrontValue, word.kana)
-                                    : safeFrontValue}
-                                  {word.kana && (
-                                    <span
-                                      onClick={(e) => e.stopPropagation()}
-                                      onKeyDown={(e) => e.stopPropagation()}
-                                    >
-                                      <AudioButton text={word.kana} size="small" />
-                                    </span>
-                                  )}
-                                </span>
-                              </td>
-                              {otherLanguages.map((lang) => {
-                                const value = getWordField(word, lang).trim() || "—";
-                                const tableDisplayValue =
-                                  showFurigana && lang === "kanji"
-                                    ? renderWithFurigana(value, word.kana)
-                                    : value;
-                                return (
-                                  <td key={lang} className="muted" style={{ fontSize: "16px" }}>
-                                    <span
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        gap: "4px",
-                                      }}
-                                    >
-                                      {tableDisplayValue}
-                                      {lang === "kana" && (
-                                        <span
-                                          onClick={(e) => e.stopPropagation()}
-                                          onKeyDown={(e) => e.stopPropagation()}
-                                        >
-                                          <AudioButton text={value} size="small" />
-                                        </span>
-                                      )}
-                                    </span>
-                                  </td>
-                                );
-                              })}
-                              <td className="muted">
-                                {tagsText ? (
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      gap: "var(--space-2)",
-                                      flexWrap: "wrap",
-                                    }}
-                                  >
-                                    {word.tags.map((tag) => (
-                                      <span
-                                        key={tag.id}
-                                        style={{
-                                          padding: "4px 10px",
-                                          borderRadius: "var(--radius-md)",
-                                          background: "var(--color-primary-soft)",
-                                          color: "var(--color-primary)",
-                                          fontSize: "13px",
-                                          fontWeight: 600,
-                                        }}
-                                      >
-                                        {tag.name}
-                                      </span>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  "—"
-                                )}
-                              </td>
-                              <td className="muted" style={{ fontSize: "14px" }}>
-                                {word.note || "—"}
-                              </td>
-                            </tr>
-                          </React.Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                ))}
-            </div>
-          );
-        })}
+              ))}
+            </fieldset>
+            <button
+              className={`button ${showFurigana ? "button--primary" : ""}`}
+              type="button"
+              onClick={() => setShowFurigana((previous) => !previous)}
+            >
+              Furigana
+            </button>
+            <fieldset className="segmented" aria-label="Affichage">
+              <button
+                type="button"
+                className={`segmented__button ${viewMode === "cards" ? "segmented__button--active" : ""}`}
+                onClick={() => setViewMode("cards")}
+              >
+                Cartes
+              </button>
+              <button
+                type="button"
+                className={`segmented__button ${viewMode === "list" ? "segmented__button--active" : ""}`}
+                onClick={() => setViewMode("list")}
+              >
+                Liste
+              </button>
+            </fieldset>
+          </div>
+        ) : (
+          <div className="vocabToolbar__side">
+            <fieldset className="segmented" aria-label="Tri des séries">
+              <button
+                type="button"
+                className={`segmented__button ${seriesSort === "recent" ? "segmented__button--active" : ""}`}
+                onClick={() => setSeriesSort("recent")}
+              >
+                Récentes
+              </button>
+              <button
+                type="button"
+                className={`segmented__button ${seriesSort === "alpha" ? "segmented__button--active" : ""}`}
+                onClick={() => setSeriesSort("alpha")}
+              >
+                A–Z
+              </button>
+            </fieldset>
+            <button
+              className={`button vocabToolbar__multi${isSelecting ? " button--primary" : ""}`}
+              type="button"
+              aria-pressed={isSelecting}
+              onClick={toggleSelectMode}
+            >
+              <LayersIcon className="vocabToolbar__multiIcon" />
+              Plusieurs séries
+            </button>
+          </div>
+        )}
       </div>
 
-      {expandedWord && (
+      {errorMessage ? <div className="formError">{errorMessage}</div> : null}
+
+      {isLoading ? (
+        <div className="vocabSeriesGrid" aria-hidden="true">
+          {[0, 1, 2, 3].map((skeletonIndex) => (
+            <div
+              key={`skeleton-${skeletonIndex}`}
+              className="vocabSeriesCard vocabSeriesCard--skeleton"
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {!isLoading && !openSeries ? (
+        visibleSeries.length === 0 ? (
+          <div className="emptyState emptyState--center vocabPage__empty">
+            <p className="emptyState__title">
+              {query
+                ? `Aucun résultat pour « ${searchQuery.trim()} »`
+                : "Aucune série pour l’instant"}
+            </p>
+            <p className="emptyState__text">
+              {query
+                ? "Essaie un autre mot, ou le nom d’une série."
+                : "Ajoute un mot et donne-lui un tag : ça devient ta première série."}
+            </p>
+            <div className="emptyState__actions">
+              {query ? (
+                <button className="button" type="button" onClick={() => setSearchQuery("")}>
+                  Effacer la recherche
+                </button>
+              ) : (
+                <button
+                  className="button button--primary"
+                  type="button"
+                  onClick={() => setIsModalOpen(true)}
+                >
+                  + Ajouter un mot
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="vocabSeriesGrid">
+            {visibleSeries.map((series) => {
+              const isSelected = selectedKeys.has(series.key);
+              const isUntagged = series.tagId === null;
+              const reviewedPercent =
+                series.wordsCount > 0
+                  ? Math.round((series.reviewedCount / series.wordsCount) * 100)
+                  : 0;
+              const reviewedLabel = series.lastReviewedAt
+                ? `révisée ${formatRelativeDate(series.lastReviewedAt).toLowerCase()}`
+                : isUntagged
+                  ? "sans tag"
+                  : "pas encore révisée";
+              return (
+                <article
+                  key={series.key}
+                  className={`vocabSeriesCard${isSelected ? " vocabSeriesCard--selected" : ""}${
+                    isUntagged ? " vocabSeriesCard--untagged" : ""
+                  }${isSelecting && !isUntagged ? " vocabSeriesCard--selectable" : ""}`}
+                >
+                  <button
+                    className="vocabSeriesCard__peek"
+                    type="button"
+                    aria-label={`Voir le vocabulaire de ${series.tagName}`}
+                    onClick={() => setOpenSeriesKey(series.key)}
+                  >
+                    <EyeIcon className="vocabSeriesCard__peekIcon" />
+                  </button>
+                  <button
+                    className="vocabSeriesCard__open"
+                    type="button"
+                    onClick={() => handleSeriesCardClick(series)}
+                  >
+                    <h2 className="vocabSeriesCard__title">{series.tagName}</h2>
+                    <p className="vocabSeriesCard__meta">
+                      {pluralize(series.wordsCount, "mot", "mots")}
+                      <span aria-hidden="true"> · </span>
+                      {reviewedLabel}
+                    </p>
+                    <div
+                      className="vocabSeriesCard__bar"
+                      aria-label={`${reviewedPercent} % des mots révisés`}
+                    >
+                      <span
+                        className="vocabSeriesCard__barFill"
+                        style={{ width: `${reviewedPercent}%` }}
+                      />
+                    </div>
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        )
+      ) : null}
+
+      {openSeries && !isLoading ? (
+        openSeriesWords.length === 0 ? (
+          <div className="emptyState emptyState--center vocabPage__empty">
+            <p className="emptyState__title">
+              {query
+                ? `Aucun mot ne correspond à « ${searchQuery.trim()} »`
+                : "Cette série est vide"}
+            </p>
+            <p className="emptyState__text">
+              {query
+                ? "Efface la recherche pour revoir tous les mots."
+                : "Ajoute un mot : il sera déjà tagué dans cette série."}
+            </p>
+            <div className="emptyState__actions">
+              {query ? (
+                <button className="button" type="button" onClick={() => setSearchQuery("")}>
+                  Effacer la recherche
+                </button>
+              ) : (
+                <button
+                  className="button button--primary"
+                  type="button"
+                  onClick={() => setIsModalOpen(true)}
+                >
+                  + Ajouter un mot
+                </button>
+              )}
+            </div>
+          </div>
+        ) : viewMode === "cards" ? (
+          <div className="dictionaryGrid">
+            {openSeriesWords.map((word) => {
+              const isFlipped = flippedWordIds.has(word.id);
+              const frontValue = getWordField(word, frontLanguage).trim() || "—";
+              return (
+                <div
+                  key={word.id}
+                  className={`dictionaryCard ${isFlipped ? "dictionaryCard--flipped" : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="dictionaryCard__flip"
+                    onClick={() => toggleFlipped(word.id)}
+                  >
+                    <div className="dictionaryCard__inner">
+                      <div className="dictionaryCard__face">
+                        <div className="dictionaryCard__lang">
+                          {dictionaryLanguageLabels[frontLanguage]}
+                        </div>
+                        <div className="dictionaryCard__main">
+                          {showFurigana && frontLanguage === "kanji"
+                            ? renderWithFurigana(frontValue, word.kana)
+                            : frontValue}
+                        </div>
+                        <span className="dictionaryCard__hint">Cliquer pour retourner</span>
+                      </div>
+                      <div className="dictionaryCard__face dictionaryCard__face--back">
+                        <div className="dictionaryCard__backGrid">
+                          {otherLanguages.map((language) => {
+                            const value = getWordField(word, language).trim() || "—";
+                            return (
+                              <div key={language} className="dictionaryCard__row">
+                                <div className="dictionaryCard__rowLabel">
+                                  {dictionaryLanguageLabels[language]}
+                                </div>
+                                <div className="dictionaryCard__rowValue">
+                                  {showFurigana && language === "kanji"
+                                    ? renderWithFurigana(value, word.kana)
+                                    : value}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {word.note ? (
+                            <div className="dictionaryCard__note">{word.note}</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                  <div className="dictionaryCard__actions">
+                    {word.kana ? <AudioButton text={word.kana} size="small" /> : null}
+                    <button
+                      type="button"
+                      className="dictionaryCard__expand"
+                      onClick={() => setExpandedWord(word)}
+                    >
+                      Fiche
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="vocabWordList">
+            {openSeriesWords.map((word) => (
+              <div key={word.id} className="vocabWordRow">
+                <button
+                  type="button"
+                  className="vocabWordRow__main"
+                  onClick={() => setExpandedWord(word)}
+                >
+                  <span className="vocabWordRow__jp">
+                    {showFurigana && word.kanji
+                      ? renderWithFurigana(word.kanji, word.kana)
+                      : word.kanji || word.kana || "—"}
+                  </span>
+                  <span className="vocabWordRow__kana">
+                    {word.kanji ? word.kana || word.romaji || "" : word.romaji || ""}
+                  </span>
+                  <span className="vocabWordRow__fr">{word.french}</span>
+                </button>
+                {word.kana ? (
+                  <span className="vocabWordRow__audio">
+                    <AudioButton text={word.kana} size="small" />
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )
+      ) : null}
+
+      {!openSeries && isSelecting ? (
+        <div className="vocabSelectBar">
+          <p className="vocabSelectBar__label">
+            {selectedSeries.length === 0
+              ? "Clique sur les séries à regrouper"
+              : pluralize(selectedSeries.length, "série sélectionnée", "séries sélectionnées")}
+            {selectedSeries.length > 0 ? (
+              <span className="vocabSelectBar__meta">
+                {" "}
+                · {pluralize(selectedWordsCount, "mot", "mots")}
+              </span>
+            ) : null}
+          </p>
+          <div className="vocabSelectBar__actions">
+            <button className="button button--ghost" type="button" onClick={exitSelectMode}>
+              Annuler
+            </button>
+            <button
+              className="button button--primary"
+              type="button"
+              disabled={selectedSeries.length === 0}
+              onClick={startSelectedSeries}
+            >
+              Réviser la sélection
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {expandedWord ? (
         <WordDetailModal
           word={expandedWord}
           onClose={() => setExpandedWord(null)}
           renderWithFurigana={renderWithFurigana}
         />
-      )}
+      ) : null}
+
+      {isModalOpen ? (
+        <WordFormModal
+          editingWord={null}
+          tags={tags}
+          defaultTagIds={openSeries?.tagId ? [openSeries.tagId] : undefined}
+          onClose={() => setIsModalOpen(false)}
+          onSaved={async () => {
+            setIsModalOpen(false);
+            await reloadVocabulary();
+          }}
+          onCreateTag={handleCreateTag}
+          onDeleteTag={handleDeleteTag}
+        />
+      ) : null}
     </div>
   );
 }
@@ -767,7 +851,6 @@ function WordDetailModal({
   const kanaValue = word.kana ?? "";
   const romajiValue = word.romaji ?? "";
   const frenchValue = word.french;
-  const tagsText = word.tags.map((tag) => tag.name).join(" · ");
 
   return (
     <div
@@ -790,17 +873,15 @@ function WordDetailModal({
         >
           ✕
         </button>
-
-        {kanjiValue && (
+        {kanjiValue ? (
           <div className="wordDetailModal__section">
             <div className="wordDetailModal__label">Kanji</div>
             <div className="wordDetailModal__kanji">
               {renderWithFurigana(kanjiValue, kanaValue)}
             </div>
           </div>
-        )}
-
-        {kanaValue && (
+        ) : null}
+        {kanaValue ? (
           <div className="wordDetailModal__section">
             <div className="wordDetailModal__label">Kana</div>
             <div className="wordDetailModal__kana">
@@ -808,36 +889,23 @@ function WordDetailModal({
               <AudioButton text={kanaValue} />
             </div>
           </div>
-        )}
-
-        {romajiValue && (
+        ) : null}
+        {romajiValue ? (
           <div className="wordDetailModal__section">
             <div className="wordDetailModal__label">Rōmaji</div>
             <div className="wordDetailModal__romaji">{romajiValue}</div>
           </div>
-        )}
-
+        ) : null}
         <div className="wordDetailModal__section">
           <div className="wordDetailModal__label">Français</div>
           <div className="wordDetailModal__french">{frenchValue}</div>
         </div>
-
-        {word.note && (
+        {word.note ? (
           <div className="wordDetailModal__section">
             <div className="wordDetailModal__label">Note</div>
             <div className="wordDetailModal__note">{word.note}</div>
           </div>
-        )}
-
-        {tagsText && (
-          <div className="wordDetailModal__tags">
-            {word.tags.map((tag) => (
-              <span key={tag.id} className="wordDetailModal__tag">
-                {tag.name}
-              </span>
-            ))}
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
