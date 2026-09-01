@@ -3,7 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { Tag, WordWithStatsAndTags, WordWithTags } from "../../api";
-import { createTag, deleteTag, downloadTagAudio, fetchTags, fetchWordsWithTags } from "../../api";
+import {
+  createTag,
+  deleteTag,
+  downloadTagAudio,
+  fetchTags,
+  fetchWordsWithTags,
+  resetTagWordScores,
+} from "../../api";
 import { AudioButton } from "../components/AudioButton";
 import { EyeIcon, LayersIcon, PlayIcon } from "../components/NavIcons";
 import { WordFormModal } from "../components/WordFormModal";
@@ -164,6 +171,9 @@ export function DictionaryPage() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [isSelecting, setIsSelecting] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const [isResettingScores, setIsResettingScores] = useState(false);
+  const [resetStatus, setResetStatus] = useState<string | null>(null);
 
   useEffect(() => {
     saveDictionaryLanguage(frontLanguage);
@@ -180,6 +190,8 @@ export function DictionaryPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset flips when navigating between series
   useEffect(() => {
     setFlippedWordIds(new Set());
+    setIsResetConfirmOpen(false);
+    setResetStatus(null);
   }, [openSeriesKey]);
 
   async function reloadVocabulary() {
@@ -345,6 +357,25 @@ export function DictionaryPage() {
     navigate(`/train/tags?ids=${ids}&name=${encodeURIComponent(names)}`);
   }
 
+  async function handleConfirmResetScores() {
+    if (!openSeries?.tagId) return;
+    setIsResettingScores(true);
+    setErrorMessage(null);
+    try {
+      await resetTagWordScores(openSeries.tagId);
+      await reloadVocabulary();
+      setResetStatus(`Les scores de « ${openSeries.tagName} » ont été réinitialisés.`);
+      setIsResetConfirmOpen(false);
+      window.setTimeout(() => setResetStatus(null), 3000);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Impossible de réinitialiser les scores.",
+      );
+    } finally {
+      setIsResettingScores(false);
+    }
+  }
+
   async function handleDownloadAudio(tagId: number, tagName: string) {
     setDownloadingTagId(tagId);
     try {
@@ -428,6 +459,14 @@ export function DictionaryPage() {
                 onClick={() => handleDownloadAudio(openSeries.tagId as number, openSeries.tagName)}
               >
                 {downloadingTagId === openSeries.tagId ? "Audio…" : "Audio MP3"}
+              </button>
+              <button
+                className="button vocabPage__resetButton"
+                type="button"
+                disabled={isResettingScores}
+                onClick={() => setIsResetConfirmOpen(true)}
+              >
+                Réinitialiser les scores
               </button>
             </>
           ) : null}
@@ -553,6 +592,40 @@ export function DictionaryPage() {
       </div>
 
       {errorMessage ? <div className="formError">{errorMessage}</div> : null}
+      {resetStatus ? <div className="formSuccess">{resetStatus}</div> : null}
+
+      {openSeries?.tagId && isResetConfirmOpen ? (
+        <div className="vocabPage__confirm" role="alertdialog" aria-labelledby="series-reset-title">
+          <div>
+            <p className="vocabPage__confirmTitle" id="series-reset-title">
+              Réinitialiser les scores de « {openSeries.tagName} » ?
+            </p>
+            <p className="vocabPage__confirmText">
+              Les compteurs, le score et le planning SRS de cette série seront remis à zéro. Les
+              mots aussi présents dans d’autres séries seront également réinitialisés. Cette action
+              est irréversible.
+            </p>
+          </div>
+          <div className="vocabPage__confirmActions">
+            <button
+              className="button"
+              type="button"
+              disabled={isResettingScores}
+              onClick={() => setIsResetConfirmOpen(false)}
+            >
+              Annuler
+            </button>
+            <button
+              className="button button--danger"
+              type="button"
+              disabled={isResettingScores}
+              onClick={() => void handleConfirmResetScores()}
+            >
+              {isResettingScores ? "Réinitialisation…" : "Confirmer"}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="vocabSeriesGrid" aria-hidden="true">

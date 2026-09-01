@@ -454,6 +454,49 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     res.status(204).send();
   });
 
+  app.post("/api/tags/:id/reset-scores", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const tagId = Number(req.params.id);
+    if (!Number.isFinite(tagId) || tagId <= 0) {
+      res.status(400).json({ error: "Invalid tag id" });
+      return;
+    }
+
+    const tag = database
+      .prepare("SELECT id FROM tags WHERE id = ? AND user_id = ?")
+      .get(tagId, userId);
+    if (!tag) {
+      res.status(404).json({ error: "Tag not found" });
+      return;
+    }
+
+    const resetResult = database
+      .prepare(
+        `
+        UPDATE word_stats
+        SET success_count = 0,
+            partial_count = 0,
+            fail_count = 0,
+            score = 0,
+            consecutive_success_count = 0,
+            last_reviewed_at = NULL,
+            srs_interval = 0,
+            srs_ease_factor = 2.5,
+            srs_next_review_at = NULL,
+            srs_step = 0
+        WHERE word_id IN (
+          SELECT w.id
+          FROM words w
+          INNER JOIN word_tags wt ON wt.word_id = w.id
+          WHERE w.user_id = ? AND wt.tag_id = ?
+        )
+      `,
+      )
+      .run(userId, tagId);
+
+    res.status(200).json({ success: true, resetCount: resetResult.changes });
+  });
+
   app.get("/api/words", (req, res) => {
     const userId = getRequiredUserId(req);
     const includeStats = req.query.includeStats === "1" || req.query.includeStats === "true";

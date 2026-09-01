@@ -326,6 +326,10 @@ export async function deleteTag(tagId: number): Promise<void> {
   await apiDelete(`/api/tags/${tagId}`);
 }
 
+export async function resetTagWordScores(tagId: number): Promise<{ resetCount: number }> {
+  return await apiPost<{ success: boolean; resetCount: number }>(`/api/tags/${tagId}/reset-scores`);
+}
+
 export async function createWord(word: {
   french: string;
   romaji?: string | null;
