@@ -9,56 +9,65 @@ import {
   updateProfile,
   uploadAvatar,
 } from "../../api";
+import { PillNav } from "../components/PillNav";
 import { WordsPage } from "./WordsPage";
 
 type SettingsTab = "profile" | "password" | "vocabulary" | "tools";
+type ThemePreference = "light" | "dark";
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; hint: string }> = [
+  { id: "profile", label: "Profil", hint: "Compte et apparence" },
+  { id: "password", label: "Mot de passe", hint: "Sécurité" },
+  { id: "vocabulary", label: "Vocabulaire", hint: "Mots et imports" },
+  { id: "tools", label: "Outils", hint: "Kanji et données" },
+];
+
+function readStoredTheme(): ThemePreference {
+  if (typeof window === "undefined") return "light";
+  return window.localStorage.getItem("kotoba.theme") === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme: ThemePreference) {
+  if (theme === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  window.localStorage.setItem("kotoba.theme", theme);
+}
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
 
   return (
-    <div>
+    <div className="settingsPage">
       <div className="pageHeader">
         <div>
+          <p className="settingsPage__kicker">Compte</p>
           <h1 className="pageTitle">Paramètres</h1>
-          <p className="pageSubtitle">Gère ton profil, la sécurité de ton compte et tes données.</p>
+          <p className="pageSubtitle">
+            Profil, apparence, sécurité, et gestion de ton vocabulaire.
+          </p>
         </div>
       </div>
 
-      <div className="settingsTabs">
-        <button
-          className={`settingsTabs__tab ${activeTab === "profile" ? "settingsTabs__tab--active" : ""}`}
-          type="button"
-          onClick={() => setActiveTab("profile")}
-        >
-          Profil
-        </button>
-        <button
-          className={`settingsTabs__tab ${activeTab === "password" ? "settingsTabs__tab--active" : ""}`}
-          type="button"
-          onClick={() => setActiveTab("password")}
-        >
-          Mot de passe
-        </button>
-        <button
-          className={`settingsTabs__tab ${activeTab === "vocabulary" ? "settingsTabs__tab--active" : ""}`}
-          type="button"
-          onClick={() => setActiveTab("vocabulary")}
-        >
-          Vocabulaire
-        </button>
-        <button
-          className={`settingsTabs__tab ${activeTab === "tools" ? "settingsTabs__tab--active" : ""}`}
-          type="button"
-          onClick={() => setActiveTab("tools")}
-        >
-          Outils
-        </button>
-      </div>
+      <PillNav
+        ariaLabel="Sections des paramètres"
+        items={SETTINGS_TABS}
+        value={activeTab}
+        onChange={setActiveTab}
+      />
 
       {activeTab === "profile" && <ProfileSection />}
       {activeTab === "password" && <PasswordSection />}
-      {activeTab === "vocabulary" && <WordsPage />}
+      {activeTab === "vocabulary" && (
+        <div className="settingsVocab">
+          <p className="settingsVocab__lead">
+            Ajoute, organise et importe tes mots depuis cette liste.
+          </p>
+          <WordsPage />
+        </div>
+      )}
       {activeTab === "tools" && <ToolsSection />}
     </div>
   );
@@ -74,6 +83,7 @@ function ProfileSection() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemePreference>(readStoredTheme);
 
   useEffect(() => {
     let isCancelled = false;
@@ -98,6 +108,11 @@ function ProfileSection() {
       isCancelled = true;
     };
   }, []);
+
+  function handleThemeChange(nextTheme: ThemePreference) {
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
+  }
 
   function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -139,82 +154,122 @@ function ProfileSection() {
   }
 
   if (isLoading) {
-    return <div className="muted">Chargement…</div>;
+    return (
+      <div className="settingsPanel">
+        <p className="muted">Chargement du profil…</p>
+      </div>
+    );
   }
 
   return (
-    <form className="form settingsSection" onSubmit={handleSubmit}>
-      <div className="field">
-        <div className="field__label">Avatar</div>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
+    <div className="settingsStack">
+      <form className="settingsPanel" onSubmit={handleSubmit}>
+        <div className="settingsPanel__header">
+          <div>
+            <h2 className="settingsPanel__title">Identité</h2>
+            <p className="settingsPanel__text">Avatar, nom d'affichage et adresse e-mail.</p>
+          </div>
+        </div>
+
+        <div className="settingsIdentity">
           {avatarPreview ? (
-            <img
-              src={avatarPreview}
-              alt="Avatar"
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: "50%",
-                objectFit: "cover",
-                border: "2px solid var(--color-border)",
-              }}
-            />
+            <img src={avatarPreview} alt="" className="settingsAvatar" />
           ) : (
-            <div className="settingsAvatar__placeholder">
+            <div className="settingsAvatar settingsAvatar__placeholder">
               {currentUser?.username[0]?.toUpperCase() ?? "?"}
             </div>
           )}
-          <label className="button" style={{ cursor: "pointer" }}>
-            Choisir une image
+          <div className="settingsIdentity__meta">
+            <div className="settingsIdentity__name">
+              {displayName.trim() || currentUser?.username}
+            </div>
+            <div className="settingsIdentity__handle">@{currentUser?.username}</div>
+            <label className="button settingsIdentity__upload">
+              Choisir une image
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                onChange={handleAvatarChange}
+                className="srOnly"
+              />
+            </label>
+            <p className="settingsIdentity__hint">JPEG, PNG, GIF ou WebP · 5 Mo max</p>
+          </div>
+        </div>
+
+        <div className="settingsFields">
+          <label className="field">
+            <div className="field__label">Nom d'utilisateur</div>
+            <input className="input" value={currentUser?.username ?? ""} disabled />
+          </label>
+
+          <label className="field">
+            <div className="field__label">Nom d'affichage</div>
             <input
-              type="file"
-              accept="image/jpeg,image/png,image/gif,image/webp"
-              onChange={handleAvatarChange}
-              style={{ display: "none" }}
+              className="input"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="Ex: Brandon"
+              maxLength={100}
+            />
+          </label>
+
+          <label className="field">
+            <div className="field__label">Email</div>
+            <input
+              className="input"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Ex: brandon@example.com"
             />
           </label>
         </div>
-        <div className="muted" style={{ marginTop: "var(--space-2)", fontSize: "14px" }}>
-          JPEG, PNG, GIF, WebP (max 5 Mo)
+
+        {errorMessage && <div className="formError">{errorMessage}</div>}
+        {successMessage && <div className="formSuccess">{successMessage}</div>}
+
+        <div>
+          <button className="button button--primary" disabled={isSubmitting} type="submit">
+            {isSubmitting ? "Enregistrement…" : "Enregistrer le profil"}
+          </button>
         </div>
+      </form>
+
+      <div className="settingsPanel">
+        <div className="settingsPanel__header">
+          <div>
+            <h2 className="settingsPanel__title">Apparence</h2>
+            <p className="settingsPanel__text">Thème clair ou sombre pour toute l'application.</p>
+          </div>
+        </div>
+        <fieldset className="settingsTheme">
+          <legend className="srOnly">Thème</legend>
+          <button
+            type="button"
+            className={`settingsTheme__option${theme === "light" ? " settingsTheme__option--active" : ""}`}
+            onClick={() => handleThemeChange("light")}
+          >
+            <span
+              className="settingsTheme__preview settingsTheme__preview--light"
+              aria-hidden="true"
+            />
+            <span className="settingsTheme__name">Clair</span>
+          </button>
+          <button
+            type="button"
+            className={`settingsTheme__option${theme === "dark" ? " settingsTheme__option--active" : ""}`}
+            onClick={() => handleThemeChange("dark")}
+          >
+            <span
+              className="settingsTheme__preview settingsTheme__preview--dark"
+              aria-hidden="true"
+            />
+            <span className="settingsTheme__name">Sombre</span>
+          </button>
+        </fieldset>
       </div>
-
-      <label className="field">
-        <div className="field__label">Nom d'utilisateur</div>
-        <input className="input" value={currentUser?.username ?? ""} disabled />
-      </label>
-
-      <label className="field">
-        <div className="field__label">Nom d'affichage</div>
-        <input
-          className="input"
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-          placeholder="Ex: Brandon"
-          maxLength={100}
-        />
-      </label>
-
-      <label className="field">
-        <div className="field__label">Email</div>
-        <input
-          className="input"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="Ex: brandon@example.com"
-        />
-      </label>
-
-      {errorMessage && <div className="formError">{errorMessage}</div>}
-      {successMessage && <div className="formSuccess">{successMessage}</div>}
-
-      <div>
-        <button className="button button--primary" disabled={isSubmitting} type="submit">
-          Enregistrer
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }
 
@@ -265,49 +320,58 @@ function PasswordSection() {
   }
 
   return (
-    <form className="form settingsSection" onSubmit={handleSubmit}>
-      <label className="field">
-        <div className="field__label">Mot de passe actuel</div>
-        <input
-          className="input"
-          value={currentPassword}
-          onChange={(event) => setCurrentPassword(event.target.value)}
-          type="password"
-          autoComplete="current-password"
-          placeholder="••••••••"
-        />
-      </label>
+    <form className="settingsPanel" onSubmit={handleSubmit}>
+      <div className="settingsPanel__header">
+        <div>
+          <h2 className="settingsPanel__title">Mot de passe</h2>
+          <p className="settingsPanel__text">Choisis un mot de passe d'au moins 8 caractères.</p>
+        </div>
+      </div>
 
-      <label className="field">
-        <div className="field__label">Nouveau mot de passe</div>
-        <input
-          className="input"
-          value={newPassword}
-          onChange={(event) => setNewPassword(event.target.value)}
-          type="password"
-          autoComplete="new-password"
-          placeholder="••••••••"
-        />
-      </label>
+      <div className="settingsFields">
+        <label className="field">
+          <div className="field__label">Mot de passe actuel</div>
+          <input
+            className="input"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            type="password"
+            autoComplete="current-password"
+            placeholder="••••••••"
+          />
+        </label>
 
-      <label className="field">
-        <div className="field__label">Confirmer</div>
-        <input
-          className="input"
-          value={confirmPassword}
-          onChange={(event) => setConfirmPassword(event.target.value)}
-          type="password"
-          autoComplete="new-password"
-          placeholder="••••••••"
-        />
-      </label>
+        <label className="field">
+          <div className="field__label">Nouveau mot de passe</div>
+          <input
+            className="input"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            type="password"
+            autoComplete="new-password"
+            placeholder="••••••••"
+          />
+        </label>
+
+        <label className="field">
+          <div className="field__label">Confirmer</div>
+          <input
+            className="input"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            type="password"
+            autoComplete="new-password"
+            placeholder="••••••••"
+          />
+        </label>
+      </div>
 
       {errorMessage && <div className="formError">{errorMessage}</div>}
       {successMessage && <div className="formSuccess">{successMessage}</div>}
 
       <div>
         <button className="button button--primary" disabled={isSubmitting} type="submit">
-          Modifier le mot de passe
+          {isSubmitting ? "Modification…" : "Modifier le mot de passe"}
         </button>
       </div>
     </form>
@@ -336,33 +400,27 @@ function ToolsSection() {
   }
 
   return (
-    <div className="settingsSection">
-      <div className="emptyState">
-        <p className="emptyState__title">Traits de kanji</p>
-        <p className="emptyState__text">
-          Télécharge les SVG manquants pour afficher le tracé des kanji pendant tes sessions.
-        </p>
-        <div className="emptyState__actions">
-          <button
-            className="button button--primary"
-            type="button"
-            disabled={isDownloadingKanji}
-            onClick={() => void handleDownloadKanji()}
-          >
-            {isDownloadingKanji ? "Téléchargement…" : "Télécharger les kanji manquants"}
-          </button>
+    <div className="settingsStack">
+      <div className="settingsPanel">
+        <div className="settingsPanel__header">
+          <div>
+            <h2 className="settingsPanel__title">Traits de kanji</h2>
+            <p className="settingsPanel__text">
+              Télécharge les SVG manquants pour afficher le tracé des kanji pendant tes sessions.
+            </p>
+          </div>
         </div>
+        <button
+          className="button button--primary"
+          type="button"
+          disabled={isDownloadingKanji}
+          onClick={() => void handleDownloadKanji()}
+        >
+          {isDownloadingKanji ? "Téléchargement…" : "Télécharger les kanji manquants"}
+        </button>
+        {errorMessage ? <div className="formError">{errorMessage}</div> : null}
+        {statusMessage ? <div className="formSuccess">{statusMessage}</div> : null}
       </div>
-      {errorMessage ? (
-        <div className="formError" style={{ marginTop: "var(--space-4)" }}>
-          {errorMessage}
-        </div>
-      ) : null}
-      {statusMessage ? (
-        <div className="formSuccess" style={{ marginTop: "var(--space-4)" }}>
-          {statusMessage}
-        </div>
-      ) : null}
     </div>
   );
 }
