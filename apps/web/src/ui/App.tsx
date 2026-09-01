@@ -1,16 +1,10 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import type { User } from "../api";
 import { type SrsSummary, fetchMe, fetchSrsSummary, logoutUser } from "../api";
-import {
-  HomeNavIcon,
-  PracticeNavIcon,
-  ReadingNavIcon,
-  SrsNavIcon,
-  VocabNavIcon,
-} from "./components/NavIcons";
+import { PracticeNavIcon, SrsNavIcon, VocabNavIcon, WordsNavIcon } from "./components/NavIcons";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { AdminPage } from "./pages/AdminPage";
 import { DialoguePage } from "./pages/DialoguePage";
@@ -30,19 +24,6 @@ import { StatsPage } from "./pages/StatsPage";
 import { TrainPage } from "./pages/TrainPage";
 import { WordsPage } from "./pages/WordsPage";
 
-const MORE_PATH_PREFIXES = [
-  "/dialogue",
-  "/kanji-quiz",
-  "/kanji",
-  "/words",
-  "/difficult",
-  "/phrases-bank",
-  "/grammaire",
-  "/stats",
-  "/settings",
-  "/admin",
-];
-
 function getInitials(name: string): string {
   return name
     .split(" ")
@@ -52,59 +33,114 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-function isMorePath(pathname: string): boolean {
-  return MORE_PATH_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
-}
-
-function getMobilePageTitle(pathname: string): string {
-  if (pathname.startsWith("/train/")) return "Session";
-  if (pathname === "/" || pathname.startsWith("/series/")) return "Accueil";
-  const titles: Array<[string, string]> = [
-    ["/dictionary", "Dictionnaire"],
-    ["/srs", "SRS"],
-    ["/pratique", "Pratique"],
-    ["/lecture", "Lecture"],
-    ["/dialogue", "Dialogue"],
-    ["/kanji-quiz", "Quiz kanji"],
-    ["/kanji", "Kanji"],
-    ["/words", "Mots"],
-    ["/difficult", "Mots difficiles"],
-    ["/phrases-bank", "Phrases"],
-    ["/grammaire", "Grammaire"],
-    ["/stats", "Statistiques"],
-    ["/settings", "Paramètres"],
-    ["/admin", "Administration"],
-  ];
-  for (const [prefix, title] of titles) {
-    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return title;
-  }
-  return "Kotoba";
-}
-
-type SidebarLinkProps = {
+type TopNavLinkProps = {
   to: string;
   label: string;
-  icon?: React.ReactNode;
+  icon: React.ReactNode;
   badge?: React.ReactNode;
   isActive?: boolean;
-  onNavigate?: () => void;
 };
 
-function SidebarLink({ to, label, icon, badge, isActive, onNavigate }: SidebarLinkProps) {
+function TopNavLink({ to, label, icon, badge, isActive }: TopNavLinkProps) {
   return (
     <NavLink
       to={to}
-      onClick={onNavigate}
       className={({ isActive: routeActive }) =>
-        `sidebar__link ${(isActive ?? routeActive) ? "sidebar__link--active" : ""}`
+        `topNav__link ${(isActive ?? routeActive) ? "topNav__link--active" : ""}`
       }
     >
       {icon}
-      <span className="sidebar__linkLabel">{label}</span>
+      <span className="topNav__linkLabel">{label}</span>
       {badge}
     </NavLink>
+  );
+}
+
+function AccountMenu({
+  currentUser,
+  onLogout,
+}: {
+  currentUser: User;
+  onLogout: () => Promise<void>;
+}) {
+  const location = useLocation();
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const displayName = currentUser.display_name ?? currentUser.username;
+
+  useEffect(() => {
+    if (location.key) setIsOpen(false);
+  }, [location.key]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setIsOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="accountMenu" ref={menuRef}>
+      <button
+        className={`accountMenu__trigger${isOpen ? " accountMenu__trigger--open" : ""}`}
+        type="button"
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label="Menu du compte"
+        onClick={() => setIsOpen((previous) => !previous)}
+      >
+        <span className="accountMenu__avatar">
+          {currentUser.avatar_url ? (
+            <img src={currentUser.avatar_url} alt="" className="accountMenu__avatarImg" />
+          ) : (
+            getInitials(displayName)
+          )}
+        </span>
+        <span className="accountMenu__meta">
+          <span className="accountMenu__name">{displayName}</span>
+          <span className="accountMenu__level">Niv. {currentUser.level}</span>
+        </span>
+      </button>
+      {isOpen ? (
+        <div className="accountMenu__dropdown" role="menu">
+          <div className="accountMenu__identity">
+            <div className="accountMenu__identityName">{displayName}</div>
+            <div className="accountMenu__identityLevel">Niveau {currentUser.level}</div>
+          </div>
+          <Link className="accountMenu__item" role="menuitem" to="/stats">
+            Statistiques
+          </Link>
+          <Link className="accountMenu__item" role="menuitem" to="/settings">
+            Paramètres
+          </Link>
+          {currentUser.is_admin === 1 ? (
+            <Link className="accountMenu__item" role="menuitem" to="/admin">
+              Administration
+            </Link>
+          ) : null}
+          <button
+            className="accountMenu__item accountMenu__item--danger"
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setIsOpen(false);
+              void onLogout();
+            }}
+          >
+            Déconnexion
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -114,14 +150,6 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
-  const [isMoreOpen, setIsMoreOpen] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const stored = window.localStorage.getItem("kotoba.sidebarMore");
-    if (stored === "closed") return false;
-    if (stored === "open") return true;
-    return isMorePath(window.location.pathname);
-  });
   const [srsSummary, setSrsSummary] = useState<SrsSummary | null>(null);
 
   useEffect(() => {
@@ -175,177 +203,83 @@ export function App() {
       setSrsSummary(null);
       return;
     }
+    const currentPath = location.pathname;
     let isMounted = true;
-    async function loadSrsSummary() {
-      try {
-        const summary = await fetchSrsSummary();
-        if (isMounted) setSrsSummary(summary);
-      } catch {
-        /* ignore */
-      }
-    }
-    loadSrsSummary();
+    fetchSrsSummary()
+      .then((summary) => {
+        if (isMounted && currentPath) setSrsSummary(summary);
+      })
+      .catch(() => undefined);
     return () => {
       isMounted = false;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, location.pathname]);
 
-  const isHomeActive =
-    location.pathname === "/" ||
-    location.pathname.startsWith("/series/") ||
+  useEffect(() => {
+    if (!isAuthenticated || location.pathname !== "/") return;
+    let isMounted = true;
+    fetchMe()
+      .then((user) => {
+        if (isMounted) setCurrentUser(user);
+      })
+      .catch(() => undefined);
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, location.pathname]);
+
+  const isHomeActive = location.pathname === "/";
+  const isVocabActive =
+    location.pathname === "/dictionary" ||
     location.pathname.startsWith("/train/tag/") ||
-    location.pathname.startsWith("/train/tags") ||
-    location.pathname.startsWith("/train/srs/");
+    location.pathname.startsWith("/train/tags");
+  const isSrsActive = location.pathname === "/srs" || location.pathname.startsWith("/train/srs/");
 
-  useEffect(() => {
-    if (isMorePath(location.pathname)) setIsMoreOpen(true);
-  }, [location.pathname]);
-
-  useEffect(() => {
-    window.localStorage.setItem("kotoba.sidebarMore", isMoreOpen ? "open" : "closed");
-  }, [isMoreOpen]);
-
-  function closeMobileNav() {
-    setIsMobileNavOpen(false);
+  async function handleLogout() {
+    await logoutUser();
+    setCurrentUser(null);
+    navigate("/login", { replace: true });
   }
 
-  const sidebar = isAuthenticated ? (
-    <aside id="app-sidebar" className={`sidebar${isMobileNavOpen ? " sidebar--open" : ""}`}>
-      <Link className="sidebar__brand" to="/" onClick={closeMobileNav}>
-        <span className="sidebar__brandName">Kotoba</span>
-        <span className="sidebar__brandKana">言葉</span>
-      </Link>
-
-      <nav className="sidebar__nav">
-        <SidebarLink
-          to="/"
-          label="Accueil"
-          icon={<HomeNavIcon className="sidebar__icon" />}
-          isActive={isHomeActive}
-          onNavigate={closeMobileNav}
-        />
-        <SidebarLink
-          to="/dictionary"
-          label="Vocabulaire"
-          icon={<VocabNavIcon className="sidebar__icon" />}
-          onNavigate={closeMobileNav}
-        />
-        <SidebarLink
-          to="/srs"
-          label="SRS"
-          icon={<SrsNavIcon className="sidebar__icon" />}
-          badge={
-            srsSummary && srsSummary.dueCount > 0 ? (
-              <span className="sidebar__badge">{srsSummary.dueCount}</span>
-            ) : null
-          }
-          onNavigate={closeMobileNav}
-        />
-        <SidebarLink
-          to="/pratique"
-          label="Pratique"
-          icon={<PracticeNavIcon className="sidebar__icon" />}
-          onNavigate={closeMobileNav}
-        />
-        <SidebarLink
-          to="/lecture"
-          label="Lecture"
-          icon={<ReadingNavIcon className="sidebar__icon" />}
-          onNavigate={closeMobileNav}
-        />
-
-        <button
-          className="sidebar__moreToggle"
-          type="button"
-          aria-expanded={isMoreOpen}
-          aria-controls="sidebar-more"
-          onClick={() => setIsMoreOpen((previous) => !previous)}
-        >
-          Plus
-          <span className="sidebar__moreChevron">{isMoreOpen ? "▾" : "▸"}</span>
-        </button>
-        {isMoreOpen ? (
-          <div id="sidebar-more" className="sidebar__more">
-            <div className="sidebar__section">Pratique</div>
-            <SidebarLink to="/dialogue" label="Dialogue" onNavigate={closeMobileNav} />
-            <SidebarLink to="/kanji" label="Kanji" onNavigate={closeMobileNav} />
-            <SidebarLink to="/kanji-quiz" label="Quiz kanji" onNavigate={closeMobileNav} />
-
-            <div className="sidebar__section">Vocabulaire</div>
-            <SidebarLink to="/words" label="Mots" onNavigate={closeMobileNav} />
-            <SidebarLink to="/difficult" label="Mots difficiles" onNavigate={closeMobileNav} />
-            <SidebarLink to="/phrases-bank" label="Banque de phrases" onNavigate={closeMobileNav} />
-            <SidebarLink to="/grammaire" label="Grammaire" onNavigate={closeMobileNav} />
-
-            <div className="sidebar__section">Compte</div>
-            <SidebarLink to="/stats" label="Statistiques" onNavigate={closeMobileNav} />
-            <SidebarLink to="/settings" label="Paramètres" onNavigate={closeMobileNav} />
-            {currentUser?.is_admin === 1 ? (
-              <SidebarLink to="/admin" label="Administration" onNavigate={closeMobileNav} />
-            ) : null}
-          </div>
-        ) : null}
-      </nav>
-
-      <div className="sidebar__footer">
-        <Link className="sidebar__user" to="/settings" onClick={closeMobileNav}>
-          <div className="sidebar__avatar">
-            {currentUser?.avatar_url ? (
-              <img src={currentUser.avatar_url} alt="" className="sidebar__avatarImg" />
-            ) : (
-              getInitials(currentUser?.display_name ?? currentUser?.username ?? "?")
-            )}
-          </div>
-          <div className="sidebar__userName">
-            {currentUser?.display_name ?? currentUser?.username}
-          </div>
-        </Link>
-        <button
-          className="sidebar__footerButton sidebar__footerButton--danger"
-          type="button"
-          onClick={async () => {
-            await logoutUser();
-            setCurrentUser(null);
-            closeMobileNav();
-            navigate("/login", { replace: true });
-          }}
-        >
-          Déconnexion
-        </button>
-      </div>
-    </aside>
-  ) : null;
-
   return (
-    <div className={`app${isAuthenticated ? " app--withSidebar" : ""}`}>
-      {sidebar}
-      {isAuthenticated && isMobileNavOpen ? (
-        <button
-          className="sidebarBackdrop"
-          type="button"
-          aria-label="Fermer le menu"
-          onClick={closeMobileNav}
-        />
+    <div className={`app${isAuthenticated ? " app--withNav" : ""}`}>
+      {isAuthenticated && currentUser ? (
+        <header className="topNav">
+          <Link className={`topNav__brand${isHomeActive ? " topNav__brand--active" : ""}`} to="/">
+            <span className="topNav__brandName">Kotoba</span>
+            <span className="topNav__brandKana">言葉</span>
+          </Link>
+          <nav className="topNav__links" aria-label="Navigation principale">
+            <TopNavLink
+              to="/dictionary"
+              label="Vocabulaire"
+              icon={<VocabNavIcon className="topNav__icon" />}
+              isActive={isVocabActive}
+            />
+            <TopNavLink
+              to="/srs"
+              label="SRS"
+              icon={<SrsNavIcon className="topNav__icon" />}
+              isActive={isSrsActive}
+              badge={
+                srsSummary && srsSummary.dueCount > 0 ? (
+                  <span className="topNav__badge">{srsSummary.dueCount}</span>
+                ) : null
+              }
+            />
+            <TopNavLink
+              to="/pratique"
+              label="Pratique"
+              icon={<PracticeNavIcon className="topNav__icon" />}
+            />
+            <TopNavLink to="/words" label="Mots" icon={<WordsNavIcon className="topNav__icon" />} />
+          </nav>
+          <AccountMenu currentUser={currentUser} onLogout={handleLogout} />
+        </header>
       ) : null}
 
       <div className="app__content">
-        {isAuthenticated ? (
-          <div className="mobileBar">
-            <button
-              className="mobileBar__menu"
-              type="button"
-              aria-label={isMobileNavOpen ? "Fermer le menu" : "Ouvrir le menu"}
-              aria-expanded={isMobileNavOpen}
-              aria-controls="app-sidebar"
-              onClick={() => setIsMobileNavOpen(true)}
-            >
-              Menu
-            </button>
-            <span className="mobileBar__title">{getMobilePageTitle(location.pathname)}</span>
-          </div>
-        ) : null}
-
-        <main className="main">
+        <main className={`main${location.pathname === "/" ? " main--dashboard" : ""}`}>
           <Routes>
             <Route
               path="/login"

@@ -12,13 +12,63 @@ type ActivityHeatmapProps = {
   activity: ActivityDay[];
   weekCount?: number;
   compact?: boolean;
+  showLegend?: boolean;
 };
+
+const MONTH_LABELS = [
+  "janv.",
+  "févr.",
+  "mars",
+  "avr.",
+  "mai",
+  "juin",
+  "juil.",
+  "août",
+  "sept.",
+  "oct.",
+  "nov.",
+  "déc.",
+];
+
+const DAY_LABELS = [
+  { key: "dim", label: "Dim" },
+  { key: "lun", label: "" },
+  { key: "mar", label: "Mar" },
+  { key: "mer", label: "" },
+  { key: "jeu", label: "Jeu" },
+  { key: "ven", label: "" },
+  { key: "sam", label: "Sam" },
+];
+
+const HEATMAP_LEVELS = [
+  "var(--color-heatmap-0)",
+  "var(--color-heatmap-1)",
+  "var(--color-heatmap-2)",
+  "var(--color-heatmap-3)",
+  "var(--color-heatmap-4)",
+];
+
+function parseLocalDate(dateString: string): Date {
+  return new Date(`${dateString}T12:00:00`);
+}
+
+function formatHeatmapTitle(dateString: string, count: number): string {
+  const formattedDate = parseLocalDate(dateString).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const reviewLabel = count === 1 ? "révision" : "révisions";
+  return `${formattedDate} : ${count} ${reviewLabel}`;
+}
 
 export function ActivityHeatmap({
   activity,
   weekCount = 52,
   compact = false,
+  showLegend,
 }: ActivityHeatmapProps) {
+  const shouldShowLegend = showLegend ?? !compact;
   const heatmapData = useMemo(() => {
     const activityMap = new Map(activity.map((day) => [day.activity_date, day.reviews_count]));
 
@@ -62,48 +112,84 @@ export function ActivityHeatmap({
     return maximum;
   }, [heatmapData]);
 
-  function getIntensity(count: number): string {
-    if (count === 0) return "var(--color-heatmap-0)";
-    const ratio = count / maxCount;
-    if (ratio < 0.25) return "var(--color-heatmap-1)";
-    if (ratio < 0.5) return "var(--color-heatmap-2)";
-    if (ratio < 0.75) return "var(--color-heatmap-3)";
-    return "var(--color-heatmap-4)";
-  }
+  const monthLabels = useMemo(() => {
+    const labels: Array<string | null> = heatmapData.map(() => null);
+    let lastMonth = -1;
+    let lastLabelWeek = -3;
+    const minGap = compact ? 1 : 2;
 
-  const dayLabels = [
-    { key: "dim", label: "Dim" },
-    { key: "lun", label: "" },
-    { key: "mar", label: "Mar" },
-    { key: "mer", label: "" },
-    { key: "jeu", label: "Jeu" },
-    { key: "ven", label: "" },
-    { key: "sam", label: "Sam" },
-  ];
+    heatmapData.forEach((week, weekIndex) => {
+      const firstDay = week[0];
+      if (!firstDay) return;
+      const month = parseLocalDate(firstDay.date).getMonth();
+      if (month === lastMonth) return;
+      lastMonth = month;
+      if (weekIndex === 0 || weekIndex - lastLabelWeek >= minGap) {
+        labels[weekIndex] = MONTH_LABELS[month];
+        lastLabelWeek = weekIndex;
+      }
+    });
+
+    return labels;
+  }, [compact, heatmapData]);
+
+  function getIntensity(count: number): string {
+    if (count === 0) return HEATMAP_LEVELS[0];
+    const ratio = count / maxCount;
+    if (ratio < 0.25) return HEATMAP_LEVELS[1];
+    if (ratio < 0.5) return HEATMAP_LEVELS[2];
+    if (ratio < 0.75) return HEATMAP_LEVELS[3];
+    return HEATMAP_LEVELS[4];
+  }
 
   return (
     <div className={`heatmap${compact ? " heatmap--compact" : ""}`}>
-      <div className="heatmap__labels">
-        {dayLabels.map((day) => (
-          <div key={day.key} className="heatmap__dayLabel">
-            {day.label}
-          </div>
-        ))}
-      </div>
-      <div className="heatmap__grid">
-        {heatmapData.map((week) => (
-          <div key={week[0]?.date ?? "empty"} className="heatmap__week">
-            {week.map((day) => (
-              <div
-                key={day.date}
-                className="heatmap__cell"
-                style={{ backgroundColor: getIntensity(day.count) }}
-                title={`${day.date}: ${day.count} révisions`}
-              />
+      <div className="heatmap__body">
+        <div className="heatmap__labels">
+          {DAY_LABELS.map((day) => (
+            <div key={day.key} className="heatmap__dayLabel">
+              {day.label}
+            </div>
+          ))}
+        </div>
+        <div className="heatmap__gridWrap">
+          <div className="heatmap__months">
+            {heatmapData.map((week, weekIndex) => (
+              <div key={week[0]?.date ?? `month-${weekIndex}`} className="heatmap__month">
+                {monthLabels[weekIndex] ?? ""}
+              </div>
             ))}
           </div>
-        ))}
+          <div className="heatmap__grid">
+            {heatmapData.map((week) => (
+              <div key={week[0]?.date ?? "empty"} className="heatmap__week">
+                {week.map((day) => (
+                  <div
+                    key={day.date}
+                    className="heatmap__cell"
+                    style={{ backgroundColor: getIntensity(day.count) }}
+                    title={formatHeatmapTitle(day.date, day.count)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
+      {shouldShowLegend ? (
+        <div className="heatmap__legend">
+          <span>Moins</span>
+          {HEATMAP_LEVELS.map((levelColor) => (
+            <span
+              key={levelColor}
+              className="heatmap__legendSwatch"
+              style={{ backgroundColor: levelColor }}
+              aria-hidden="true"
+            />
+          ))}
+          <span>Plus</span>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,16 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
   other: "Autre",
 };
 
+const MODE_LABELS: Record<string, string> = {
+  phrases: "Phrases",
+  jlpt: "JLPT",
+  conjugaison: "Conjugaison",
+  construction: "Construction",
+  ecoute: "Écoute",
+  srs: "SRS",
+  train: "Vocabulaire",
+};
+
 export function WeakPointsPanel() {
   const navigate = useNavigate();
   const [data, setData] = useState<WeakPointsData | null>(null);
@@ -29,63 +39,94 @@ export function WeakPointsPanel() {
       .finally(() => {
         if (!isCancelled) setIsLoading(false);
       });
-    return () => { isCancelled = true; };
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
-  if (isLoading || !data || data.byErrorType.length === 0) return null;
+  if (isLoading) {
+    return (
+      <div className="statsPanel">
+        <div className="statsPanel__header">
+          <div>
+            <h2 className="statsPanel__title">Points faibles</h2>
+            <p className="statsPanel__text">Analyse des 30 derniers jours</p>
+          </div>
+        </div>
+        <p className="muted">Chargement…</p>
+      </div>
+    );
+  }
 
-  const maxErrorCount = Math.max(1, ...data.byErrorType.map((entry) => entry.count));
-  const trend = data.lastWeek > 0
-    ? Math.round(((data.thisWeek - data.lastWeek) / data.lastWeek) * 100)
-    : 0;
+  const hasErrorTypes = Boolean(data && data.byErrorType.length > 0);
+  const maxErrorCount = hasErrorTypes
+    ? Math.max(1, ...(data?.byErrorType ?? []).map((entry) => entry.count))
+    : 1;
+  const trend =
+    data && data.lastWeek > 0
+      ? Math.round(((data.thisWeek - data.lastWeek) / data.lastWeek) * 100)
+      : 0;
+  const modeChips = data?.byMode.filter((entry) => entry.count > 0).slice(0, 4) ?? [];
 
   return (
-    <div className="statsSection">
-      <h2 className="statsSection__title">Points faibles (30 derniers jours)</h2>
-
-      {trend !== 0 && (
-        <p style={{ fontSize: "13px", color: "var(--color-text-soft)", marginBottom: "var(--space-4)" }}>
-          {trend < 0
-            ? `En amélioration : ${Math.abs(trend)}% d'erreurs en moins cette semaine`
-            : `Attention : ${trend}% d'erreurs en plus cette semaine`}
-        </p>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-        {data.byErrorType.map((entry) => (
-          <div key={entry.error_type} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-            <div style={{ width: "110px", fontSize: "14px", fontWeight: 500, flexShrink: 0 }}>
-              {ERROR_TYPE_LABELS[entry.error_type] ?? entry.error_type}
-            </div>
-            <div style={{ flex: 1, height: "8px", background: "var(--color-border)", borderRadius: "4px", overflow: "hidden" }}>
-              <div style={{
-                height: "100%",
-                width: `${(entry.count / maxErrorCount) * 100}%`,
-                background: "var(--color-danger, #ef4444)",
-                borderRadius: "4px",
-                transition: "width 0.3s ease",
-              }} />
-            </div>
-            <div style={{ width: "40px", textAlign: "right", fontSize: "13px", color: "var(--color-text-soft)" }}>
-              {entry.count}
-            </div>
-          </div>
-        ))}
+    <div className="statsPanel">
+      <div className="statsPanel__header">
+        <div>
+          <h2 className="statsPanel__title">Points faibles</h2>
+          <p className="statsPanel__text">Erreurs des 30 derniers jours, par type</p>
+        </div>
+        {trend !== 0 ? (
+          <span className={`statsTrend ${trend < 0 ? "statsTrend--up" : "statsTrend--down"}`}>
+            {trend < 0 ? `−${Math.abs(trend)}% cette semaine` : `+${trend}% cette semaine`}
+          </span>
+        ) : null}
       </div>
 
-      <button
-        type="button"
-        className="button"
-        style={{ marginTop: "var(--space-4)" }}
-        onClick={() => {
-          const topErrorType = data.byErrorType[0]?.error_type;
-          if (topErrorType) {
-            navigate(`/pratique?tab=phrases`);
-          }
-        }}
-      >
-        Travailler mes points faibles
-      </button>
+      {!hasErrorTypes ? (
+        <p className="statsPanel__empty">
+          Pas encore assez d'erreurs pour dégager un profil. Continue à t'entraîner.
+        </p>
+      ) : (
+        <>
+          <div className="statsWeak__bars">
+            {data?.byErrorType.map((entry) => (
+              <div key={entry.error_type} className="statsWeak__row">
+                <div className="statsWeak__label">
+                  {ERROR_TYPE_LABELS[entry.error_type] ?? entry.error_type}
+                </div>
+                <div className="statsWeak__track">
+                  <div
+                    className="statsWeak__fill"
+                    style={{ width: `${(entry.count / maxErrorCount) * 100}%` }}
+                  />
+                </div>
+                <div className="statsWeak__count">{entry.count}</div>
+              </div>
+            ))}
+          </div>
+
+          {modeChips.length > 0 ? (
+            <div className="statsWeak__modes">
+              {modeChips.map((entry) => (
+                <span key={entry.exercise_mode} className="statsWeak__mode">
+                  {MODE_LABELS[entry.exercise_mode] ?? entry.exercise_mode}
+                  <strong>{entry.count}</strong>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => {
+              navigate("/pratique?tab=phrases");
+            }}
+          >
+            Travailler mes points faibles
+          </button>
+        </>
+      )}
     </div>
   );
 }

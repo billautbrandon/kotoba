@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  type BadgeDefinition,
   type GeminiQuota,
   type KeyboardAnswer,
   type KeyboardCorrection,
   type WordWithStats,
+  type XpAward,
   correctKeyboardAnswers,
   fetchDifficultWords,
   fetchDueWords,
@@ -14,12 +16,17 @@ import {
   submitBulkReviews,
 } from "../../api";
 import { extractKanji } from "../../utils/kanji";
+import { previewReviewXp } from "../../utils/xp";
 import { AudioButton } from "../components/AudioButton";
+import { BadgeNotification } from "../components/BadgeNotification";
 import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
+import { LevelUpOverlay } from "../components/LevelUpOverlay";
+import { PlayIcon } from "../components/NavIcons";
 import { QuotaBar } from "../components/QuotaBar";
+import { XpBar } from "../components/XpBar";
 
 type TrainMode = "tag" | "srs" | "difficult";
-type SrsCategory = "hard" | "medium" | "easy" | "due";
+type SrsCategory = "hard" | "medium" | "easy" | "due" | "mastered";
 type SessionMode = "manual" | "keyboard";
 type KeyboardDirection = "fr" | "jpn";
 type SessionRating = "success" | "partial" | "fail";
@@ -38,6 +45,21 @@ const srsCategoryLabels: Record<SrsCategory, string> = {
   medium: "Moyen",
   easy: "Facile",
   due: "À réviser",
+  mastered: "Maîtrisé",
+};
+
+const PROMPT_CHOICES: Array<{ mode: PromptMode; title: string; text: string }> = [
+  { mode: "french", title: "Français", text: "Tu vois le mot en français." },
+  { mode: "romaji", title: "Rōmaji", text: "Tu vois la lecture en alphabet." },
+  { mode: "kana", title: "Kana", text: "Tu vois l’hiragana / katakana." },
+  { mode: "kanji", title: "Kanji", text: "Tu vois les caractères." },
+];
+
+const promptModeLabels: Record<PromptMode, string> = {
+  french: "français",
+  romaji: "rōmaji",
+  kana: "kana",
+  kanji: "kanji",
 };
 
 export function TrainPage(props: { mode: TrainMode }) {
@@ -100,6 +122,12 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [sessionStartedAtMs, setSessionStartedAtMs] = useState<number | null>(null);
   const [clockNowMs, setClockNowMs] = useState<number>(() => Date.now());
   const [randomPromptModes, setRandomPromptModes] = useState<PromptMode[]>([]);
+  const [comboCount, setComboCount] = useState(0);
+  const comboCountRef = useRef(0);
+  const [xpFlash, setXpFlash] = useState<number | null>(null);
+  const [xpResult, setXpResult] = useState<XpAward | null>(null);
+  const [newBadges, setNewBadges] = useState<BadgeDefinition[]>([]);
+  const [leveledUpTo, setLeveledUpTo] = useState<number | null>(null);
 
   useEffect(() => {
     saveSettings({
@@ -144,6 +172,12 @@ export function TrainPage(props: { mode: TrainMode }) {
     setKeyboardCorrections({});
     setCorrectingError(null);
     setSessionStartedAtMs(Date.now());
+    comboCountRef.current = 0;
+    setComboCount(0);
+    setXpFlash(null);
+    setXpResult(null);
+    setNewBadges([]);
+    setLeveledUpTo(null);
 
     try {
       let loadedWords: WordWithStats[];
@@ -151,12 +185,19 @@ export function TrainPage(props: { mode: TrainMode }) {
       if (props.mode === "difficult") {
         loadedWords = await fetchDifficultWords();
       } else if (props.mode === "srs" && srsCategory === "due") {
-        const dueData = await fetchDueWords();
+        const limitParam = Number(searchParams.get("limit"));
+        const dueData = await fetchDueWords(
+          Number.isFinite(limitParam) && limitParam > 0 ? limitParam : null,
+        );
         loadedWords = dueData.words;
       } else if (props.mode === "srs") {
         const srsData = await fetchSrsWords();
-        const bucketCategory = srsCategory as "hard" | "medium" | "easy";
+        const bucketCategory = srsCategory as "hard" | "medium" | "easy" | "mastered";
         loadedWords = srsData[bucketCategory] ?? [];
+        const limitParam = Number(searchParams.get("limit"));
+        if (Number.isFinite(limitParam) && limitParam > 0) {
+          loadedWords = loadedWords.slice(0, limitParam);
+        }
       } else {
         if (requestedTagIds.length === 0) {
           throw new Error("Tag invalide");
@@ -231,6 +272,10 @@ export function TrainPage(props: { mode: TrainMode }) {
     setKeyboardCorrections({});
     setCorrectingError(null);
     setSessionStartedAtMs(Date.now());
+    comboCountRef.current = 0;
+    setComboCount(0);
+    setXpFlash(null);
+    setXpResult(null);
   }
 
   const correctingTriggered = useRef(false);
@@ -259,6 +304,11 @@ export function TrainPage(props: { mode: TrainMode }) {
     (rating: SessionRating) => {
       if (currentWordId) {
         setRatingsByWordId((prev) => ({ ...prev, [currentWordId]: rating }));
+        const nextCombo = rating === "success" ? comboCountRef.current + 1 : 0;
+        comboCountRef.current = nextCombo;
+        setComboCount(nextCombo);
+        setXpFlash(previewReviewXp(rating, nextCombo));
+        window.setTimeout(() => setXpFlash(null), 700);
         advanceToNextWord();
       }
     },
@@ -403,8 +453,11 @@ export function TrainPage(props: { mode: TrainMode }) {
     if (reviews.length === 0) return;
     setIsSubmitting(true);
     try {
-      await submitBulkReviews(reviews);
+      const result = await submitBulkReviews(reviews);
       setIsRatingsSubmitted(true);
+      setXpResult(result);
+      if (result.newBadges?.length) setNewBadges(result.newBadges);
+      if (result.leveledUp) setLeveledUpTo(result.level);
     } finally {
       setIsSubmitting(false);
     }
@@ -425,7 +478,9 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   function handleCancelSession() {
     if (window.confirm("Annuler la série ? Tes progrès ne seront pas enregistrés.")) {
-      navigate(props.mode === "srs" ? "/srs" : props.mode === "difficult" ? "/difficult" : "/");
+      navigate(
+        props.mode === "srs" ? "/srs" : props.mode === "difficult" ? "/difficult" : "/dictionary",
+      );
     }
   }
 
@@ -495,127 +550,147 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   const progressPercent = words && words.length > 0 ? (currentIndex / words.length) * 100 : 0;
 
+  const backHref =
+    props.mode === "srs" ? "/srs" : props.mode === "difficult" ? "/difficult" : "/dictionary";
+  const backLabel =
+    props.mode === "srs"
+      ? "← SRS"
+      : props.mode === "difficult"
+        ? "← Mots difficiles"
+        : "← Toutes les séries";
+  const setupSummary =
+    configSessionMode === "keyboard"
+      ? `Clavier · ${configKeyboardDirection === "fr" ? "vers le japonais" : "vers le français"}`
+      : configShuffleMode
+        ? "Cartes · langue au hasard"
+        : `Cartes · question en ${promptModeLabels[configPromptMode]}`;
+
   // --- SETUP PHASE ---
   if (phase === "setup") {
     return (
-      <div className="trainSetup">
-        <div className="trainSetup__header">
-          <h1 className="trainSetup__title">{modeLabel}</h1>
-          <p className="trainSetup__subtitle">Configure ta session avant de commencer.</p>
-        </div>
-
-        <div className="trainSetup__section">
-          <h2 className="trainSetup__sectionTitle">Mode</h2>
-          <div className="trainSetup__options">
-            <label
-              className={`trainSetup__option ${configSessionMode === "manual" ? "trainSetup__option--active" : ""}`}
-            >
-              <input
-                type="radio"
-                checked={configSessionMode === "manual"}
-                onChange={() => setConfigSessionMode("manual")}
-              />
-              <div>
-                <div className="trainSetup__optionLabel">Manuel</div>
-                <div className="trainSetup__optionHint">
-                  Avance avec <strong>&rarr;</strong> / <strong>Entrée</strong>, reviens avec{" "}
-                  <strong>&larr;</strong>
-                </div>
-              </div>
-            </label>
-            <label
-              className={`trainSetup__option ${configSessionMode === "keyboard" ? "trainSetup__option--active" : ""}`}
-            >
-              <input
-                type="radio"
-                checked={configSessionMode === "keyboard"}
-                onChange={() => setConfigSessionMode("keyboard")}
-              />
-              <div>
-                <div className="trainSetup__optionLabel">Clavier</div>
-                <div className="trainSetup__optionHint">
-                  Tape tes réponses au clavier, correction par IA à la fin
-                </div>
-              </div>
-            </label>
+      <div className="trainSetup pratique--setup">
+        <div className="pageHeader">
+          <div>
+            <Link className="vocabPage__back" to={backHref}>
+              {backLabel}
+            </Link>
+            <h1 className="pageTitle">{modeLabel}</h1>
+            <p className="pageSubtitle">Choisis comment tu veux réviser.</p>
           </div>
         </div>
 
-        {configSessionMode === "keyboard" ? (
-          <div className="trainSetup__section">
-            <h2 className="trainSetup__sectionTitle">Direction</h2>
-            <div className="trainSetup__promptButtons">
+        <div className="pratiqueSetup">
+          <section className="pratiqueStep">
+            <header className="pratiqueStep__header">
+              <span className="pratiqueStep__index">1</span>
+              <div>
+                <h2 className="pratiqueStep__title">Comment tu révises ?</h2>
+              </div>
+            </header>
+            <div className="pratiqueChoiceGrid">
               <button
-                className={`button ${configKeyboardDirection === "fr" ? "button--primary" : ""}`}
                 type="button"
-                onClick={() => setConfigKeyboardDirection("fr")}
+                className={`pratiqueChoice${configSessionMode === "manual" ? " pratiqueChoice--active" : ""}`}
+                onClick={() => setConfigSessionMode("manual")}
               >
-                FR &rarr; JPN
+                <span className="pratiqueChoice__title">Voir et noter</span>
+                <span className="pratiqueChoice__text">
+                  Tu retournes la carte, puis tu te notes. Raccourcis clavier si tu veux.
+                </span>
               </button>
               <button
-                className={`button ${configKeyboardDirection === "jpn" ? "button--primary" : ""}`}
                 type="button"
-                onClick={() => setConfigKeyboardDirection("jpn")}
+                className={`pratiqueChoice${configSessionMode === "keyboard" ? " pratiqueChoice--active" : ""}`}
+                onClick={() => setConfigSessionMode("keyboard")}
               >
-                JPN &rarr; FR
+                <span className="pratiqueChoice__title">Écrire au clavier</span>
+                <span className="pratiqueChoice__text">
+                  Tu tapes tes réponses. L’IA corrige à la fin de la session.
+                </span>
               </button>
             </div>
-            <p className="trainSetup__optionHint" style={{ marginTop: "var(--space-3)" }}>
-              {configKeyboardDirection === "fr"
-                ? "Le mot français est affiché, tu tapes le kanji et le kana."
-                : "Le mot japonais est affiché, tu tapes le français et l'autre forme japonaise."}
-            </p>
-          </div>
-        ) : (
-          <div className="trainSetup__section">
-            <h2 className="trainSetup__sectionTitle">Question</h2>
-            <div className="trainSetup__promptButtons">
-              {(
-                [
-                  ["french", "FR"],
-                  ["romaji", "Romaji"],
-                  ["kana", "Kana"],
-                  ["kanji", "Kanji"],
-                ] as Array<[PromptMode, string]>
-              ).map(([mode, label]) => (
+          </section>
+
+          {configSessionMode === "keyboard" ? (
+            <section className="pratiqueStep">
+              <header className="pratiqueStep__header">
+                <span className="pratiqueStep__index">2</span>
+                <div>
+                  <h2 className="pratiqueStep__title">Dans quel sens ?</h2>
+                </div>
+              </header>
+              <div className="pratiqueChoiceGrid">
                 <button
-                  key={mode}
-                  className={`button ${configPromptMode === mode && !configShuffleMode ? "button--primary" : ""}`}
                   type="button"
-                  onClick={() => {
-                    setConfigPromptMode(mode);
-                    setConfigShuffleMode(false);
-                  }}
+                  className={`pratiqueChoice${configKeyboardDirection === "fr" ? " pratiqueChoice--active" : ""}`}
+                  onClick={() => setConfigKeyboardDirection("fr")}
                 >
-                  {label}
+                  <span className="pratiqueChoice__title">Écrire en japonais</span>
+                  <span className="pratiqueChoice__text">
+                    Tu vois le français, tu tapes le kanji et le kana.
+                  </span>
                 </button>
-              ))}
-              <button
-                className={`button ${configShuffleMode ? "button--primary" : ""}`}
-                type="button"
-                onClick={() => setConfigShuffleMode(true)}
-                style={configShuffleMode ? undefined : { border: "2px dashed var(--color-border)" }}
-              >
-                Aléatoire
-              </button>
-            </div>
-            {configShuffleMode && (
-              <p className="trainSetup__optionHint" style={{ marginTop: "var(--space-3)" }}>
-                La langue sera choisie au hasard pour chaque mot.
-              </p>
-            )}
-          </div>
-        )}
+                <button
+                  type="button"
+                  className={`pratiqueChoice${configKeyboardDirection === "jpn" ? " pratiqueChoice--active" : ""}`}
+                  onClick={() => setConfigKeyboardDirection("jpn")}
+                >
+                  <span className="pratiqueChoice__title">Écrire en français</span>
+                  <span className="pratiqueChoice__text">
+                    Tu vois le japonais, tu tapes le français.
+                  </span>
+                </button>
+              </div>
+            </section>
+          ) : (
+            <section className="pratiqueStep">
+              <header className="pratiqueStep__header">
+                <span className="pratiqueStep__index">2</span>
+                <div>
+                  <h2 className="pratiqueStep__title">Qu’est-ce que tu vois ?</h2>
+                  <p className="pratiqueStep__hint">La face de la carte, avant de la retourner.</p>
+                </div>
+              </header>
+              <div className="trainSetup__promptGrid">
+                {PROMPT_CHOICES.map((choice) => (
+                  <button
+                    key={choice.mode}
+                    type="button"
+                    className={`pratiqueChoice${configPromptMode === choice.mode && !configShuffleMode ? " pratiqueChoice--active" : ""}`}
+                    onClick={() => {
+                      setConfigPromptMode(choice.mode);
+                      setConfigShuffleMode(false);
+                    }}
+                  >
+                    <span className="pratiqueChoice__title">{choice.title}</span>
+                    <span className="pratiqueChoice__text">{choice.text}</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={`pratiqueChoice${configShuffleMode ? " pratiqueChoice--active" : ""}`}
+                  onClick={() => setConfigShuffleMode(true)}
+                >
+                  <span className="pratiqueChoice__title">Aléatoire</span>
+                  <span className="pratiqueChoice__text">La langue change à chaque mot.</span>
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
 
-        {configSessionMode === "keyboard" && geminiQuota && <QuotaBar quota={geminiQuota} />}
+        {configSessionMode === "keyboard" && geminiQuota ? <QuotaBar quota={geminiQuota} /> : null}
 
-        <div className="trainSetup__actions">
-          <button className="button button--primary" type="button" onClick={startSession}>
+        <div className="pratiqueSetup__launch">
+          <p className="pratiqueSetup__summary">{setupSummary}</p>
+          <button
+            className="button button--primary pratiqueSetup__generate"
+            type="button"
+            onClick={() => void startSession()}
+          >
+            <PlayIcon className="vocabPage__playIcon" />
             Démarrer
           </button>
-          <Link className="button" to={props.mode === "srs" ? "/srs" : "/"}>
-            Retour
-          </Link>
         </div>
       </div>
     );
@@ -658,6 +733,10 @@ export function TrainPage(props: { mode: TrainMode }) {
               Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
             </span>
             <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
+            {comboCount >= 2 ? (
+              <span className="trainSession__combo">🔥 Combo {comboCount}</span>
+            ) : null}
+            {xpFlash !== null ? <span className="trainSession__xpFlash">+{xpFlash} XP</span> : null}
           </div>
           <div className="trainSession__topRight">
             <button className="trainSession__finishBtn" type="button" onClick={handleFinishSession}>
@@ -779,6 +858,10 @@ export function TrainPage(props: { mode: TrainMode }) {
               Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
             </span>
             <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
+            {comboCount >= 2 ? (
+              <span className="trainSession__combo">🔥 Combo {comboCount}</span>
+            ) : null}
+            {xpFlash !== null ? <span className="trainSession__xpFlash">+{xpFlash} XP</span> : null}
           </div>
           <div className="trainSession__topRight">
             <button
@@ -1002,7 +1085,7 @@ export function TrainPage(props: { mode: TrainMode }) {
                 >
                   Voir les resultats sans correction
                 </button>
-                <Link className="button" to={props.mode === "srs" ? "/srs" : "/"}>
+                <Link className="button" to={props.mode === "srs" ? "/srs" : "/dictionary"}>
                   Annuler
                 </Link>
               </div>
@@ -1037,7 +1120,21 @@ export function TrainPage(props: { mode: TrainMode }) {
       </div>
 
       <div className="trainRecap__score">
-        Score: {sessionScoreDelta >= 0 ? `+${sessionScoreDelta}` : sessionScoreDelta}
+        {xpResult ? (
+          <>
+            <div className="trainRecap__xp">+{xpResult.xpGained} XP</div>
+            {xpResult.combo ? (
+              <div className="trainRecap__combo">Combo max {xpResult.combo}</div>
+            ) : null}
+            <XpBar
+              level={xpResult.level}
+              xpInLevel={xpResult.xpInLevel}
+              xpForNextLevel={xpResult.xpForNextLevel}
+            />
+          </>
+        ) : (
+          <>Score: {sessionScoreDelta >= 0 ? `+${sessionScoreDelta}` : sessionScoreDelta}</>
+        )}
       </div>
 
       {words && words.length > 0 && (
@@ -1131,10 +1228,14 @@ export function TrainPage(props: { mode: TrainMode }) {
         >
           Recommencer
         </button>
-        <Link className="button" to={props.mode === "srs" ? "/srs" : "/"}>
-          {props.mode === "srs" ? "Retour au SRS" : "Retour aux series"}
+        <Link className="button" to={props.mode === "srs" ? "/srs" : "/dictionary"}>
+          {props.mode === "srs" ? "Retour au SRS" : "Retour au vocabulaire"}
         </Link>
       </div>
+      <BadgeNotification badges={newBadges} onDismiss={() => setNewBadges([])} />
+      {leveledUpTo ? (
+        <LevelUpOverlay level={leveledUpTo} onDismiss={() => setLeveledUpTo(null)} />
+      ) : null}
     </div>
   );
 }

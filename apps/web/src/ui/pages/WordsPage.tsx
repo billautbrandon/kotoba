@@ -26,9 +26,9 @@ export function WordsPage() {
 
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeTagFilterId, setActiveTagFilterId] = useState<number | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
-
-  const [jsonImportStatus, setJsonImportStatus] = useState<string | null>(null);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState<boolean>(false);
+  const [isResettingScores, setIsResettingScores] = useState<boolean>(false);
+  const [toolsStatus, setToolsStatus] = useState<string | null>(null);
   const importSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -159,17 +159,24 @@ export function WordsPage() {
 
   const hasWords = (words?.length ?? 0) > 0;
 
-  useEffect(() => {
-    if (!isLoading && !hasWords) {
-      setShowAdvanced(true);
-    }
-  }, [isLoading, hasWords]);
-
   function openImport() {
-    setShowAdvanced(true);
-    window.requestAnimationFrame(() => {
-      importSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    importSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function handleConfirmResetScores() {
+    setIsResettingScores(true);
+    setErrorMessage(null);
+    try {
+      await resetAllWordScores();
+      await refreshWordsAndTags();
+      setToolsStatus("Tous les scores ont été réinitialisés.");
+      setIsResetConfirmOpen(false);
+      window.setTimeout(() => setToolsStatus(null), 3000);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    } finally {
+      setIsResettingScores(false);
+    }
   }
 
   return (
@@ -187,21 +194,93 @@ export function WordsPage() {
         </button>
       </div>
 
-      {errorMessage ? (
-        <div style={{ marginTop: "var(--space-5)" }} className="formError">
-          {errorMessage}
+      {errorMessage ? <div className="formError wordsPage__banner">{errorMessage}</div> : null}
+      {toolsStatus ? <div className="formSuccess wordsPage__banner">{toolsStatus}</div> : null}
+
+      <div className="wordsPage__tools">
+        <button className="button" type="button" onClick={() => void handleExportBackup()}>
+          Exporter le backup
+        </button>
+        <button
+          className="button wordsPage__resetButton"
+          type="button"
+          onClick={() => setIsResetConfirmOpen(true)}
+        >
+          Réinitialiser les scores
+        </button>
+      </div>
+
+      {isResetConfirmOpen ? (
+        <div className="wordsPage__confirm" role="alertdialog" aria-labelledby="words-reset-title">
+          <div>
+            <p className="wordsPage__confirmTitle" id="words-reset-title">
+              Réinitialiser tous les scores ?
+            </p>
+            <p className="wordsPage__confirmText">
+              Tous les compteurs de réussite, d’échec et les scores SRS seront remis à zéro. Cette
+              action est irréversible.
+            </p>
+          </div>
+          <div className="wordsPage__confirmActions">
+            <button
+              className="button"
+              type="button"
+              disabled={isResettingScores}
+              onClick={() => setIsResetConfirmOpen(false)}
+            >
+              Annuler
+            </button>
+            <button
+              className="button button--danger"
+              type="button"
+              disabled={isResettingScores}
+              onClick={() => void handleConfirmResetScores()}
+            >
+              {isResettingScores ? "Réinitialisation…" : "Confirmer"}
+            </button>
+          </div>
         </div>
       ) : null}
 
       {hasWords ? (
         <div className="wordsPage__toolbar">
-          <input
-            className="input wordsPage__search"
-            type="search"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Rechercher un mot (français, kana, kanji, rōmaji…)"
-          />
+          <div className="dictionarySearch wordsPage__searchBar">
+            <svg
+              className="dictionarySearch__icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.2-3.2" />
+            </svg>
+            <input
+              className="dictionarySearch__input"
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Rechercher un mot (français, kana, kanji, rōmaji…)"
+            />
+            {searchQuery ? (
+              <button
+                className="dictionarySearch__clear"
+                type="button"
+                aria-label="Effacer la recherche"
+                onClick={() => setSearchQuery("")}
+              >
+                ×
+              </button>
+            ) : null}
+            {searchQuery.trim() ? (
+              <span className="dictionarySearch__count">
+                {filteredWords.length} mot{filteredWords.length > 1 ? "s" : ""}
+              </span>
+            ) : null}
+          </div>
           <div className="wordsPage__tagFilters">
             <button
               type="button"
@@ -234,14 +313,14 @@ export function WordsPage() {
         <div className="wordsPage__empty emptyState emptyState--center">
           <p className="emptyState__title">Aucun mot pour l'instant</p>
           <p className="emptyState__text">
-            Ajoute tes premiers mots à la main, ou importe un fichier JSON pour démarrer plus vite.
+            Ajoute tes premiers mots à la main, ou colle une liste pour que l’IA crée les fiches.
           </p>
           <div className="emptyState__actions">
             <button className="button button--primary" type="button" onClick={openAddModal}>
               + Ajouter un mot
             </button>
             <button className="button" type="button" onClick={openImport}>
-              Importer un fichier
+              Importer une liste
             </button>
           </div>
         </div>
@@ -254,72 +333,18 @@ export function WordsPage() {
       ) : null}
 
       {hasWords && filteredWords.length > 0 ? (
-        <div style={{ marginTop: "var(--space-6)" }}>
-          <WordsGroupedByTag
-            words={filteredWords}
-            startEdit={openEditModal}
-            handleDelete={handleDelete}
-          />
-        </div>
+        <WordsGroupedByTag
+          words={filteredWords}
+          startEdit={openEditModal}
+          handleDelete={handleDelete}
+        />
       ) : null}
 
-      <div className="wordsPage__advanced" ref={importSectionRef}>
-        <button
-          type="button"
-          className="sectionHeader"
-          onClick={() => setShowAdvanced((previous) => !previous)}
-        >
-          <span className="sectionHeader__chevron">{showAdvanced ? "▾" : "▸"}</span>
-          <span className="sectionHeader__title">Import / Export</span>
-          <span className="sectionHeader__meta muted">Backup, import en masse, scores</span>
-        </button>
-
-        {showAdvanced ? (
-          <div className="wordsPage__advancedBody">
-            <div className="row" style={{ gap: "var(--space-3)", marginBottom: "var(--space-5)" }}>
-              <button
-                className="button button--primary"
-                type="button"
-                onClick={() => void handleExportBackup()}
-              >
-                Exporter backup
-              </button>
-              <button
-                className="button button--danger"
-                type="button"
-                onClick={async () => {
-                  if (
-                    !window.confirm(
-                      "Êtes-vous sûr de vouloir réinitialiser tous les scores ? Cette action est irréversible.",
-                    )
-                  )
-                    return;
-                  setErrorMessage(null);
-                  try {
-                    await resetAllWordScores();
-                    await refreshWordsAndTags();
-                    setJsonImportStatus("Tous les scores ont été réinitialisés.");
-                    setTimeout(() => setJsonImportStatus(null), 3000);
-                  } catch (error) {
-                    setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-                  }
-                }}
-              >
-                Réinitialiser tous les scores
-              </button>
-            </div>
-
-            <ImportPanel
-              onImported={refreshWordsAndTags}
-              onError={(message) => setErrorMessage(message)}
-            />
-            {jsonImportStatus ? (
-              <div className="importPanel__status" style={{ marginTop: "var(--space-3)" }}>
-                {jsonImportStatus}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+      <div className="wordsPage__import" ref={importSectionRef}>
+        <ImportPanel
+          onImported={refreshWordsAndTags}
+          onError={(message) => setErrorMessage(message)}
+        />
       </div>
 
       {isModalOpen ? (

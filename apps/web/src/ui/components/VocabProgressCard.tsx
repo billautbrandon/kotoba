@@ -1,73 +1,80 @@
-import type React from "react";
+import { Link } from "react-router-dom";
 
-import type { ActivityDay, StatsOverview, StreakInfo } from "../../api";
+import type { StatsOverview } from "../../api";
+
+type SeriesPreview = {
+  tagId: number;
+  tagName: string;
+  wordsCount: number;
+  lastReviewedAt: string | null;
+};
 
 type VocabProgressCardProps = {
   overview: StatsOverview | null;
-  streakInfo: StreakInfo | null;
-  activity: ActivityDay[];
+  series: SeriesPreview[];
 };
 
-function lastSevenDays(
-  activity: ActivityDay[],
-): { date: string; count: number; isToday: boolean }[] {
-  const activityMap = new Map(activity.map((day) => [day.activity_date, day.reviews_count]));
-  const bars: { date: string; count: number; isToday: boolean }[] = [];
-  const today = new Date();
-
-  for (let offset = 6; offset >= 0; offset -= 1) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - offset);
-    const dateString = date.toISOString().slice(0, 10);
-    bars.push({
-      date: dateString,
-      count: activityMap.get(dateString) ?? 0,
-      isToday: offset === 0,
-    });
-  }
-  return bars;
+function pluralize(count: number, singular: string, plural: string): string {
+  return `${count} ${count > 1 ? plural : singular}`;
 }
 
-export function VocabProgressCard({ overview, streakInfo, activity }: VocabProgressCardProps) {
-  const todayReviews = streakInfo?.todayReviews ?? 0;
-  const dailyGoal = Math.max(1, streakInfo?.dailyGoal ?? 20);
-  const progressPercent = Math.min(100, Math.round((todayReviews / dailyGoal) * 100));
-  const bars = lastSevenDays(activity);
-  const maxBar = Math.max(1, ...bars.map((bar) => bar.count));
+export function VocabProgressCard({ overview, series }: VocabProgressCardProps) {
+  const totalWords = overview?.totalWords ?? 0;
+  const masteredCount = overview?.masteredCount ?? 0;
+  const seriesCount = series.length;
+  const masteryPercent =
+    totalWords > 0 ? Math.min(100, Math.round((masteredCount / totalWords) * 100)) : 0;
+  const recentSeries = [...series]
+    .sort((left, right) => {
+      const leftTime = left.lastReviewedAt ? new Date(left.lastReviewedAt).getTime() : 0;
+      const rightTime = right.lastReviewedAt ? new Date(right.lastReviewedAt).getTime() : 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, 3);
 
   return (
     <div className="dashCard">
-      <h2 className="dashCard__title">Vocabulaire</h2>
+      <div className="dashCard__titleRow">
+        <h2 className="dashCard__title">Vocabulaire</h2>
+        <Link className="dashCard__link" to="/dictionary">
+          Voir les séries
+        </Link>
+      </div>
       <div className="vocabProgress">
-        <div className="vocabProgress__top">
-          <div
-            className="progressRing"
-            style={{ "--progress": progressPercent } as React.CSSProperties}
-          >
-            <div className="progressRing__inner">
-              <div className="progressRing__value">
-                {todayReviews}/{dailyGoal}
-              </div>
-              <div className="progressRing__label">aujourd'hui</div>
-            </div>
-          </div>
-          <div>
-            <div className="vocabProgress__known">
-              {(overview?.masteredCount ?? 0).toLocaleString("fr-FR")}
-            </div>
-            <div className="vocabProgress__knownLabel">mots maîtrisés</div>
+        <div className="vocabProgress__hero">
+          <div className="vocabProgress__known">{totalWords.toLocaleString("fr-FR")}</div>
+          <div className="vocabProgress__knownLabel">
+            {pluralize(totalWords, "mot", "mots")} · {pluralize(seriesCount, "série", "séries")}
           </div>
         </div>
-        <div className="sparkBars" aria-hidden="true">
-          {bars.map((bar) => (
-            <div
-              key={bar.date}
-              className={`sparkBars__bar${bar.isToday ? " sparkBars__bar--today" : ""}`}
-              style={{ height: `${Math.max(8, (bar.count / maxBar) * 100)}%` }}
-              title={`${bar.date}: ${bar.count} révisions`}
-            />
-          ))}
+        <div className="vocabProgress__mastery">
+          <div className="vocabProgress__masteryRow">
+            <span>{masteredCount.toLocaleString("fr-FR")} maîtrisés</span>
+            <span>{masteryPercent}%</span>
+          </div>
+          <div className="vocabProgress__barTrack" aria-hidden="true">
+            <div className="vocabProgress__barFill" style={{ width: `${masteryPercent}%` }} />
+          </div>
         </div>
+        {recentSeries.length > 0 ? (
+          <div className="vocabProgress__series">
+            <div className="vocabProgress__seriesLabel">Récemment révisées</div>
+            <div className="vocabProgress__chips">
+              {recentSeries.map((item) => (
+                <Link
+                  key={item.tagId}
+                  className="vocabProgress__chip"
+                  to={`/train/tag/${item.tagId}?name=${encodeURIComponent(item.tagName)}`}
+                >
+                  {item.tagName}
+                  <span>{item.wordsCount}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="vocabProgress__empty">Ajoute une série pour commencer à réviser.</p>
+        )}
       </div>
     </div>
   );

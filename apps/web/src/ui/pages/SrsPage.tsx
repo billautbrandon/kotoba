@@ -1,9 +1,15 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { SrsSummary, SrsWords, WordWithStats } from "../../api";
 import { fetchSrsSummary, fetchSrsWords } from "../../api";
 import { AudioButton } from "../components/AudioButton";
+import {
+  type SrsBatchSize,
+  loadSrsBatchSize,
+  saveSrsBatchSize,
+  srsDuePath,
+} from "../utils/srsBatch";
 
 type SrsCategory = "hard" | "medium" | "easy" | "mastered";
 
@@ -21,12 +27,25 @@ const categoryDescriptions: Record<SrsCategory, string> = {
   mastered: "10 réussites consécutives",
 };
 
+const BATCH_LABELS: Record<SrsBatchSize, string> = {
+  10: "10",
+  20: "20",
+  30: "30",
+  50: "50",
+  0: "Tout",
+};
+
 export function SrsPage() {
   const navigate = useNavigate();
   const [srsWords, setSrsWords] = useState<SrsWords | null>(null);
   const [srsSummary, setSrsSummary] = useState<SrsSummary | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [batchSize, setBatchSize] = useState<SrsBatchSize>(() => loadSrsBatchSize());
+
+  useEffect(() => {
+    saveSrsBatchSize(batchSize);
+  }, [batchSize]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -46,9 +65,7 @@ export function SrsPage() {
           setSrsWords(null);
         }
       } finally {
-        if (!isCancelled) {
-          setIsLoading(false);
-        }
+        if (!isCancelled) setIsLoading(false);
       }
     }
 
@@ -59,57 +76,66 @@ export function SrsPage() {
   }, []);
 
   function startTraining(category: SrsCategory) {
-    navigate(`/train/srs/${category}`);
+    const query = batchSize > 0 ? `?limit=${batchSize}` : "";
+    navigate(`/train/srs/${category}${query}`);
   }
 
+  const dueCount = srsSummary?.dueCount ?? 0;
+  const reviewCount = Math.max(0, dueCount - (srsSummary?.newCount ?? 0));
+
   return (
-    <div>
+    <div className="srsPage">
       <div className="pageHeader">
         <div>
           <h1 className="pageTitle">SRS</h1>
           <p className="pageSubtitle">
-            Révision espacée : les mots reviennent au bon moment pour une mémorisation durable.
+            Révision espacée : les mots reviennent au bon moment, par petits lots.
           </p>
         </div>
       </div>
 
-      {isLoading ? (
-        <div style={{ marginTop: 16 }} className="muted">
-          Chargement…
-        </div>
-      ) : null}
+      {isLoading ? <div className="muted">Chargement…</div> : null}
+      {errorMessage ? <div className="formError">Erreur: {errorMessage}</div> : null}
 
-      {errorMessage ? (
-        <div style={{ marginTop: 16 }}>
-          <div className="muted">Erreur: {errorMessage}</div>
-        </div>
-      ) : null}
-
-      {!isLoading && srsSummary && srsSummary.dueCount > 0 && (
-        <div className="srsDueCard">
-          <div className="srsDueCard__info">
-            <div className="srsDueCard__count">{srsSummary.dueCount}</div>
-            <div className="srsDueCard__label">mots à réviser</div>
-            <div className="srsDueCard__detail">
-              {srsSummary.newCount > 0 && <span>{srsSummary.newCount} nouveaux</span>}
-              {srsSummary.newCount > 0 && srsSummary.dueCount - srsSummary.newCount > 0 && " · "}
-              {srsSummary.dueCount - srsSummary.newCount > 0 && (
-                <span>{srsSummary.dueCount - srsSummary.newCount} à revoir</span>
-              )}
+      {!isLoading && srsSummary ? (
+        <div className="srsHero">
+          <div className="srsHero__info">
+            <div className="srsHero__count">{dueCount}</div>
+            <div className="srsHero__label">cartes à réviser</div>
+            <div className="srsHero__detail">
+              {reviewCount > 0 ? <span>{reviewCount} à revoir</span> : null}
+              {reviewCount > 0 && srsSummary.newCount > 0 ? " · " : null}
+              {srsSummary.newCount > 0 ? <span>{srsSummary.newCount} nouveaux</span> : null}
+              {dueCount === 0 ? <span>Rien n’est dû pour le moment</span> : null}
             </div>
           </div>
-          <button
-            className="button button--primary"
-            type="button"
-            onClick={() => navigate("/train/srs/due")}
-            style={{ padding: "var(--space-3) var(--space-6)", fontSize: "16px" }}
-          >
-            Commencer la révision
-          </button>
+          <div className="srsHero__controls">
+            <div className="srsHero__batchLabel">Taille du lot</div>
+            <div className="srsHero__batch">
+              {([10, 20, 30, 50, 0] as SrsBatchSize[]).map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  className={`srsHero__batchBtn ${batchSize === size ? "srsHero__batchBtn--active" : ""}`}
+                  onClick={() => setBatchSize(size)}
+                >
+                  {BATCH_LABELS[size]}
+                </button>
+              ))}
+            </div>
+            <button
+              className="button button--primary"
+              type="button"
+              disabled={dueCount === 0}
+              onClick={() => navigate(srsDuePath(batchSize))}
+            >
+              Commencer
+            </button>
+          </div>
         </div>
-      )}
+      ) : null}
 
-      {!isLoading && srsSummary && (
+      {!isLoading && srsSummary ? (
         <div className="srsSummaryBar">
           <div className="srsSummaryBar__item">
             <span className="srsSummaryBar__value">{srsSummary.newCount}</span>
@@ -128,21 +154,21 @@ export function SrsPage() {
             <span className="srsSummaryBar__label">Maîtrisés</span>
           </div>
         </div>
-      )}
+      ) : null}
 
       {!isLoading && srsWords ? (
         <div className="srsGrid">
-          {(["hard", "medium", "easy", "mastered"] as const).map((category) => {
-            const words = srsWords[category];
-            return (
+          {(["hard", "medium", "easy", "mastered"] as const)
+            .filter((category) => srsWords[category].length > 0)
+            .map((category) => (
               <SrsSection
                 key={category}
                 category={category}
-                words={words}
+                words={srsWords[category]}
+                batchSize={batchSize}
                 onStartTraining={() => startTraining(category)}
               />
-            );
-          })}
+            ))}
         </div>
       ) : null}
     </div>
@@ -152,14 +178,17 @@ export function SrsPage() {
 function SrsSection({
   category,
   words,
+  batchSize,
   onStartTraining,
 }: {
   category: SrsCategory;
   words: WordWithStats[];
+  batchSize: SrsBatchSize;
   onStartTraining: () => void;
 }) {
   const label = categoryLabels[category];
   const description = categoryDescriptions[category];
+  const shownCount = batchSize > 0 ? Math.min(batchSize, words.length) : words.length;
 
   const successRate =
     words.length > 0
@@ -181,35 +210,27 @@ function SrsSection({
           <span className="srsCard__count">{words.length}</span>
         </div>
         <p className="srsCard__description">{description}</p>
-        {words.length > 0 && <div className="srsCard__rate">Taux moyen : {successRate}%</div>}
+        {words.length > 0 ? <div className="srsCard__rate">Taux moyen : {successRate}%</div> : null}
       </div>
       <div className="srsCard__body">
-        {words.length > 0 ? (
-          <div className="srsCard__list">
-            {words.slice(0, 3).map((word) => (
-              <div key={word.id} className="srsCard__word">
-                <span className="srsCard__wordFr">{word.french}</span>
-                <span className="srsCard__wordJp">
-                  {word.kanji ?? word.kana ?? word.romaji ?? "—"}
-                  {word.kana && <AudioButton text={word.kana} size="small" />}
-                </span>
-              </div>
-            ))}
-            {words.length > 3 && <div className="srsCard__more">+{words.length - 3} autres</div>}
-          </div>
-        ) : (
-          <div className="srsCard__empty">Aucun mot</div>
-        )}
+        <div className="srsCard__list">
+          {words.slice(0, 3).map((word) => (
+            <div key={word.id} className="srsCard__word">
+              <span className="srsCard__wordFr">{word.french}</span>
+              <span className="srsCard__wordJp">
+                {word.kanji ?? word.kana ?? word.romaji ?? "—"}
+                {word.kana ? <AudioButton text={word.kana} size="small" /> : null}
+              </span>
+            </div>
+          ))}
+          {words.length > 3 ? (
+            <div className="srsCard__more">+{words.length - 3} autres</div>
+          ) : null}
+        </div>
       </div>
       <div className="srsCard__footer">
-        <button
-          className="button button--primary"
-          type="button"
-          onClick={onStartTraining}
-          disabled={words.length === 0}
-          style={{ width: "100%" }}
-        >
-          Lancer l&apos;entraînement
+        <button className="button button--primary" type="button" onClick={onStartTraining}>
+          Lancer {shownCount} mot{shownCount > 1 ? "s" : ""}
         </button>
       </div>
     </div>

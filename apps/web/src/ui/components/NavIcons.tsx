@@ -104,3 +104,60 @@ export function PlayIcon({ className }: NavIconProps) {
     </svg>
   );
 }
+
+export function EyeIcon({ className }: NavIconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <title>Voir</title>
+      <path d="M2.5 12s3.6-7 9.5-7 9.5 7 9.5 7-3.6 7-9.5 7-9.5-7-9.5-7Z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </svg>
+  );
+}
+
+export function WordsNavIcon({ className }: NavIconProps) {
+  return (
+    <svg
+      className={className ?? "sidebar__icon"}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <title>Mots</title>
+      <path d="M5 6.5h14M5 12h10M5 17.5h12" />
+    </svg>
+  );
+}
+
+export function LayersIcon({ className }: NavIconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <title>Plusieurs séries</title>
+      <path d="M12 4 4.5 8.2 12 12.4l7.5-4.2L12 4Z" />
+      <path d="M4.5 12.2 12 16.4l7.5-4.2" />
+      <path d="M4.5 16.2 12 20.4l7.5-4.2" />
+    </svg>
+  );
+}

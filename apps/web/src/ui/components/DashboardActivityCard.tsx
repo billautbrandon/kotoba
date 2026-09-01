@@ -24,24 +24,37 @@ export function DashboardActivityCard({
   streakInfo,
   overview,
 }: DashboardActivityCardProps) {
+  const streak = streakInfo?.currentStreak ?? 0;
+  const weekReviews = reviewsThisWeek(activity);
+  const successRate = overview?.avgSuccessRate ?? 0;
+
   return (
     <div className="dashCard dashCard--span2">
-      <h2 className="dashCard__title">Activité</h2>
-      <ActivityHeatmap activity={activity} weekCount={16} compact />
+      <div className="dashCard__titleRow">
+        <h2 className="dashCard__title">Activité</h2>
+      </div>
       <div className="heatmapStats">
         <div className="heatmapStats__item">
-          <div className="heatmapStats__value">{streakInfo?.currentStreak ?? 0}</div>
-          <div className="heatmapStats__label">jours de série</div>
+          <div className="heatmapStats__value">
+            <span className="heatmapStats__flame" aria-hidden="true">
+              🔥
+            </span>
+            {streak}
+          </div>
+          <div className="heatmapStats__label">
+            {streak > 1 ? "jours de série" : "jour de série"}
+          </div>
         </div>
         <div className="heatmapStats__item">
-          <div className="heatmapStats__value">{reviewsThisWeek(activity)}</div>
+          <div className="heatmapStats__value">{weekReviews}</div>
           <div className="heatmapStats__label">cette semaine</div>
         </div>
         <div className="heatmapStats__item">
-          <div className="heatmapStats__value">{overview?.avgSuccessRate ?? 0}%</div>
+          <div className="heatmapStats__value">{successRate}%</div>
           <div className="heatmapStats__label">réussite</div>
         </div>
       </div>
+      <ActivityHeatmap activity={activity} weekCount={20} compact showLegend />
     </div>
   );
 }

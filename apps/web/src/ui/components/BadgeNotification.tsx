@@ -11,56 +11,30 @@ export function BadgeNotification({ badges, onDismiss }: BadgeNotificationProps)
 
   useEffect(() => {
     if (badges.length === 0) return;
-    const showTimer = setTimeout(() => setIsVisible(true), 100);
-    const hideTimer = setTimeout(() => {
+    const showTimer = window.setTimeout(() => setIsVisible(true), 80);
+    const hideTimer = window.setTimeout(() => {
       setIsVisible(false);
-      setTimeout(onDismiss, 400);
+      window.setTimeout(onDismiss, 400);
     }, 5000);
     return () => {
-      clearTimeout(showTimer);
-      clearTimeout(hideTimer);
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
     };
   }, [badges, onDismiss]);
 
   if (badges.length === 0) return null;
 
   return (
-    <div style={{
-      position: "fixed",
-      top: "var(--space-4)",
-      right: "var(--space-4)",
-      zIndex: 9999,
-      display: "flex",
-      flexDirection: "column",
-      gap: "var(--space-2)",
-      transform: isVisible ? "translateX(0)" : "translateX(120%)",
-      opacity: isVisible ? 1 : 0,
-      transition: "transform 0.4s ease, opacity 0.4s ease",
-    }}>
+    <div className={`badgeToast ${isVisible ? "badgeToast--visible" : ""}`}>
       {badges.map((badge) => (
-        <div key={badge.id} style={{
-          padding: "var(--space-3) var(--space-4)",
-          background: "var(--color-surface)",
-          border: "2px solid var(--color-border)",
-          borderRadius: "var(--radius-lg)",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--space-3)",
-          minWidth: "260px",
-          cursor: "pointer",
-        }} onClick={onDismiss}>
-          <span style={{ fontSize: "32px" }}>{badge.icon}</span>
-          <div>
-            <div style={{ fontSize: "12px", color: "var(--color-text-soft)", fontWeight: 500 }}>
-              Nouveau badge !
-            </div>
-            <div style={{ fontSize: "14px", fontWeight: 600 }}>{badge.title}</div>
-            <div style={{ fontSize: "12px", color: "var(--color-text-soft)" }}>
-              {badge.description}
-            </div>
-          </div>
-        </div>
+        <button key={badge.id} className="badgeToast__card" type="button" onClick={onDismiss}>
+          <span className="badgeToast__icon">{badge.icon}</span>
+          <span>
+            <span className="badgeToast__kicker">Nouveau badge</span>
+            <span className="badgeToast__title">{badge.title}</span>
+            <span className="badgeToast__text">{badge.description}</span>
+          </span>
+        </button>
       ))}
     </div>
   );
