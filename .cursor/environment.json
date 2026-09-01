@@ -1,0 +1,15 @@
+{
+  "name": "Kotoba",
+  "install": "npm install",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev",
+      "description": "Runs the API (Express + tsx watch on port 3001) and the web app (webpack-dev-server on port 3000) concurrently. Web proxies /api and /avatars to the API. A default account (username: root, password: root) is seeded on first start."
+    }
+  ],
+  "ports": [
+    { "name": "web", "port": 3000 },
+    { "name": "api", "port": 3001 }
+  ]
+}
