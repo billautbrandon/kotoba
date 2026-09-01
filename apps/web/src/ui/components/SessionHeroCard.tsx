@@ -1,10 +1,15 @@
 import type { User } from "../../api";
 import { PlayIcon } from "./NavIcons";
+import { XpBar } from "./XpBar";
 
 type SessionHeroCardProps = {
   currentUser: User | null;
   dueCount: number;
   todayReviews: number;
+  currentStreak: number;
+  level: number;
+  xpInLevel: number;
+  xpForNextLevel: number;
   onStartSession: () => void;
 };
 
@@ -18,6 +23,10 @@ export function SessionHeroCard({
   currentUser,
   dueCount,
   todayReviews,
+  currentStreak,
+  level,
+  xpInLevel,
+  xpForNextLevel,
   onStartSession,
 }: SessionHeroCardProps) {
   const now = new Date();
@@ -48,6 +57,22 @@ export function SessionHeroCard({
         <div className="sessionHero__greet">
           {greetingForHour(now.getHours())}
           {displayName ? `, ${displayName}` : ""}
+        </div>
+        <div className="sessionHero__progress">
+          <XpBar
+            level={level}
+            xpInLevel={xpInLevel}
+            xpForNextLevel={xpForNextLevel}
+            variant="hero"
+          />
+          <div className="sessionHero__streak" title="Série quotidienne">
+            <span className="sessionHero__streakFlame" aria-hidden="true">
+              🔥
+            </span>
+            <span>
+              {currentStreak} jour{currentStreak > 1 ? "s" : ""}
+            </span>
+          </div>
         </div>
         <button
           className="sessionHero__start"
