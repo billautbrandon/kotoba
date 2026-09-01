@@ -128,6 +128,7 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [xpResult, setXpResult] = useState<XpAward | null>(null);
   const [newBadges, setNewBadges] = useState<BadgeDefinition[]>([]);
   const [leveledUpTo, setLeveledUpTo] = useState<number | null>(null);
+  const [followUpRound, setFollowUpRound] = useState(0);
 
   useEffect(() => {
     saveSettings({
@@ -178,6 +179,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     setXpResult(null);
     setNewBadges([]);
     setLeveledUpTo(null);
+    setFollowUpRound(0);
 
     try {
       let loadedWords: WordWithStats[];
@@ -258,9 +260,8 @@ export function TrainPage(props: { mode: TrainMode }) {
     });
   }, [words]);
 
-  function restartSession() {
-    if (!words) return;
-    const reshuffled = shuffleWords(words);
+  function beginTrainingRound(roundWords: WordWithStats[], nextFollowUpRound: number) {
+    const reshuffled = shuffleWords(roundWords);
     setWords(reshuffled);
     setRandomPromptModes(generateRandomPromptModes(reshuffled.length));
     setCurrentIndex(0);
@@ -276,6 +277,15 @@ export function TrainPage(props: { mode: TrainMode }) {
     setComboCount(0);
     setXpFlash(null);
     setXpResult(null);
+    setNewBadges([]);
+    setLeveledUpTo(null);
+    setFollowUpRound(nextFollowUpRound);
+    setErrorMessage(null);
+  }
+
+  function restartSession() {
+    if (!words) return;
+    beginTrainingRound(words, followUpRound);
   }
 
   const correctingTriggered = useRef(false);
@@ -382,6 +392,16 @@ export function TrainPage(props: { mode: TrainMode }) {
     return { successCount, partialCount, failCount, skippedCount };
   }, [allSessionWordIds, ratingsByWordId]);
 
+  const failedWords = useMemo(() => {
+    if (!words) return [];
+    return words.filter((word) => {
+      const rating = ratingsByWordId[word.id];
+      return rating === "partial" || rating === "fail";
+    });
+  }, [words, ratingsByWordId]);
+
+  const failedWordCount = failedWords.length;
+
   const sessionScoreDelta = useMemo(() => {
     let delta = 0;
     for (const wordId of allSessionWordIds) {
@@ -440,8 +460,8 @@ export function TrainPage(props: { mode: TrainMode }) {
     setRatingsByWordId((prev) => ({ ...prev, [wordId]: rating }));
   }
 
-  async function submitRatings() {
-    if (!words) return;
+  async function submitRatings(): Promise<boolean> {
+    if (!words) return false;
     const reviews = words
       .map((word) => {
         const rating = ratingsByWordId[word.id];
@@ -450,17 +470,32 @@ export function TrainPage(props: { mode: TrainMode }) {
       })
       .filter((review): review is { wordId: number; result: SessionRating } => review !== null);
 
-    if (reviews.length === 0) return;
+    if (reviews.length === 0) return false;
     setIsSubmitting(true);
+    setErrorMessage(null);
     try {
       const result = await submitBulkReviews(reviews);
       setIsRatingsSubmitted(true);
       setXpResult(result);
       if (result.newBadges?.length) setNewBadges(result.newBadges);
       if (result.leveledUp) setLeveledUpTo(result.level);
+      return true;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Impossible d’enregistrer la série");
+      return false;
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function startFailedWordsFollowUp() {
+    const wordsToRetry = failedWords;
+    if (wordsToRetry.length === 0) return;
+    if (!isRatingsSubmitted) {
+      const didSave = await submitRatings();
+      if (!didSave) return;
+    }
+    beginTrainingRound(wordsToRetry, followUpRound + 1);
   }
 
   function goToPreviousWord() {
@@ -732,6 +767,9 @@ export function TrainPage(props: { mode: TrainMode }) {
             <span className="trainSession__counter">
               Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
             </span>
+            {followUpRound > 0 ? (
+              <span className="trainSession__followUp">Relance {followUpRound}</span>
+            ) : null}
             <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
             {comboCount >= 2 ? (
               <span className="trainSession__combo">🔥 Combo {comboCount}</span>
@@ -857,6 +895,9 @@ export function TrainPage(props: { mode: TrainMode }) {
             <span className="trainSession__counter">
               Mot {words ? currentIndex + 1 : 0} / {words?.length ?? 0}
             </span>
+            {followUpRound > 0 ? (
+              <span className="trainSession__followUp">Relance {followUpRound}</span>
+            ) : null}
             <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
             {comboCount >= 2 ? (
               <span className="trainSession__combo">🔥 Combo {comboCount}</span>
@@ -1097,9 +1138,15 @@ export function TrainPage(props: { mode: TrainMode }) {
   }
 
   // --- FINISHED PHASE ---
+  const failedWordsLabel = `${failedWordCount} mot${failedWordCount > 1 ? "s" : ""} raté${
+    failedWordCount > 1 ? "s" : ""
+  }`;
+
   return (
     <div className="trainRecap">
-      <h2 className="trainRecap__title">Fin de serie</h2>
+      <h2 className="trainRecap__title">
+        {followUpRound > 0 ? `Relance ${followUpRound}` : "Fin de serie"}
+      </h2>
       <div className="trainRecap__summary">
         {recapCounts.successCount + recapCounts.partialCount + recapCounts.failCount} mot(s) note(s)
         sur {words?.length ?? 0}.
@@ -1118,6 +1165,16 @@ export function TrainPage(props: { mode: TrainMode }) {
           </span>
         )}
       </div>
+      {failedWordCount > 0 ? (
+        <p className="trainRecap__followUpHint">
+          Relance uniquement les mots partiels et incorrects, autant de fois que tu veux, jusqu’à
+          tout réussir.
+        </p>
+      ) : null}
+      {followUpRound > 0 && failedWordCount === 0 ? (
+        <p className="trainRecap__followUpDone">Tous les mots de cette relance sont réussis.</p>
+      ) : null}
+      {errorMessage ? <div className="formError">{errorMessage}</div> : null}
 
       <div className="trainRecap__score">
         {xpResult ? (
@@ -1212,10 +1269,22 @@ export function TrainPage(props: { mode: TrainMode }) {
       )}
 
       <div className="trainRecap__actions">
+        {failedWordCount > 0 ? (
+          <button
+            className="button button--primary"
+            type="button"
+            onClick={() => void startFailedWordsFollowUp()}
+            disabled={isSubmitting}
+          >
+            {isRatingsSubmitted
+              ? `Revoir les ${failedWordsLabel}`
+              : `Enregistrer et revoir les ${failedWordsLabel}`}
+          </button>
+        ) : null}
         <button
-          className="button button--primary"
+          className={failedWordCount > 0 ? "button" : "button button--primary"}
           type="button"
-          onClick={() => submitRatings()}
+          onClick={() => void submitRatings()}
           disabled={isSubmitting || isRatingsSubmitted}
         >
           {isRatingsSubmitted ? "Serie enregistree" : "Enregistrer la serie"}

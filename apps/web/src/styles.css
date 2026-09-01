@@ -1878,6 +1878,15 @@ select.input:focus {
   color: var(--color-primary);
 }
 
+.trainSession__followUp {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+  background: var(--color-primary-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
 .trainSession__timer {
   font-size: 13px;
   color: var(--color-muted);
@@ -2225,6 +2234,22 @@ select.input:focus {
   color: var(--color-muted-light);
   font-weight: 600;
   font-style: italic;
+}
+
+.trainRecap__followUpHint,
+.trainRecap__followUpDone {
+  margin: 0 0 var(--space-4);
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.trainRecap__followUpDone {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.trainRecap .formError {
+  margin: 0 0 var(--space-4);
 }
 
 .trainRecap__row--skipped td {
