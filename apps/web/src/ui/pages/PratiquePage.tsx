@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   BulkReviewsError,
@@ -7,8 +7,10 @@ import {
   type ConstructionBlock,
   type GeminiQuota,
   type GeneratedPhrase,
+  type GrammarNote,
   type JlptConstraints,
   type JlptExercise,
+  type ListeningExercise,
   type PhraseConstraints,
   type PhraseEvaluation,
   type Tag,
@@ -29,19 +31,49 @@ import {
   generatePhrases,
   savePhrase,
   submitBulkReviews,
-  type ListeningExercise,
-  type GrammarNote,
 } from "../../api";
 import { AnswerDiff } from "../components/AnswerDiff";
 import { AudioButton } from "../components/AudioButton";
+import { PillNav } from "../components/PillNav";
 import { QuotaBar } from "../components/QuotaBar";
 import { SentenceBuilder, joinBlocks } from "../components/SentenceBuilder";
 import { TeacherChat } from "../components/TeacherChat";
 import { VoiceButton } from "../components/VoiceButton";
 
 type PratiqueTab = "phrases" | "jlpt" | "conjugaison" | "construction" | "ecoute";
-type PratiquePhase = "setup" | "training" | "recap";
+type HubMode = "phrases" | "jlpt" | "conjugaison";
+type PhraseStyle = "write" | "blocks" | "story";
+type PratiquePhase = "hub" | "setup" | "training" | "recap";
 type SentenceLength = "short" | "medium" | "long";
+type JlptLevel = "N5" | "N4" | "N3" | "N2" | "N1";
+
+const JLPT_LEVELS: JlptLevel[] = ["N5", "N4", "N3", "N2", "N1"];
+const JLPT_LEVEL_HINTS: Record<JlptLevel, string> = {
+  N5: "Bases du quotidien.",
+  N4: "Élémentaire.",
+  N3: "Intermédiaire.",
+  N2: "Avancé.",
+  N1: "Expert.",
+};
+const JLPT_LEVEL_KEY = "kotoba.jlptLevel";
+
+const PRATIQUE_PILLS: Array<{ id: HubMode; label: string; hint: string }> = [
+  { id: "phrases", label: "Phrases", hint: "Avec tes mots" },
+  { id: "jlpt", label: "JLPT", hint: "N5 à N1" },
+  { id: "conjugaison", label: "Conjugaison", hint: "Tes verbes" },
+];
+
+function loadJlptLevel(): JlptLevel {
+  const stored = window.localStorage.getItem(JLPT_LEVEL_KEY);
+  if (stored === "N5" || stored === "N4" || stored === "N3" || stored === "N2" || stored === "N1") {
+    return stored;
+  }
+  return "N5";
+}
+
+function saveJlptLevel(level: JlptLevel) {
+  window.localStorage.setItem(JLPT_LEVEL_KEY, level);
+}
 
 const PHRASES_SETTINGS_KEY = "kotoba.phrasesSettings.v1";
 
@@ -58,7 +90,42 @@ type PersistedPhrasesSettings = {
   withKanji: boolean;
   sentenceLength: SentenceLength;
   vocabSampleSize: number;
+  phraseStyle: PhraseStyle;
 };
+
+function isPratiqueTab(value: string | null): value is PratiqueTab {
+  return (
+    value === "phrases" ||
+    value === "jlpt" ||
+    value === "conjugaison" ||
+    value === "construction" ||
+    value === "ecoute"
+  );
+}
+
+function isPhraseStyle(value: unknown): value is PhraseStyle {
+  return value === "write" || value === "blocks" || value === "story";
+}
+
+function sessionTabForPhraseStyle(style: PhraseStyle): PratiqueTab {
+  return style === "blocks" ? "construction" : "phrases";
+}
+
+function resolvePhraseStyle(
+  tabFromUrl: string | null,
+  persisted: Partial<PersistedPhrasesSettings> | null,
+): PhraseStyle {
+  if (tabFromUrl === "construction") return "blocks";
+  if (tabFromUrl === "phrases") {
+    if (persisted?.phraseStyle === "story" || persisted?.contentType === "paragraph") {
+      return "story";
+    }
+    return "write";
+  }
+  if (isPhraseStyle(persisted?.phraseStyle)) return persisted.phraseStyle;
+  if (persisted?.contentType === "paragraph") return "story";
+  return "write";
+}
 
 function loadPhrasesSettings(): Partial<PersistedPhrasesSettings> | null {
   try {
@@ -109,6 +176,9 @@ const CONJUGATION_FORMS = [
   "forme causative",
 ];
 
+const CORE_CONJUGATION_FORMS = CONJUGATION_FORMS.slice(0, 4);
+const EXTRA_CONJUGATION_FORMS = CONJUGATION_FORMS.slice(4);
+
 type UnifiedExercise = {
   prompt: string;
   answer: string;
@@ -130,9 +200,14 @@ type UnifiedResult = {
 
 export function PratiquePage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = (searchParams.get("tab") as PratiqueTab) || "phrases";
+  const tabFromUrl = searchParams.get("tab");
+  const persistedPhrases = useMemo(() => loadPhrasesSettings(), []);
+  const initialTab: PratiqueTab = isPratiqueTab(tabFromUrl) ? tabFromUrl : "phrases";
   const [activeTab, setActiveTab] = useState<PratiqueTab>(initialTab);
   const [phase, setPhase] = useState<PratiquePhase>("setup");
+  const [phraseStyle, setPhraseStyle] = useState<PhraseStyle>(() =>
+    resolvePhraseStyle(tabFromUrl, persistedPhrases),
+  );
 
   // Shared state
   const [tags, setTags] = useState<Tag[]>([]);
@@ -144,13 +219,14 @@ export function PratiquePage() {
   const [hasCheckedCurrent, setHasCheckedCurrent] = useState(false);
   const [currentFeedback, setCurrentFeedback] = useState<string | null>(null);
   const [currentIsCorrect, setCurrentIsCorrect] = useState<boolean | null>(null);
+  const [currentHint, setCurrentHint] = useState<string | null>(null);
+  const [isRetryingPhrase, setIsRetryingPhrase] = useState(false);
+  const [phraseRetryUsed, setPhraseRetryUsed] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showContext, setShowContext] = useState(false);
 
   // Phrases state (restored from localStorage on first render)
-  const persistedPhrases = useMemo(() => loadPhrasesSettings(), []);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(
     persistedPhrases?.selectedTagIds ?? [],
   );
@@ -172,7 +248,7 @@ export function PratiquePage() {
     persistedPhrases?.direction ?? "fr-to-jp",
   );
   const [contentType, setContentType] = useState<"phrases" | "paragraph">(
-    persistedPhrases?.contentType ?? "phrases",
+    resolvePhraseStyle(tabFromUrl, persistedPhrases) === "story" ? "paragraph" : "phrases",
   );
   const [withKanji, setWithKanji] = useState(persistedPhrases?.withKanji ?? true);
   const [sentenceLength, setSentenceLength] = useState<SentenceLength>(
@@ -191,6 +267,11 @@ export function PratiquePage() {
     "medium",
   );
   const [jlptContext, setJlptContext] = useState("");
+  const [jlptLevel, setJlptLevel] = useState<JlptLevel>(() => loadJlptLevel());
+
+  useEffect(() => {
+    saveJlptLevel(jlptLevel);
+  }, [jlptLevel]);
 
   // Conjugation state
   const [conjTagId, setConjTagId] = useState<number | null>(null);
@@ -214,19 +295,23 @@ export function PratiquePage() {
 
   // Listening state
   const [listeningTagIds, setListeningTagIds] = useState<number[]>([]);
-  const [listeningDifficulty, setListeningDifficulty] = useState<"debutant" | "intermediaire">("debutant");
+  const [listeningDifficulty, setListeningDifficulty] = useState<"debutant" | "intermediaire">(
+    "debutant",
+  );
   const [listeningCount, setListeningCount] = useState(5);
   const [listeningExercises, setListeningExercises] = useState<ListeningExercise[]>([]);
   const [listeningIndex, setListeningIndex] = useState(0);
   const [listeningTranscript, setListeningTranscript] = useState("");
   const [listeningRevealed, setListeningRevealed] = useState(false);
-  const [listeningResults, setListeningResults] = useState<Array<{
-    exercise: ListeningExercise;
-    userTranscript: string;
-    isCorrect: boolean | null;
-    feedback: string | null;
-    revealed: boolean;
-  }>>([]);
+  const [listeningResults, setListeningResults] = useState<
+    Array<{
+      exercise: ListeningExercise;
+      userTranscript: string;
+      isCorrect: boolean | null;
+      feedback: string | null;
+      revealed: boolean;
+    }>
+  >([]);
   const [listeningSpeed, setListeningSpeed] = useState(1.0);
   const [listeningIsPlaying, setListeningIsPlaying] = useState(false);
   const [listeningIsPaused, setListeningIsPaused] = useState(false);
@@ -254,6 +339,14 @@ export function PratiquePage() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (tags.length !== 1) return;
+    const onlyTagId = tags[0].id;
+    setSelectedTagIds((previous) => (previous.length === 0 ? [onlyTagId] : previous));
+    setListeningTagIds((previous) => (previous.length === 0 ? [onlyTagId] : previous));
+    setConjTagId((previous) => previous ?? onlyTagId);
+  }, [tags]);
 
   // Recover and flush any pending SRS reviews from a previous failed session.
   useEffect(() => {
@@ -308,6 +401,7 @@ export function PratiquePage() {
       withKanji,
       sentenceLength,
       vocabSampleSize,
+      phraseStyle,
     });
   }, [
     selectedTagIds,
@@ -322,12 +416,37 @@ export function PratiquePage() {
     withKanji,
     sentenceLength,
     vocabSampleSize,
+    phraseStyle,
   ]);
 
-  function handleTabChange(tab: PratiqueTab) {
-    if (phase !== "setup") return;
-    setActiveTab(tab);
-    setSearchParams({ tab });
+  function handleTabChange(tab: HubMode) {
+    if (phase !== "setup" && phase !== "hub") return;
+    if (tab === "phrases") {
+      const sessionTab = sessionTabForPhraseStyle(phraseStyle);
+      setActiveTab(sessionTab);
+      setSearchParams({ tab: sessionTab });
+    } else {
+      setActiveTab(tab);
+      setSearchParams({ tab });
+    }
+    setErrorMessage(null);
+    setPhase("setup");
+  }
+
+  function applyPhraseStyle(style: PhraseStyle) {
+    setPhraseStyle(style);
+    if (style === "blocks") {
+      setActiveTab("construction");
+      setSearchParams({ tab: "construction" });
+    } else if (style === "story") {
+      setActiveTab("phrases");
+      setContentType("paragraph");
+      setSearchParams({ tab: "phrases" });
+    } else {
+      setActiveTab("phrases");
+      setContentType("phrases");
+      setSearchParams({ tab: "phrases" });
+    }
     setErrorMessage(null);
   }
 
@@ -340,6 +459,9 @@ export function PratiquePage() {
     setHasCheckedCurrent(false);
     setCurrentFeedback(null);
     setCurrentIsCorrect(null);
+    setCurrentHint(null);
+    setIsRetryingPhrase(false);
+    setPhraseRetryUsed(false);
     setErrorMessage(null);
     setReviewsSubmitted(false);
     setAddedToVocab(new Set());
@@ -358,7 +480,7 @@ export function PratiquePage() {
         tense,
         polarity,
         politeness,
-        count: phraseCount,
+        count: contentType === "paragraph" ? 1 : phraseCount,
         customContext: customContext.trim() || undefined,
         direction,
         contentType,
@@ -380,6 +502,9 @@ export function PratiquePage() {
       setResults([]);
       setHasCheckedCurrent(false);
       setReviewsSubmitted(false);
+      setCurrentHint(null);
+      setIsRetryingPhrase(false);
+      setPhraseRetryUsed(false);
       setPhase("training");
       refreshQuota();
     } catch (error) {
@@ -400,6 +525,7 @@ export function PratiquePage() {
         count: jlptType === "paragraph" ? 1 : jlptCount,
         paragraphLength: jlptType === "paragraph" ? jlptParagraphLength : undefined,
         customContext: jlptContext.trim() || undefined,
+        level: jlptLevel,
       });
       const unified: UnifiedExercise[] = generated.map((exercise) => ({
         prompt: exercise.prompt,
@@ -413,6 +539,9 @@ export function PratiquePage() {
       setResults([]);
       setHasCheckedCurrent(false);
       setAddedToVocab(new Set());
+      setCurrentHint(null);
+      setIsRetryingPhrase(false);
+      setPhraseRetryUsed(false);
       setPhase("training");
       refreshQuota();
     } catch (error) {
@@ -453,6 +582,9 @@ export function PratiquePage() {
       setResults([]);
       setHasCheckedCurrent(false);
       setConjEvaluationCache(new Map());
+      setCurrentHint(null);
+      setIsRetryingPhrase(false);
+      setPhraseRetryUsed(false);
       setPhase("training");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
@@ -505,6 +637,9 @@ export function PratiquePage() {
       setResults([]);
       setHasCheckedCurrent(false);
       setReviewsSubmitted(false);
+      setCurrentHint(null);
+      setIsRetryingPhrase(false);
+      setPhraseRetryUsed(false);
       setPhase("training");
       refreshQuota();
     } catch (error) {
@@ -544,9 +679,20 @@ export function PratiquePage() {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "ja-JP";
     utterance.rate = listeningSpeed;
-    utterance.onstart = () => { setListeningIsPlaying(true); setListeningIsPaused(false); };
-    utterance.onend = () => { setListeningIsPlaying(false); setListeningIsPaused(false); listeningUtteranceRef.current = null; };
-    utterance.onerror = () => { setListeningIsPlaying(false); setListeningIsPaused(false); listeningUtteranceRef.current = null; };
+    utterance.onstart = () => {
+      setListeningIsPlaying(true);
+      setListeningIsPaused(false);
+    };
+    utterance.onend = () => {
+      setListeningIsPlaying(false);
+      setListeningIsPaused(false);
+      listeningUtteranceRef.current = null;
+    };
+    utterance.onerror = () => {
+      setListeningIsPlaying(false);
+      setListeningIsPaused(false);
+      listeningUtteranceRef.current = null;
+    };
     listeningUtteranceRef.current = utterance;
     window.speechSynthesis.speak(utterance);
   }
@@ -572,13 +718,16 @@ export function PratiquePage() {
         currentListeningExercise.french,
       );
       refreshQuota();
-      setListeningResults((previous) => [...previous, {
-        exercise: currentListeningExercise,
-        userTranscript: listeningTranscript.trim(),
-        isCorrect: evaluation.isCorrect ?? false,
-        feedback: evaluation.feedback ?? null,
-        revealed: listeningRevealed,
-      }]);
+      setListeningResults((previous) => [
+        ...previous,
+        {
+          exercise: currentListeningExercise,
+          userTranscript: listeningTranscript.trim(),
+          isCorrect: evaluation.isCorrect ?? false,
+          feedback: evaluation.feedback ?? null,
+          revealed: listeningRevealed,
+        },
+      ]);
       if (listeningIndex + 1 < listeningExercises.length) {
         setListeningIndex(listeningIndex + 1);
         setListeningTranscript("");
@@ -623,23 +772,28 @@ export function PratiquePage() {
     setIsEvaluating(true);
     setErrorMessage(null);
     try {
-      if (activeTab === "phrases") {
+      if (activeTab === "phrases" || activeTab === "construction") {
         const evaluation = await evaluatePhrase(
           userAnswer.trim(),
           currentExercise.answer,
-          currentExercise.prompt,
-          direction,
+          activeTab === "construction"
+            ? (currentExercise.frenchPrompt ?? currentExercise.prompt)
+            : currentExercise.prompt,
+          activeTab === "construction" ? (currentExercise.direction ?? direction) : direction,
         );
-        setCurrentIsCorrect(evaluation.isCorrect);
-        setCurrentFeedback(evaluation.feedback);
-      } else if (activeTab === "construction") {
-        const exerciseDirection = currentExercise.direction ?? direction;
-        const evaluation = await evaluatePhrase(
-          userAnswer.trim(),
-          currentExercise.answer,
-          currentExercise.frenchPrompt ?? currentExercise.prompt,
-          exerciseDirection,
-        );
+        const canRetry = Boolean(evaluation.retryable) && !evaluation.isCorrect && !phraseRetryUsed;
+        if (canRetry) {
+          setIsRetryingPhrase(true);
+          setPhraseRetryUsed(true);
+          setCurrentHint(evaluation.hint ?? evaluation.feedback);
+          setCurrentIsCorrect(false);
+          setCurrentFeedback(null);
+          setHasCheckedCurrent(false);
+          refreshQuota();
+          return;
+        }
+        setIsRetryingPhrase(false);
+        setCurrentHint(null);
         setCurrentIsCorrect(evaluation.isCorrect);
         setCurrentFeedback(evaluation.feedback);
       } else if (activeTab === "jlpt") {
@@ -692,12 +846,22 @@ export function PratiquePage() {
       setUserAnswer("");
       setCurrentIsCorrect(null);
       setCurrentFeedback(null);
+      setCurrentHint(null);
+      setIsRetryingPhrase(false);
+      setPhraseRetryUsed(false);
       setHasCheckedCurrent(false);
       setErrorMessage(null);
       setTimeout(() => {
         if (activeTab === "conjugaison") inputRef.current?.focus();
       }, 50);
     }
+  }
+
+  function revealPhraseCorrection() {
+    setIsRetryingPhrase(false);
+    setCurrentHint(null);
+    setCurrentIsCorrect(false);
+    setHasCheckedCurrent(true);
   }
 
   function handleSkip() {
@@ -714,6 +878,9 @@ export function PratiquePage() {
       setUserAnswer("");
       setCurrentIsCorrect(null);
       setCurrentFeedback(null);
+      setCurrentHint(null);
+      setIsRetryingPhrase(false);
+      setPhraseRetryUsed(false);
       setHasCheckedCurrent(false);
       setErrorMessage(null);
     }
@@ -752,7 +919,11 @@ export function PratiquePage() {
         handleNextRef.current();
       } else if (event.key === "Escape") {
         event.preventDefault();
-        handleRestartRef.current();
+        if (
+          window.confirm("Quitter la session ? La progression en cours ne sera pas enregistrée.")
+        ) {
+          handleRestartRef.current();
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -862,626 +1033,484 @@ export function PratiquePage() {
     return "ja-JP";
   }
 
+  const phraseStyleLabel =
+    phraseStyle === "blocks" ? "assembler" : phraseStyle === "story" ? "histoire" : "écrire";
+  const pratiquePill: HubMode =
+    activeTab === "jlpt" ? "jlpt" : activeTab === "conjugaison" ? "conjugaison" : "phrases";
+
+  const setupHeading = (() => {
+    if (activeTab === "phrases" || activeTab === "construction") {
+      return {
+        title: "Phrases",
+        description: "Écris avec ton vocabulaire : tape, assemble, ou raconte une courte histoire.",
+      };
+    }
+    if (activeTab === "jlpt") {
+      return {
+        title: "JLPT",
+        description: `Entraînement ${jlptLevel} généré, indépendant de tes mots.`,
+      };
+    }
+    if (activeTab === "conjugaison") {
+      return {
+        title: "Conjugaison",
+        description: "Conjugue les verbes d’une série.",
+      };
+    }
+    return {
+      title: "Écoute",
+      description: "Écoute une phrase et transcris-la.",
+    };
+  })();
+
   // ===================== SETUP =====================
   if (phase === "setup") {
+    const selectedSeriesNames = tags
+      .filter((tag) => selectedTagIds.includes(tag.id))
+      .map((tag) => tag.name);
+    const listeningSeriesNames = tags
+      .filter((tag) => listeningTagIds.includes(tag.id))
+      .map((tag) => tag.name);
+    const conjugationSeriesName = tags.find((tag) => tag.id === conjTagId)?.name;
+    const directionLabel = (value: "fr-to-jp" | "jp-to-fr") =>
+      value === "fr-to-jp" ? "vers le japonais" : "vers le français";
+
+    let generateLabel = "Générer";
+    let generateSummary = "";
+    let generateBlockedReason: string | null = null;
+
+    if (activeTab === "phrases") {
+      generateLabel = isGenerating
+        ? "Génération…"
+        : phraseStyle === "story"
+          ? "Générer l’histoire"
+          : `Générer ${phraseCount} ${phraseCount > 1 ? "phrases" : "phrase"}`;
+      generateSummary = [
+        phraseStyleLabel,
+        directionLabel(direction),
+        selectedSeriesNames.length === 1
+          ? selectedSeriesNames[0]
+          : `${selectedSeriesNames.length} séries`,
+      ].join(" · ");
+      if (selectedTagIds.length === 0) generateBlockedReason = "Choisis au moins une série.";
+      else if (selectedParticles.length === 0)
+        generateBlockedReason = "Coche au moins une particule dans Plus d’options.";
+    } else if (activeTab === "construction") {
+      generateLabel = isGenerating ? "Génération…" : `Générer ${phraseCount} puzzles`;
+      generateSummary = [
+        phraseStyleLabel,
+        directionLabel(direction),
+        selectedSeriesNames.length === 1
+          ? selectedSeriesNames[0]
+          : `${selectedSeriesNames.length} séries`,
+      ].join(" · ");
+      if (selectedTagIds.length === 0) generateBlockedReason = "Choisis au moins une série.";
+      else if (selectedParticles.length === 0)
+        generateBlockedReason = "Coche au moins une particule dans Plus d’options.";
+    } else if (activeTab === "jlpt") {
+      generateLabel = isGenerating
+        ? "Génération…"
+        : jlptType === "paragraph"
+          ? "Générer le paragraphe"
+          : `Générer ${jlptCount} exercices`;
+      generateSummary = `${jlptLevel} · ${directionLabel(jlptDirection)} · ${
+        { words: "mots", phrases: "phrases", paragraph: "paragraphe" }[jlptType]
+      }`;
+    } else if (activeTab === "conjugaison") {
+      generateLabel = isGenerating ? "Génération…" : `Générer ${conjCount} formes`;
+      generateSummary = `${conjugationSeriesName ?? "aucune série"} · ${conjForms.size} formes`;
+      if (!conjTagId) generateBlockedReason = "Choisis une série.";
+      else if (conjForms.size === 0) generateBlockedReason = "Coche au moins une forme.";
+    } else if (activeTab === "ecoute") {
+      generateLabel = isGenerating ? "Génération…" : `Générer ${listeningCount} dictées`;
+      generateSummary = [
+        listeningDifficulty === "debutant" ? "débutant" : "intermédiaire",
+        listeningSeriesNames.length === 1
+          ? listeningSeriesNames[0]
+          : `${listeningSeriesNames.length} séries`,
+      ].join(" · ");
+      if (listeningTagIds.length === 0) generateBlockedReason = "Choisis au moins une série.";
+    }
+
+    const grammarFields = (
+      <div className="pratiqueStep__stack">
+        <div>
+          <p className="pratiqueStep__miniLabel">Particules</p>
+          <div className="pratique__chipGrid">
+            {AVAILABLE_PARTICLES.map((particle) => (
+              <button
+                key={particle}
+                type="button"
+                className={`pratique__chip pratique__chip--particle ${selectedParticles.includes(particle) ? "pratique__chip--active" : ""}`}
+                onClick={() =>
+                  setSelectedParticles((previous) =>
+                    previous.includes(particle)
+                      ? previous.filter((item) => item !== particle)
+                      : [...previous, particle],
+                  )
+                }
+              >
+                {particle}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="pratiqueChoiceGrid pratiqueChoiceGrid--compact">
+          <div>
+            <p className="pratiqueStep__miniLabel">Temps</p>
+            <div className="pratique__toggleRow">
+              {TENSE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`pratique__toggle pratique__toggle--sm ${tense === option.value ? "pratique__toggle--active" : ""}`}
+                  onClick={() => setTense(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="pratiqueStep__miniLabel">Polarité</p>
+            <div className="pratique__toggleRow">
+              {POLARITY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`pratique__toggle pratique__toggle--sm ${polarity === option.value ? "pratique__toggle--active" : ""}`}
+                  onClick={() => setPolarity(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="pratiqueStep__miniLabel">Politesse</p>
+            <div className="pratique__toggleRow">
+              {POLITENESS_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`pratique__toggle pratique__toggle--sm ${politeness === option.value ? "pratique__toggle--active" : ""}`}
+                  onClick={() => setPoliteness(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div>
+          <p className="pratiqueStep__miniLabel">
+            Vocabulaire envoyé à l’IA : {vocabSampleSize} mots
+          </p>
+          <input
+            type="range"
+            min={10}
+            max={300}
+            step={10}
+            value={vocabSampleSize}
+            onChange={(event) => setVocabSampleSize(Number(event.target.value))}
+            className="pratique__slider"
+            aria-label="Taille de l'échantillon de vocabulaire"
+          />
+        </div>
+        <div>
+          <p className="pratiqueStep__miniLabel">Contexte (optionnel)</p>
+          <textarea
+            className="pratique__textarea"
+            placeholder="Ex. : phrases du quotidien, au restaurant…"
+            value={customContext}
+            onChange={(event) => setCustomContext(event.target.value)}
+            maxLength={500}
+            rows={2}
+          />
+        </div>
+      </div>
+    );
+
     return (
-      <div className="pratique">
+      <div className="pratique pratique--setup">
         <div className="pageHeader">
           <div>
             <h1 className="pageTitle">Pratique</h1>
-            <p className="pageSubtitle">
-              Phrases, construction, JLPT, conjugaison et écoute — générés à partir de ton vocabulaire.
-            </p>
+            <p className="pageSubtitle">{setupHeading.description}</p>
           </div>
         </div>
-        <div className="pratique__tabs">
-          {(["phrases", "construction", "jlpt", "conjugaison", "ecoute"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className={`pratique__tab ${activeTab === tab ? "pratique__tab--active" : ""}`}
-              onClick={() => handleTabChange(tab)}
-            >
-              {tab === "phrases"
-                ? "Phrases"
-                : tab === "construction"
-                  ? "Construction"
-                  : tab === "jlpt"
-                    ? "JLPT N5"
-                    : tab === "conjugaison"
-                      ? "Conjugaison"
-                      : "Écoute"}
-            </button>
-          ))}
-        </div>
+        <PillNav
+          ariaLabel="Modes de pratique"
+          items={PRATIQUE_PILLS}
+          value={pratiquePill}
+          onChange={handleTabChange}
+        />
+        {quota ? <QuotaBar quota={quota} /> : null}
 
-        {quota && <QuotaBar quota={quota} />}
-
-        <div className="pratique__setup">
-          {activeTab === "phrases" && (
+        <div className="pratiqueSetup">
+          {activeTab === "phrases" || activeTab === "construction" ? (
             <>
-              <div className="pratique__row">
-                <div className="pratique__field">
-                  <div className="pratique__label">Direction</div>
-                  <div className="pratique__toggleRow">
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${direction === "fr-to-jp" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setDirection("fr-to-jp")}
-                    >
-                      FR → JP
-                    </button>
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${direction === "jp-to-fr" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setDirection("jp-to-fr")}
-                    >
-                      JP → FR
-                    </button>
-                  </div>
-                </div>
-                <div className="pratique__field">
-                  <div className="pratique__label">Type</div>
-                  <div className="pratique__toggleRow">
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${contentType === "phrases" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setContentType("phrases")}
-                    >
-                      Phrases
-                    </button>
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${contentType === "paragraph" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setContentType("paragraph")}
-                    >
-                      Histoire
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">Tags</div>
-                <div className="pratique__chipGrid">
-                  {tags.map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className={`pratique__chip ${selectedTagIds.includes(tag.id) ? "pratique__chip--active" : ""}`}
-                      onClick={() =>
-                        setSelectedTagIds((previous) =>
-                          previous.includes(tag.id)
-                            ? previous.filter((id) => id !== tag.id)
-                            : [...previous, tag.id],
-                        )
-                      }
-                    >
-                      {tag.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">Particules</div>
-                <div className="pratique__chipGrid">
-                  {AVAILABLE_PARTICLES.map((particle) => (
-                    <button
-                      key={particle}
-                      type="button"
-                      className={`pratique__chip pratique__chip--particle ${selectedParticles.includes(particle) ? "pratique__chip--active" : ""}`}
-                      onClick={() =>
-                        setSelectedParticles((previous) =>
-                          previous.includes(particle)
-                            ? previous.filter((p) => p !== particle)
-                            : [...previous, particle],
-                        )
-                      }
-                    >
-                      {particle}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pratique__row pratique__row--grammar">
-                <div className="pratique__field pratique__field--compact">
-                  <div className="pratique__label">Temps</div>
-                  <div className="pratique__toggleRow">
-                    {TENSE_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${tense === option.value ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setTense(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pratique__field pratique__field--compact">
-                  <div className="pratique__label">Polarité</div>
-                  <div className="pratique__toggleRow">
-                    {POLARITY_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${polarity === option.value ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setPolarity(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pratique__field pratique__field--compact">
-                  <div className="pratique__label">Politesse</div>
-                  <div className="pratique__toggleRow">
-                    {POLITENESS_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${politeness === option.value ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setPoliteness(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pratique__row">
-                <div className="pratique__field">
-                  <div className="pratique__label">
-                    {contentType === "phrases"
-                      ? "Nombre de phrases"
-                      : "Nombre de phrases (histoire)"}
-                  </div>
-                  <div className="pratique__toggleRow">
-                    {[1, 3, 5, 8, 10].map((count) => (
-                      <button
-                        key={count}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${phraseCount === count ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setPhraseCount(count)}
-                      >
-                        {count}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pratique__field">
-                  <div className="pratique__label">Longueur des phrases</div>
-                  <div className="pratique__toggleRow">
-                    {(["short", "medium", "long"] as const).map((length) => (
-                      <button
-                        key={length}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${sentenceLength === length ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setSentenceLength(length)}
-                      >
-                        {{ short: "Courtes", medium: "Moyennes", long: "Longues" }[length]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">
-                  Vocabulaire envoyé à l'IA : <strong>{vocabSampleSize}</strong> mots aléatoires
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={300}
-                  step={10}
-                  value={vocabSampleSize}
-                  onChange={(event) => setVocabSampleSize(Number(event.target.value))}
-                  className="pratique__slider"
-                  aria-label="Taille de l'échantillon de vocabulaire"
+              <SetupStep
+                index={1}
+                title="Comment tu pratiques ?"
+                hint="Un seul mode : tu choisis ensuite tes mots."
+              >
+                <SetupChoices
+                  value={phraseStyle}
+                  onChange={applyPhraseStyle}
+                  options={[
+                    {
+                      value: "write",
+                      title: "Écrire",
+                      text: "Tu tapes la traduction, phrase par phrase.",
+                    },
+                    {
+                      value: "blocks",
+                      title: "Assembler",
+                      text: "Tu ranges les blocs pour former la phrase.",
+                    },
+                    {
+                      value: "story",
+                      title: "Histoire",
+                      text: "Un court paragraphe avec tes mots.",
+                    },
+                  ]}
                 />
-                <div className="pratique__hint">
-                  Si l'IA renvoie une erreur JSON ou met du temps à répondre, réduis cette valeur.
-                </div>
-              </div>
-
-              {contentType === "paragraph" && (
-                <div className="pratique__field">
-                  <div className="pratique__label">Kanji</div>
-                  <div className="pratique__toggleRow">
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${withKanji ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setWithKanji(true)}
-                    >
-                      Avec
-                    </button>
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${!withKanji ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setWithKanji(false)}
-                    >
-                      Sans
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {!showContext ? (
-                <button
-                  type="button"
-                  className="pratique__contextToggle"
-                  onClick={() => setShowContext(true)}
-                >
-                  + Ajouter un contexte
-                </button>
-              ) : (
-                <div className="pratique__field">
-                  <div className="pratique__label">Contexte (optionnel)</div>
-                  <textarea
-                    className="pratique__textarea"
-                    placeholder="Ex : Utilise des phrases simples du quotidien…"
-                    value={customContext}
-                    onChange={(event) => setCustomContext(event.target.value)}
-                    maxLength={500}
-                    rows={2}
-                  />
-                </div>
-              )}
-            </>
-          )}
-
-          {activeTab === "construction" && (
-            <>
-              <div className="pratique__row">
-                <div className="pratique__field">
-                  <div className="pratique__label">Direction</div>
-                  <div className="pratique__toggleRow">
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${direction === "fr-to-jp" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setDirection("fr-to-jp")}
-                    >
-                      FR → JP
-                    </button>
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${direction === "jp-to-fr" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setDirection("jp-to-fr")}
-                    >
-                      JP → FR
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">Tags</div>
-                <div className="pratique__chipGrid">
-                  {tags.map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className={`pratique__chip ${selectedTagIds.includes(tag.id) ? "pratique__chip--active" : ""}`}
-                      onClick={() =>
-                        setSelectedTagIds((previous) =>
-                          previous.includes(tag.id)
-                            ? previous.filter((id) => id !== tag.id)
-                            : [...previous, tag.id],
-                        )
-                      }
-                    >
-                      {tag.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">Particules</div>
-                <div className="pratique__chipGrid">
-                  {AVAILABLE_PARTICLES.map((particle) => (
-                    <button
-                      key={particle}
-                      type="button"
-                      className={`pratique__chip pratique__chip--particle ${selectedParticles.includes(particle) ? "pratique__chip--active" : ""}`}
-                      onClick={() =>
-                        setSelectedParticles((previous) =>
-                          previous.includes(particle)
-                            ? previous.filter((p) => p !== particle)
-                            : [...previous, particle],
-                        )
-                      }
-                    >
-                      {particle}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pratique__row pratique__row--grammar">
-                <div className="pratique__field pratique__field--compact">
-                  <div className="pratique__label">Temps</div>
-                  <div className="pratique__toggleRow">
-                    {TENSE_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${tense === option.value ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setTense(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pratique__field pratique__field--compact">
-                  <div className="pratique__label">Polarité</div>
-                  <div className="pratique__toggleRow">
-                    {POLARITY_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${polarity === option.value ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setPolarity(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pratique__field pratique__field--compact">
-                  <div className="pratique__label">Politesse</div>
-                  <div className="pratique__toggleRow">
-                    {POLITENESS_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${politeness === option.value ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setPoliteness(option.value)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pratique__row">
-                <div className="pratique__field">
-                  <div className="pratique__label">Nombre de phrases</div>
-                  <div className="pratique__toggleRow">
-                    {[1, 3, 5, 8, 10].map((count) => (
-                      <button
-                        key={count}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${phraseCount === count ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setPhraseCount(count)}
-                      >
-                        {count}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pratique__field">
-                  <div className="pratique__label">Longueur des phrases</div>
-                  <div className="pratique__toggleRow">
-                    {(["short", "medium", "long"] as const).map((length) => (
-                      <button
-                        key={length}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${sentenceLength === length ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setSentenceLength(length)}
-                      >
-                        {{ short: "Courtes", medium: "Moyennes", long: "Longues" }[length]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">
-                  Vocabulaire envoyé à l'IA : <strong>{vocabSampleSize}</strong> mots aléatoires
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={300}
-                  step={10}
-                  value={vocabSampleSize}
-                  onChange={(event) => setVocabSampleSize(Number(event.target.value))}
-                  className="pratique__slider"
-                  aria-label="Taille de l'échantillon de vocabulaire"
+              </SetupStep>
+              <SetupStep index={2} title="Quelle série ?" hint="On n’utilise que tes mots.">
+                <SeriesPicker
+                  tags={tags}
+                  selectedIds={selectedTagIds}
+                  multiple
+                  onChange={setSelectedTagIds}
                 />
-                <div className="pratique__hint">
-                  Si l'IA renvoie une erreur JSON ou met du temps à répondre, réduis cette valeur.
-                </div>
-              </div>
-
-              {!showContext ? (
-                <button
-                  type="button"
-                  className="pratique__contextToggle"
-                  onClick={() => setShowContext(true)}
-                >
-                  + Ajouter un contexte
-                </button>
-              ) : (
-                <div className="pratique__field">
-                  <div className="pratique__label">Contexte (optionnel)</div>
-                  <textarea
-                    className="pratique__textarea"
-                    placeholder="Ex : Phrases du quotidien, vocabulaire de cuisine…"
-                    value={customContext}
-                    onChange={(event) => setCustomContext(event.target.value)}
-                    maxLength={500}
-                    rows={2}
+              </SetupStep>
+              <SetupStep index={3} title="Dans quel sens ?">
+                <SetupChoices
+                  value={direction}
+                  onChange={setDirection}
+                  options={[
+                    {
+                      value: "fr-to-jp",
+                      title: "Écrire en japonais",
+                      text:
+                        phraseStyle === "blocks"
+                          ? "Tu vois le français, tu ranges la phrase japonaise."
+                          : "Tu vois le français, tu tapes la phrase japonaise.",
+                    },
+                    {
+                      value: "jp-to-fr",
+                      title: "Écrire en français",
+                      text: "Tu vois le japonais, tu donnes la traduction.",
+                    },
+                  ]}
+                />
+              </SetupStep>
+              {phraseStyle !== "story" ? (
+                <SetupStep index={4} title="Combien ?">
+                  <CountChoices
+                    values={[3, 5, 8, 10]}
+                    value={phraseCount}
+                    onChange={setPhraseCount}
+                    unit={phraseStyle === "blocks" ? "puzzles" : "phrases"}
                   />
-                </div>
-              )}
-            </>
-          )}
-
-          {activeTab === "jlpt" && (
-            <>
-              <div className="pratique__row">
-                <div className="pratique__field">
-                  <div className="pratique__label">Direction</div>
-                  <div className="pratique__toggleRow">
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${jlptDirection === "fr-to-jp" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setJlptDirection("fr-to-jp")}
-                    >
-                      FR → JP
-                    </button>
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${jlptDirection === "jp-to-fr" ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setJlptDirection("jp-to-fr")}
-                    >
-                      JP → FR
-                    </button>
-                  </div>
-                </div>
-                <div className="pratique__field">
-                  <div className="pratique__label">Type</div>
-                  <div className="pratique__toggleRow">
-                    {(["words", "phrases", "paragraph"] as const).map((type) => (
-                      <button
-                        key={type}
-                        type="button"
-                        className={`pratique__toggle pratique__toggle--sm ${jlptType === type ? "pratique__toggle--active" : ""}`}
-                        onClick={() => setJlptType(type)}
-                      >
-                        {{ words: "Mots", phrases: "Phrases", paragraph: "Paragraphe" }[type]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pratique__row">
-                <div className="pratique__field">
-                  <div className="pratique__label">Kanji</div>
-                  <div className="pratique__toggleRow">
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${jlptWithKanji ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setJlptWithKanji(true)}
-                    >
-                      Avec
-                    </button>
-                    <button
-                      type="button"
-                      className={`pratique__toggle ${!jlptWithKanji ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setJlptWithKanji(false)}
-                    >
-                      Sans
-                    </button>
-                  </div>
-                </div>
-                {jlptType !== "paragraph" ? (
-                  <div className="pratique__field">
-                    <div className="pratique__label">Nombre</div>
-                    <div className="pratique__toggleRow">
-                      {[3, 5, 8, 10, 15].map((count) => (
-                        <button
-                          key={count}
-                          type="button"
-                          className={`pratique__toggle pratique__toggle--sm ${jlptCount === count ? "pratique__toggle--active" : ""}`}
-                          onClick={() => setJlptCount(count)}
-                        >
-                          {count}
-                        </button>
-                      ))}
+                </SetupStep>
+              ) : null}
+              <details className="pratiqueAdvanced">
+                <summary>Plus d’options</summary>
+                <div className="pratiqueAdvanced__body">
+                  <div className="pratiqueChoiceGrid pratiqueChoiceGrid--compact">
+                    <div>
+                      <p className="pratiqueStep__miniLabel">Longueur</p>
+                      <div className="pratique__toggleRow">
+                        {(["short", "medium", "long"] as const).map((length) => (
+                          <button
+                            key={length}
+                            type="button"
+                            className={`pratique__toggle pratique__toggle--sm ${sentenceLength === length ? "pratique__toggle--active" : ""}`}
+                            onClick={() => setSentenceLength(length)}
+                          >
+                            {{ short: "Courtes", medium: "Moyennes", long: "Longues" }[length]}
+                          </button>
+                        ))}
+                      </div>
                     </div>
+                    {phraseStyle === "story" ? (
+                      <div>
+                        <p className="pratiqueStep__miniLabel">Kanji</p>
+                        <div className="pratique__toggleRow">
+                          <button
+                            type="button"
+                            className={`pratique__toggle ${withKanji ? "pratique__toggle--active" : ""}`}
+                            onClick={() => setWithKanji(true)}
+                          >
+                            Avec
+                          </button>
+                          <button
+                            type="button"
+                            className={`pratique__toggle ${!withKanji ? "pratique__toggle--active" : ""}`}
+                            onClick={() => setWithKanji(false)}
+                          >
+                            Sans
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
+                  {grammarFields}
+                </div>
+              </details>
+            </>
+          ) : null}
+
+          {activeTab === "jlpt" ? (
+            <>
+              <SetupStep index={1} title="Quel niveau ?">
+                <SetupChoices
+                  value={jlptLevel}
+                  onChange={setJlptLevel}
+                  options={JLPT_LEVELS.map((level) => ({
+                    value: level,
+                    title: level,
+                    text: JLPT_LEVEL_HINTS[level],
+                  }))}
+                />
+              </SetupStep>
+              <SetupStep index={2} title="Dans quel sens ?">
+                <SetupChoices
+                  value={jlptDirection}
+                  onChange={setJlptDirection}
+                  options={[
+                    {
+                      value: "fr-to-jp",
+                      title: "Écrire en japonais",
+                      text: `Tu vois le français, tu produis le japonais ${jlptLevel}.`,
+                    },
+                    {
+                      value: "jp-to-fr",
+                      title: "Écrire en français",
+                      text: `Tu vois le japonais ${jlptLevel}, tu traduis.`,
+                    },
+                  ]}
+                />
+              </SetupStep>
+              <SetupStep
+                index={3}
+                title="Quel format ?"
+                hint={`Ce n’est pas ton vocabulaire : contenu ${jlptLevel} généré.`}
+              >
+                <SetupChoices
+                  value={jlptType}
+                  onChange={setJlptType}
+                  options={[
+                    {
+                      value: "words",
+                      title: "Mots",
+                      text: `Un mot à la fois, pour le lexique ${jlptLevel}.`,
+                    },
+                    {
+                      value: "phrases",
+                      title: "Phrases",
+                      text: "Tu traduis une phrase courte.",
+                    },
+                    {
+                      value: "paragraph",
+                      title: "Paragraphe",
+                      text: "Un petit texte, une seule réponse.",
+                    },
+                  ]}
+                />
+              </SetupStep>
+              <SetupStep
+                index={4}
+                title={jlptType === "paragraph" ? "Quelle longueur ?" : "Combien ?"}
+              >
+                {jlptType === "paragraph" ? (
+                  <SetupChoices
+                    value={jlptParagraphLength}
+                    onChange={setJlptParagraphLength}
+                    options={[
+                      {
+                        value: "short",
+                        title: "Court",
+                        text: "Quelques lignes, une lecture rapide.",
+                      },
+                      {
+                        value: "medium",
+                        title: "Moyen",
+                        text: "Un paragraphe confortable.",
+                      },
+                      {
+                        value: "long",
+                        title: "Long",
+                        text: "Un peu plus de lecture.",
+                      },
+                    ]}
+                  />
                 ) : (
-                  <div className="pratique__field">
-                    <div className="pratique__label">Longueur</div>
+                  <CountChoices
+                    values={[3, 5, 8, 10, 15]}
+                    value={jlptCount}
+                    onChange={setJlptCount}
+                    unit="exercices"
+                  />
+                )}
+              </SetupStep>
+              <details className="pratiqueAdvanced">
+                <summary>Plus d’options</summary>
+                <div className="pratiqueAdvanced__body">
+                  <div>
+                    <p className="pratiqueStep__miniLabel">Kanji</p>
                     <div className="pratique__toggleRow">
-                      {(["short", "medium", "long"] as const).map((length) => (
-                        <button
-                          key={length}
-                          type="button"
-                          className={`pratique__toggle pratique__toggle--sm ${jlptParagraphLength === length ? "pratique__toggle--active" : ""}`}
-                          onClick={() => setJlptParagraphLength(length)}
-                        >
-                          {{ short: "Court", medium: "Moyen", long: "Long" }[length]}
-                        </button>
-                      ))}
+                      <button
+                        type="button"
+                        className={`pratique__toggle ${jlptWithKanji ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setJlptWithKanji(true)}
+                      >
+                        Avec
+                      </button>
+                      <button
+                        type="button"
+                        className={`pratique__toggle ${!jlptWithKanji ? "pratique__toggle--active" : ""}`}
+                        onClick={() => setJlptWithKanji(false)}
+                      >
+                        Sans
+                      </button>
                     </div>
                   </div>
-                )}
-              </div>
-
-              {!showContext ? (
-                <button
-                  type="button"
-                  className="pratique__contextToggle"
-                  onClick={() => setShowContext(true)}
-                >
-                  + Ajouter un contexte
-                </button>
-              ) : (
-                <div className="pratique__field">
-                  <div className="pratique__label">Contexte (optionnel)</div>
-                  <textarea
-                    className="pratique__textarea"
-                    placeholder="Ex : Je veux pratiquer le vocabulaire de la nourriture…"
-                    value={jlptContext}
-                    onChange={(event) => setJlptContext(event.target.value)}
-                    maxLength={500}
-                    rows={2}
-                  />
+                  <div>
+                    <p className="pratiqueStep__miniLabel">Contexte (optionnel)</p>
+                    <textarea
+                      className="pratique__textarea"
+                      placeholder="Ex. : vocabulaire de la nourriture…"
+                      value={jlptContext}
+                      onChange={(event) => setJlptContext(event.target.value)}
+                      maxLength={500}
+                      rows={2}
+                    />
+                  </div>
                 </div>
-              )}
+              </details>
             </>
-          )}
+          ) : null}
 
-          {activeTab === "conjugaison" && (
+          {activeTab === "conjugaison" ? (
             <>
-              <div className="pratique__field">
-                <div className="pratique__label">Série</div>
+              <SetupStep
+                index={1}
+                title="Quelle série ?"
+                hint="Une série à la fois, avec tes verbes."
+              >
+                <SeriesPicker
+                  tags={tags}
+                  selectedIds={conjTagId ? [conjTagId] : []}
+                  multiple={false}
+                  onChange={(ids) => setConjTagId(ids[0] ?? null)}
+                />
+              </SetupStep>
+              <SetupStep index={2} title="Quelles formes ?">
                 <div className="pratique__chipGrid">
-                  {tags.map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className={`pratique__chip ${conjTagId === tag.id ? "pratique__chip--active" : ""}`}
-                      onClick={() => setConjTagId(tag.id)}
-                    >
-                      {tag.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">
-                  Formes
-                  <button
-                    type="button"
-                    className="pratique__selectAll"
-                    onClick={() =>
-                      setConjForms((previous) =>
-                        previous.size === CONJUGATION_FORMS.length
-                          ? new Set()
-                          : new Set(CONJUGATION_FORMS),
-                      )
-                    }
-                  >
-                    {conjForms.size === CONJUGATION_FORMS.length ? "Aucune" : "Toutes"}
-                  </button>
-                </div>
-                <div className="pratique__chipGrid">
-                  {CONJUGATION_FORMS.map((form) => (
+                  {CORE_CONJUGATION_FORMS.map((form) => (
                     <button
                       key={form}
                       type="button"
@@ -1499,85 +1528,98 @@ export function PratiquePage() {
                     </button>
                   ))}
                 </div>
-              </div>
-
-              <div className="pratique__field">
-                <div className="pratique__label">Nombre</div>
-                <div className="pratique__toggleRow">
-                  {[5, 10, 15, 20].map((count) => (
-                    <button
-                      key={count}
-                      type="button"
-                      className={`pratique__toggle pratique__toggle--sm ${conjCount === count ? "pratique__toggle--active" : ""}`}
-                      onClick={() => setConjCount(count)}
-                    >
-                      {count}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {activeTab === "ecoute" && (
-            <>
-              <div className="pratique__field">
-                <div className="pratique__label">Tags</div>
-                <div className="pratique__chipGrid">
-                  {tags.map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      className={`pratique__chip ${listeningTagIds.includes(tag.id) ? "pratique__chip--active" : ""}`}
-                      onClick={() => setListeningTagIds((previous) =>
-                        previous.includes(tag.id) ? previous.filter((id) => id !== tag.id) : [...previous, tag.id]
-                      )}
-                    >
-                      {tag.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pratique__row">
-                <div className="pratique__field">
-                  <div className="pratique__label">Difficulté</div>
-                  <div className="pratique__toggleRow">
-                    <button type="button" className={`pratique__toggle ${listeningDifficulty === "debutant" ? "pratique__toggle--active" : ""}`} onClick={() => setListeningDifficulty("debutant")}>Débutant</button>
-                    <button type="button" className={`pratique__toggle ${listeningDifficulty === "intermediaire" ? "pratique__toggle--active" : ""}`} onClick={() => setListeningDifficulty("intermediaire")}>Intermédiaire</button>
-                  </div>
-                </div>
-                <div className="pratique__field">
-                  <div className="pratique__label">Nombre de phrases</div>
-                  <div className="pratique__toggleRow">
-                    {[3, 5, 8].map((count) => (
-                      <button key={count} type="button" className={`pratique__toggle pratique__toggle--sm ${listeningCount === count ? "pratique__toggle--active" : ""}`} onClick={() => setListeningCount(count)}>
-                        {count}
+                <details className="pratiqueAdvanced pratiqueAdvanced--nested">
+                  <summary>Autres formes</summary>
+                  <div className="pratique__chipGrid">
+                    {EXTRA_CONJUGATION_FORMS.map((form) => (
+                      <button
+                        key={form}
+                        type="button"
+                        className={`pratique__chip ${conjForms.has(form) ? "pratique__chip--active" : ""}`}
+                        onClick={() =>
+                          setConjForms((previous) => {
+                            const next = new Set(previous);
+                            if (next.has(form)) next.delete(form);
+                            else next.add(form);
+                            return next;
+                          })
+                        }
+                      >
+                        {form}
                       </button>
                     ))}
                   </div>
-                </div>
-              </div>
+                </details>
+              </SetupStep>
+              <SetupStep index={3} title="Combien ?">
+                <CountChoices
+                  values={[5, 10, 15, 20]}
+                  value={conjCount}
+                  onChange={setConjCount}
+                  unit="formes"
+                />
+              </SetupStep>
             </>
-          )}
+          ) : null}
+
+          {activeTab === "ecoute" ? (
+            <>
+              <SetupStep
+                index={1}
+                title="Quelle série ?"
+                hint="Les phrases sont générées à partir de tes mots."
+              >
+                <SeriesPicker
+                  tags={tags}
+                  selectedIds={listeningTagIds}
+                  multiple
+                  onChange={setListeningTagIds}
+                />
+              </SetupStep>
+              <SetupStep index={2} title="Quel niveau ?">
+                <SetupChoices
+                  value={listeningDifficulty}
+                  onChange={setListeningDifficulty}
+                  options={[
+                    {
+                      value: "debutant",
+                      title: "Débutant",
+                      text: "Phrases courtes, rythme lent, vocabulaire simple.",
+                    },
+                    {
+                      value: "intermediaire",
+                      title: "Intermédiaire",
+                      text: "Un peu plus long, un peu plus rapide.",
+                    },
+                  ]}
+                />
+              </SetupStep>
+              <SetupStep index={3} title="Combien ?">
+                <CountChoices
+                  values={[3, 5, 8]}
+                  value={listeningCount}
+                  onChange={setListeningCount}
+                  unit="dictées"
+                />
+              </SetupStep>
+            </>
+          ) : null}
         </div>
 
-        {errorMessage && <div className="formError">{errorMessage}</div>}
+        {errorMessage ? <div className="formError">{errorMessage}</div> : null}
 
-        <div className="pratique__actions">
+        <div className="pratiqueSetup__launch">
+          {generateSummary ? <p className="pratiqueSetup__summary">{generateSummary}</p> : null}
+          {generateBlockedReason ? (
+            <p className="pratiqueSetup__blocked">{generateBlockedReason}</p>
+          ) : null}
           <button
-            className="button button--primary"
+            className="button button--primary pratiqueSetup__generate"
             type="button"
             onClick={handleGenerate}
-            disabled={
-              isGenerating ||
-              ((activeTab === "phrases" || activeTab === "construction") &&
-                (selectedTagIds.length === 0 || selectedParticles.length === 0)) ||
-              (activeTab === "conjugaison" && (!conjTagId || conjForms.size === 0)) ||
-              (activeTab === "ecoute" && listeningTagIds.length === 0)
-            }
+            disabled={isGenerating || Boolean(generateBlockedReason)}
           >
-            {isGenerating ? "Génération…" : "Générer"}
+            {generateLabel}
           </button>
         </div>
       </div>
@@ -1590,21 +1632,42 @@ export function PratiquePage() {
     if (!currentListeningExercise) return null;
 
     return (
-      <div className="phrasesTraining">
+      <div className="phrasesTraining phrasesTraining--session">
         <div className="phrasesTraining__progressBar">
-          <div className="phrasesTraining__progressFill" style={{ width: `${((listeningIndex) / listeningExercises.length) * 100}%` }} />
+          <div
+            className="phrasesTraining__progressFill"
+            style={{ width: `${(listeningIndex / listeningExercises.length) * 100}%` }}
+          />
         </div>
         <div className="phrasesTraining__counter">
           {listeningIndex + 1} / {listeningExercises.length}
         </div>
 
         <div className="phrasesTraining__card" style={{ textAlign: "center" }}>
-          <p style={{ fontSize: "14px", color: "var(--color-text-soft)", marginBottom: "var(--space-4)" }}>
+          <p
+            style={{
+              fontSize: "14px",
+              color: "var(--color-text-soft)",
+              marginBottom: "var(--space-4)",
+            }}
+          >
             Écoute et transcris en japonais
           </p>
 
-          <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "center", alignItems: "center", marginBottom: "var(--space-5)" }}>
-            <button type="button" className="button" onClick={() => playListeningAudio(currentListeningExercise.japanese)}>
+          <div
+            style={{
+              display: "flex",
+              gap: "var(--space-3)",
+              justifyContent: "center",
+              alignItems: "center",
+              marginBottom: "var(--space-5)",
+            }}
+          >
+            <button
+              type="button"
+              className="button"
+              onClick={() => playListeningAudio(currentListeningExercise.japanese)}
+            >
               {listeningIsPlaying && !listeningIsPaused ? "Rejouer" : "Écouter"}
             </button>
             {listeningIsPlaying && (
@@ -1638,10 +1701,30 @@ export function PratiquePage() {
           />
 
           {listeningRevealed && (
-            <div style={{ marginBottom: "var(--space-4)", padding: "var(--space-3)", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)" }}>
-              <p style={{ fontSize: "13px", color: "var(--color-text-soft)", margin: "0 0 var(--space-1)" }}>Texte attendu :</p>
-              <p style={{ fontSize: "16px", fontWeight: 600, margin: "0 0 var(--space-1)" }}>{currentListeningExercise.japanese}</p>
-              <p style={{ fontSize: "13px", color: "var(--color-text-soft)", margin: 0 }}>{currentListeningExercise.french}</p>
+            <div
+              style={{
+                marginBottom: "var(--space-4)",
+                padding: "var(--space-3)",
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                borderRadius: "var(--radius-md)",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: "13px",
+                  color: "var(--color-text-soft)",
+                  margin: "0 0 var(--space-1)",
+                }}
+              >
+                Texte attendu :
+              </p>
+              <p style={{ fontSize: "16px", fontWeight: 600, margin: "0 0 var(--space-1)" }}>
+                {currentListeningExercise.japanese}
+              </p>
+              <p style={{ fontSize: "13px", color: "var(--color-text-soft)", margin: 0 }}>
+                {currentListeningExercise.french}
+              </p>
             </div>
           )}
 
@@ -1663,10 +1746,16 @@ export function PratiquePage() {
         </div>
 
         <div className="phrasesTraining__footActions">
-          <button type="button" className="button" onClick={resetSession}>Quitter</button>
+          <button type="button" className="button" onClick={resetSession}>
+            Quitter
+          </button>
         </div>
 
-        {errorMessage && <div className="formError" style={{ marginTop: "var(--space-3)" }}>{errorMessage}</div>}
+        {errorMessage && (
+          <div className="formError" style={{ marginTop: "var(--space-3)" }}>
+            {errorMessage}
+          </div>
+        )}
       </div>
     );
   }
@@ -1678,8 +1767,18 @@ export function PratiquePage() {
       (activeTab === "phrases" && contentType === "paragraph") ||
       (activeTab === "jlpt" && jlptType === "paragraph");
 
+    const answerDirection =
+      currentExercise.direction ?? (activeTab === "jlpt" ? jlptDirection : direction);
+    const promptLabel = isConjugation
+      ? "Conjugue"
+      : activeTab === "construction"
+        ? "Assemble la phrase"
+        : answerDirection === "jp-to-fr"
+          ? "Traduis en français"
+          : "Traduis en japonais";
+
     return (
-      <div className="phrasesTraining">
+      <div className="phrasesTraining phrasesTraining--session">
         <div className="phrasesTraining__progressBar">
           <div
             className="phrasesTraining__progressFill"
@@ -1701,18 +1800,20 @@ export function PratiquePage() {
         </div>
 
         <div className="phrasesTraining__card">
-          <div
-            className="phrasesTraining__prompt"
-            style={isConjugation ? { fontSize: 28 } : undefined}
-          >
-            {currentExercise.prompt}
+          <div className="phrasesTraining__promptBlock">
+            <p className="phrasesTraining__promptLabel">{promptLabel}</p>
+            <div
+              className={`phrasesTraining__prompt${isConjugation ? " phrasesTraining__prompt--verb" : ""}`}
+            >
+              {currentExercise.prompt}
+            </div>
           </div>
 
           <div className="phrasesTraining__inputArea">
             {isConjugation ? (
               <input
                 ref={inputRef}
-                className="input"
+                className="phrasesTraining__answer phrasesTraining__answer--single"
                 value={userAnswer}
                 onChange={(event) => setUserAnswer(event.target.value)}
                 onKeyDown={(event) => {
@@ -1775,7 +1876,7 @@ export function PratiquePage() {
                 onClick={handleCheck}
                 disabled={!userAnswer.trim() || isEvaluating}
               >
-                {isEvaluating ? "Vérification…" : "Vérifier"}
+                {isEvaluating ? "Vérification…" : isRetryingPhrase ? "Corriger" : "Vérifier"}
                 <kbd className="kbdHint">Ctrl+↵</kbd>
               </button>
               {!isConjugation && (
@@ -1785,6 +1886,16 @@ export function PratiquePage() {
               )}
             </div>
           )}
+
+          {isRetryingPhrase && currentHint ? (
+            <div className="phrasesTraining__hint">
+              <div className="phrasesTraining__hintTitle">Presque — un indice</div>
+              <p className="phrasesTraining__hintText">{currentHint}</p>
+              <button className="button" type="button" onClick={revealPhraseCorrection}>
+                Voir la correction
+              </button>
+            </div>
+          ) : null}
 
           {errorMessage && !hasCheckedCurrent && (
             <div className="formError" style={{ marginTop: "var(--space-4)" }}>
@@ -1839,7 +1950,9 @@ export function PratiquePage() {
                   type="button"
                   className="button"
                   style={{ marginTop: "var(--space-3)", fontSize: "13px" }}
-                  onClick={() => handleGrammarLink(currentFeedback ?? "erreur", currentExercise.prompt)}
+                  onClick={() =>
+                    handleGrammarLink(currentFeedback ?? "erreur", currentExercise.prompt)
+                  }
                 >
                   Comprendre cette erreur
                 </button>
@@ -1868,7 +1981,9 @@ export function PratiquePage() {
   // ===================== LISTENING RECAP =====================
   if (phase === "recap" && activeTab === "ecoute") {
     const listeningCorrectCount = listeningResults.filter((result) => result.isCorrect).length;
-    const listeningIncorrectCount = listeningResults.filter((result) => result.isCorrect === false).length;
+    const listeningIncorrectCount = listeningResults.filter(
+      (result) => result.isCorrect === false,
+    ).length;
 
     return (
       <div className="phrasesRecap">
@@ -1897,23 +2012,37 @@ export function PratiquePage() {
               </thead>
               <tbody>
                 {listeningResults.map((result, index) => (
-                  <tr key={index}>
+                  <tr key={`${result.exercise.japanese}-${index}`}>
                     <td className="muted">{index + 1}</td>
                     <td>
                       {result.exercise.japanese}
                       <AudioButton text={result.exercise.japanese} size="small" />
-                      <div style={{ fontSize: "12px", color: "var(--color-text-soft)" }}>{result.exercise.french}</div>
+                      <div style={{ fontSize: "12px", color: "var(--color-text-soft)" }}>
+                        {result.exercise.french}
+                      </div>
                     </td>
                     <td>{result.userTranscript || <span className="muted">—</span>}</td>
                     <td>
-                      {result.revealed && <span style={{ fontSize: "11px", color: "var(--color-text-soft)" }}>(révélé) </span>}
+                      {result.revealed && (
+                        <span style={{ fontSize: "11px", color: "var(--color-text-soft)" }}>
+                          (révélé){" "}
+                        </span>
+                      )}
                       {result.isCorrect ? (
                         <span style={{ color: "var(--color-success)" }}>✓</span>
                       ) : (
                         <span style={{ color: "var(--color-danger)" }}>✗</span>
                       )}
                       {result.feedback && (
-                        <div style={{ fontSize: "12px", color: "var(--color-text-soft)", marginTop: "2px" }}>{result.feedback}</div>
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "var(--color-text-soft)",
+                            marginTop: "2px",
+                          }}
+                        >
+                          {result.feedback}
+                        </div>
                       )}
                     </td>
                     <td>
@@ -1994,8 +2123,13 @@ export function PratiquePage() {
                   </td>
                   <td>
                     <SavePhraseButton
-                      french={result.exercise.frenchPrompt ?? (direction === "jp-to-fr" ? result.exercise.answer : result.exercise.prompt)}
-                      japanese={direction === "jp-to-fr" ? result.exercise.prompt : result.exercise.answer}
+                      french={
+                        result.exercise.frenchPrompt ??
+                        (direction === "jp-to-fr" ? result.exercise.answer : result.exercise.prompt)
+                      }
+                      japanese={
+                        direction === "jp-to-fr" ? result.exercise.prompt : result.exercise.answer
+                      }
                       source={activeTab}
                     />
                   </td>
@@ -2011,8 +2145,8 @@ export function PratiquePage() {
                           onClick={async () => {
                             try {
                               const allTags = await fetchTags();
-                              let jlptTag = allTags.find((tag) => tag.name === "JLPT N5");
-                              if (!jlptTag) jlptTag = await createTag("JLPT N5");
+                              let jlptTag = allTags.find((tag) => tag.name === `JLPT ${jlptLevel}`);
+                              if (!jlptTag) jlptTag = await createTag(`JLPT ${jlptLevel}`);
                               const isJpToFr = jlptDirection === "jp-to-fr";
                               const japanese = isJpToFr
                                 ? result.exercise.prompt
@@ -2067,8 +2201,8 @@ export function PratiquePage() {
               setIsAddingAll(true);
               try {
                 const allTags = await fetchTags();
-                let jlptTag = allTags.find((tag) => tag.name === "JLPT N5");
-                if (!jlptTag) jlptTag = await createTag("JLPT N5");
+                let jlptTag = allTags.find((tag) => tag.name === `JLPT ${jlptLevel}`);
+                if (!jlptTag) jlptTag = await createTag(`JLPT ${jlptLevel}`);
                 const newAdded = new Set(addedToVocab);
                 for (let i = 0; i < results.length; i++) {
                   if (newAdded.has(i)) continue;
@@ -2103,15 +2237,39 @@ export function PratiquePage() {
       </div>
 
       {showGrammarDrawer && (
-        <div style={{
-          position: "fixed", top: 0, right: 0, bottom: 0, width: "400px", maxWidth: "90vw",
-          background: "var(--color-bg)", borderLeft: "2px solid var(--color-border)",
-          boxShadow: "-4px 0 12px rgba(0,0,0,0.1)", zIndex: 100, overflow: "auto",
-          padding: "var(--space-5)",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)" }}>
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: "400px",
+            maxWidth: "90vw",
+            background: "var(--color-bg)",
+            borderLeft: "2px solid var(--color-border)",
+            boxShadow: "-4px 0 12px rgba(0,0,0,0.1)",
+            zIndex: 100,
+            overflow: "auto",
+            padding: "var(--space-5)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "var(--space-4)",
+            }}
+          >
             <h3 style={{ margin: 0 }}>Explication grammaticale</h3>
-            <button type="button" className="button" onClick={() => setShowGrammarDrawer(false)} style={{ padding: "2px 8px" }}>Fermer</button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => setShowGrammarDrawer(false)}
+              style={{ padding: "2px 8px" }}
+            >
+              Fermer
+            </button>
           </div>
           {isLoadingGrammar ? (
             <div className="muted">Chargement…</div>
@@ -2129,13 +2287,26 @@ export function PratiquePage() {
   );
 }
 
-function SavePhraseButton({ french, japanese, japaneseKana, source }: {
-  french: string; japanese: string; japaneseKana?: string; source: string;
+function SavePhraseButton({
+  french,
+  japanese,
+  japaneseKana,
+  source,
+}: {
+  french: string;
+  japanese: string;
+  japaneseKana?: string;
+  source: string;
 }) {
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  if (isSaved) return <span className="muted" style={{ fontSize: "12px" }}>✓ Sauvé</span>;
+  if (isSaved)
+    return (
+      <span className="muted" style={{ fontSize: "12px" }}>
+        ✓ Sauvé
+      </span>
+    );
 
   return (
     <button
@@ -2157,5 +2328,163 @@ function SavePhraseButton({ french, japanese, japaneseKana, source }: {
     >
       {isSaving ? "..." : "Sauvegarder"}
     </button>
+  );
+}
+
+function SetupStep({
+  index,
+  title,
+  hint,
+  children,
+}: {
+  index: number;
+  title: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="pratiqueStep">
+      <header className="pratiqueStep__header">
+        <span className="pratiqueStep__index">{index}</span>
+        <div>
+          <h2 className="pratiqueStep__title">{title}</h2>
+          {hint ? <p className="pratiqueStep__hint">{hint}</p> : null}
+        </div>
+      </header>
+      {children}
+    </section>
+  );
+}
+
+function SetupChoices<Value extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: Array<{ value: Value; title: string; text: string }>;
+  value: Value;
+  onChange: (value: Value) => void;
+}) {
+  return (
+    <div className={`pratiqueChoiceGrid${options.length > 2 ? " pratiqueChoiceGrid--three" : ""}`}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={`pratiqueChoice${value === option.value ? " pratiqueChoice--active" : ""}`}
+          onClick={() => onChange(option.value)}
+        >
+          <span className="pratiqueChoice__title">{option.title}</span>
+          <span className="pratiqueChoice__text">{option.text}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CountChoices({
+  values,
+  value,
+  onChange,
+  unit,
+}: {
+  values: number[];
+  value: number;
+  onChange: (value: number) => void;
+  unit: string;
+}) {
+  return (
+    <fieldset className="pratiqueCount" aria-label={unit}>
+      {values.map((count) => (
+        <button
+          key={count}
+          type="button"
+          className={`pratiqueCount__btn${value === count ? " pratiqueCount__btn--active" : ""}`}
+          onClick={() => onChange(count)}
+        >
+          {count}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+function SeriesPicker({
+  tags,
+  selectedIds,
+  multiple,
+  onChange,
+}: {
+  tags: Tag[];
+  selectedIds: number[];
+  multiple: boolean;
+  onChange: (ids: number[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleTags = normalizedQuery
+    ? tags.filter((tag) => tag.name.toLowerCase().includes(normalizedQuery))
+    : tags;
+  const allSelected = multiple && tags.length > 0 && selectedIds.length === tags.length;
+
+  if (tags.length === 0) {
+    return (
+      <p className="pratiqueStep__empty">
+        Ajoute des mots dans Vocabulaire : tes séries apparaîtront ici.
+      </p>
+    );
+  }
+
+  return (
+    <div className="pratiqueSeries">
+      {tags.length > 6 ? (
+        <input
+          className="input pratiqueSeries__search"
+          type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Filtrer les séries…"
+        />
+      ) : null}
+      {multiple && tags.length > 1 ? (
+        <div className="pratiqueSeries__toolbar">
+          <button
+            type="button"
+            className="pratique__selectAll"
+            onClick={() => onChange(allSelected ? [] : tags.map((tag) => tag.id))}
+          >
+            {allSelected ? "Aucune" : "Toutes"}
+          </button>
+          <span className="pratiqueSeries__count">
+            {selectedIds.length} sélectionnée{selectedIds.length > 1 ? "s" : ""}
+          </span>
+        </div>
+      ) : null}
+      <div className="pratique__chipGrid">
+        {visibleTags.map((tag) => (
+          <button
+            key={tag.id}
+            type="button"
+            className={`pratique__chip ${selectedIds.includes(tag.id) ? "pratique__chip--active" : ""}`}
+            onClick={() => {
+              if (multiple) {
+                onChange(
+                  selectedIds.includes(tag.id)
+                    ? selectedIds.filter((id) => id !== tag.id)
+                    : [...selectedIds, tag.id],
+                );
+                return;
+              }
+              onChange(selectedIds[0] === tag.id ? [] : [tag.id]);
+            }}
+          >
+            {tag.name}
+          </button>
+        ))}
+      </div>
+      {visibleTags.length === 0 ? (
+        <p className="pratiqueStep__empty">Aucune série ne correspond.</p>
+      ) : null}
+    </div>
   );
 }
