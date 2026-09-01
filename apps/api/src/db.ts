@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import Database from "better-sqlite3";
 
+import { type LevelProgress, XP_DAILY_GOAL, levelFromXp } from "./xp.js";
+
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDirectoryPath = path.dirname(currentFilePath);
 const projectRootPath = path.resolve(currentDirectoryPath, "../../..");
@@ -141,6 +143,9 @@ function ensureSchema(database: Database.Database) {
   ensureColumnExists(database, "users", "display_name", "TEXT");
   ensureColumnExists(database, "users", "is_admin", "INTEGER DEFAULT 0");
   ensureColumnExists(database, "users", "daily_goal", "INTEGER DEFAULT 20");
+  ensureColumnExists(database, "users", "xp", "INTEGER DEFAULT 0");
+  ensureColumnExists(database, "users", "daily_goal_xp_on", "TEXT");
+  backfillUserXp(database);
 
   database.exec(`
     CREATE TABLE IF NOT EXISTS daily_activity (
@@ -256,6 +261,23 @@ function ensureRootUser(database: Database.Database) {
   } catch (error) {
     console.error("[kotoba/db] Failed to create root user:", error);
   }
+}
+
+function backfillUserXp(database: Database.Database) {
+  database.exec(`
+    UPDATE users
+    SET xp = (
+      SELECT COALESCE(SUM(
+        COALESCE(ws.success_count, 0) * 10
+        + COALESCE(ws.partial_count, 0) * 4
+        + COALESCE(ws.fail_count, 0) * 1
+      ), 0)
+      FROM word_stats ws
+      INNER JOIN words w ON w.id = ws.word_id
+      WHERE w.user_id = users.id
+    )
+    WHERE COALESCE(xp, 0) = 0
+  `);
 }
 
 function ensureColumnExists(
@@ -468,23 +490,159 @@ const BADGE_SEEDS: Array<{
   condition_type: string;
   condition_value: number | null;
 }> = [
-  { id: "first_word", category: "vocabulary", title: "Premier pas", description: "Ajouter son premier mot", icon: "📝", condition_type: "words_total", condition_value: 1 },
-  { id: "words_10", category: "vocabulary", title: "Apprenti", description: "Avoir 10 mots dans son dictionnaire", icon: "📖", condition_type: "words_total", condition_value: 10 },
-  { id: "words_50", category: "vocabulary", title: "Étudiant", description: "Avoir 50 mots dans son dictionnaire", icon: "📚", condition_type: "words_total", condition_value: 50 },
-  { id: "words_100", category: "vocabulary", title: "Centurion", description: "Avoir 100 mots dans son dictionnaire", icon: "💯", condition_type: "words_total", condition_value: 100 },
-  { id: "words_500", category: "vocabulary", title: "Érudit", description: "Avoir 500 mots dans son dictionnaire", icon: "🏛️", condition_type: "words_total", condition_value: 500 },
-  { id: "first_mastered", category: "vocabulary", title: "Maîtrise", description: "Maîtriser son premier mot", icon: "⭐", condition_type: "mastered_total", condition_value: 1 },
-  { id: "mastered_10", category: "vocabulary", title: "Expert", description: "Maîtriser 10 mots", icon: "🌟", condition_type: "mastered_total", condition_value: 10 },
-  { id: "mastered_50", category: "vocabulary", title: "Maître", description: "Maîtriser 50 mots", icon: "🎓", condition_type: "mastered_total", condition_value: 50 },
-  { id: "streak_3", category: "streak", title: "Régulier", description: "Maintenir une série de 3 jours", icon: "🔥", condition_type: "streak", condition_value: 3 },
-  { id: "streak_7", category: "streak", title: "Semaine parfaite", description: "Maintenir une série de 7 jours", icon: "🔥", condition_type: "streak", condition_value: 7 },
-  { id: "streak_30", category: "streak", title: "Mois de feu", description: "Maintenir une série de 30 jours", icon: "🔥", condition_type: "streak", condition_value: 30 },
-  { id: "reviews_100", category: "practice", title: "Persévérant", description: "Faire 100 révisions au total", icon: "💪", condition_type: "reviews_total", condition_value: 100 },
-  { id: "reviews_500", category: "practice", title: "Assidu", description: "Faire 500 révisions au total", icon: "🏋️", condition_type: "reviews_total", condition_value: 500 },
-  { id: "reviews_1000", category: "practice", title: "Infatigable", description: "Faire 1000 révisions au total", icon: "🏆", condition_type: "reviews_total", condition_value: 1000 },
-  { id: "first_phrase_saved", category: "practice", title: "Collectionneur", description: "Sauvegarder sa première phrase", icon: "📌", condition_type: "saved_phrases_total", condition_value: 1 },
-  { id: "perfect_session", category: "milestone", title: "Sans faute", description: "Terminer une session sans aucune erreur", icon: "✨", condition_type: "event", condition_value: null },
-  { id: "first_dialogue", category: "milestone", title: "Conversation", description: "Compléter son premier dialogue", icon: "🗣️", condition_type: "event", condition_value: null },
+  {
+    id: "first_word",
+    category: "vocabulary",
+    title: "Premier pas",
+    description: "Ajouter son premier mot",
+    icon: "📝",
+    condition_type: "words_total",
+    condition_value: 1,
+  },
+  {
+    id: "words_10",
+    category: "vocabulary",
+    title: "Apprenti",
+    description: "Avoir 10 mots dans son dictionnaire",
+    icon: "📖",
+    condition_type: "words_total",
+    condition_value: 10,
+  },
+  {
+    id: "words_50",
+    category: "vocabulary",
+    title: "Étudiant",
+    description: "Avoir 50 mots dans son dictionnaire",
+    icon: "📚",
+    condition_type: "words_total",
+    condition_value: 50,
+  },
+  {
+    id: "words_100",
+    category: "vocabulary",
+    title: "Centurion",
+    description: "Avoir 100 mots dans son dictionnaire",
+    icon: "💯",
+    condition_type: "words_total",
+    condition_value: 100,
+  },
+  {
+    id: "words_500",
+    category: "vocabulary",
+    title: "Érudit",
+    description: "Avoir 500 mots dans son dictionnaire",
+    icon: "🏛️",
+    condition_type: "words_total",
+    condition_value: 500,
+  },
+  {
+    id: "first_mastered",
+    category: "vocabulary",
+    title: "Maîtrise",
+    description: "Maîtriser son premier mot",
+    icon: "⭐",
+    condition_type: "mastered_total",
+    condition_value: 1,
+  },
+  {
+    id: "mastered_10",
+    category: "vocabulary",
+    title: "Expert",
+    description: "Maîtriser 10 mots",
+    icon: "🌟",
+    condition_type: "mastered_total",
+    condition_value: 10,
+  },
+  {
+    id: "mastered_50",
+    category: "vocabulary",
+    title: "Maître",
+    description: "Maîtriser 50 mots",
+    icon: "🎓",
+    condition_type: "mastered_total",
+    condition_value: 50,
+  },
+  {
+    id: "streak_3",
+    category: "streak",
+    title: "Régulier",
+    description: "Maintenir une série de 3 jours",
+    icon: "🔥",
+    condition_type: "streak",
+    condition_value: 3,
+  },
+  {
+    id: "streak_7",
+    category: "streak",
+    title: "Semaine parfaite",
+    description: "Maintenir une série de 7 jours",
+    icon: "🔥",
+    condition_type: "streak",
+    condition_value: 7,
+  },
+  {
+    id: "streak_30",
+    category: "streak",
+    title: "Mois de feu",
+    description: "Maintenir une série de 30 jours",
+    icon: "🔥",
+    condition_type: "streak",
+    condition_value: 30,
+  },
+  {
+    id: "reviews_100",
+    category: "practice",
+    title: "Persévérant",
+    description: "Faire 100 révisions au total",
+    icon: "💪",
+    condition_type: "reviews_total",
+    condition_value: 100,
+  },
+  {
+    id: "reviews_500",
+    category: "practice",
+    title: "Assidu",
+    description: "Faire 500 révisions au total",
+    icon: "🏋️",
+    condition_type: "reviews_total",
+    condition_value: 500,
+  },
+  {
+    id: "reviews_1000",
+    category: "practice",
+    title: "Infatigable",
+    description: "Faire 1000 révisions au total",
+    icon: "🏆",
+    condition_type: "reviews_total",
+    condition_value: 1000,
+  },
+  {
+    id: "first_phrase_saved",
+    category: "practice",
+    title: "Collectionneur",
+    description: "Sauvegarder sa première phrase",
+    icon: "📌",
+    condition_type: "saved_phrases_total",
+    condition_value: 1,
+  },
+  {
+    id: "perfect_session",
+    category: "milestone",
+    title: "Sans faute",
+    description: "Terminer une session sans aucune erreur",
+    icon: "✨",
+    condition_type: "event",
+    condition_value: null,
+  },
+  {
+    id: "first_dialogue",
+    category: "milestone",
+    title: "Conversation",
+    description: "Compléter son premier dialogue",
+    icon: "🗣️",
+    condition_type: "event",
+    condition_value: null,
+  },
 ];
 
 function seedBadgeDefinitions(database: Database.Database) {
@@ -493,7 +651,15 @@ function seedBadgeDefinitions(database: Database.Database) {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const badge of BADGE_SEEDS) {
-    insertStatement.run(badge.id, badge.category, badge.title, badge.description, badge.icon, badge.condition_type, badge.condition_value);
+    insertStatement.run(
+      badge.id,
+      badge.category,
+      badge.title,
+      badge.description,
+      badge.icon,
+      badge.condition_type,
+      badge.condition_value,
+    );
   }
 }
 
@@ -595,7 +761,11 @@ export function checkAndAwardBadges(
 
   for (const badge of thresholdBadges) {
     const currentValue = metricsMap[badge.condition_type];
-    if (currentValue !== undefined && badge.condition_value !== null && currentValue >= badge.condition_value) {
+    if (
+      currentValue !== undefined &&
+      badge.condition_value !== null &&
+      currentValue >= badge.condition_value
+    ) {
       insertBadge.run(userId, badge.id);
       newlyEarned.push(badge);
     }
@@ -614,15 +784,55 @@ export function awardEventBadge(
     .get(userId, badgeId);
   if (existing) return null;
 
-  const badge = database
-    .prepare("SELECT * FROM badge_definitions WHERE id = ?")
-    .get(badgeId) as BadgeDefinition | undefined;
+  const badge = database.prepare("SELECT * FROM badge_definitions WHERE id = ?").get(badgeId) as
+    | BadgeDefinition
+    | undefined;
   if (!badge) return null;
 
   database
     .prepare("INSERT OR IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)")
     .run(userId, badgeId);
   return badge;
+}
+
+export type XpAward = LevelProgress & {
+  xpGained: number;
+  leveledUp: boolean;
+};
+
+export function grantXp(database: Database.Database, userId: number, amount: number): XpAward {
+  const xpGained = Math.max(0, Math.trunc(amount));
+  const currentRow = database
+    .prepare("SELECT COALESCE(xp, 0) AS xp FROM users WHERE id = ?")
+    .get(userId) as { xp: number } | undefined;
+  const previousProgress = levelFromXp(currentRow?.xp ?? 0);
+  const nextProgress = levelFromXp(previousProgress.totalXp + xpGained);
+  database.prepare("UPDATE users SET xp = ? WHERE id = ?").run(nextProgress.totalXp, userId);
+  return {
+    ...nextProgress,
+    xpGained,
+    leveledUp: nextProgress.level > previousProgress.level,
+  };
+}
+
+export function maybeAwardDailyGoalXp(database: Database.Database, userId: number): number {
+  const today = new Date().toISOString().slice(0, 10);
+  const userRow = database
+    .prepare(
+      "SELECT COALESCE(daily_goal, 20) AS daily_goal, daily_goal_xp_on FROM users WHERE id = ?",
+    )
+    .get(userId) as { daily_goal: number; daily_goal_xp_on: string | null } | undefined;
+  if (!userRow) return 0;
+  if (userRow.daily_goal_xp_on === today) return 0;
+
+  const todayRow = database
+    .prepare("SELECT reviews_count FROM daily_activity WHERE user_id = ? AND activity_date = ?")
+    .get(userId, today) as { reviews_count: number } | undefined;
+  const todayReviews = todayRow?.reviews_count ?? 0;
+  if (todayReviews < userRow.daily_goal) return 0;
+
+  database.prepare("UPDATE users SET daily_goal_xp_on = ? WHERE id = ?").run(today, userId);
+  return XP_DAILY_GOAL;
 }
 
 export function applyReviewToStats(

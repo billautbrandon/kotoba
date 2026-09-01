@@ -5,6 +5,10 @@ export type User = {
   avatar_url: string | null;
   display_name: string | null;
   is_admin: number;
+  xp: number;
+  level: number;
+  xpInLevel: number;
+  xpForNextLevel: number;
   created_at: string;
 };
 
@@ -37,7 +41,7 @@ export type WordWithStats = Word & {
   fail_count: number;
   score: number;
   last_reviewed_at: string | null;
-  consecutive_success_count?: number;
+  consecutive_success_count: number;
 };
 
 export type WordWithTags = Word & {
@@ -213,7 +217,12 @@ export async function fetchSrsWords(): Promise<SrsWords> {
   return apiGet<SrsWords>("/api/srs/words");
 }
 
-export async function fetchDueWords(): Promise<{ words: WordWithStats[]; dueCount: number }> {
+export async function fetchDueWords(
+  limit?: number | null,
+): Promise<{ words: WordWithStats[]; dueCount: number }> {
+  if (limit && limit > 0) {
+    return apiGet<{ words: WordWithStats[]; dueCount: number }>(`/api/srs/due?limit=${limit}`);
+  }
   return apiGet<{ words: WordWithStats[]; dueCount: number }>("/api/srs/due");
 }
 
@@ -233,6 +242,10 @@ export type StreakInfo = {
   currentStreak: number;
   todayReviews: number;
   dailyGoal: number;
+  xp: number;
+  level: number;
+  xpInLevel: number;
+  xpForNextLevel: number;
 };
 
 export async function fetchStreak(): Promise<StreakInfo> {
@@ -359,6 +372,28 @@ export async function deleteAdminUser(userId: number): Promise<void> {
   await apiDelete(`/api/admin/users/${userId}`);
 }
 
+export type BadgeDefinition = {
+  id: string;
+  category: string;
+  title: string;
+  description: string;
+  icon: string;
+  condition_type: string;
+  condition_value: number | null;
+  earned_at: string | null;
+};
+
+export type XpAward = {
+  xpGained: number;
+  totalXp: number;
+  level: number;
+  xpInLevel: number;
+  xpForNextLevel: number;
+  leveledUp: boolean;
+  combo?: number;
+  perfectSession?: boolean;
+};
+
 export async function submitReview(wordId: number, result: ReviewResult): Promise<void> {
   await apiPost("/api/reviews", { wordId, result });
 }
@@ -379,7 +414,7 @@ export class BulkReviewsError extends Error {
 
 async function submitBulkReviewsOnce(
   reviews: Array<{ wordId: number; result: ReviewResult }>,
-): Promise<{ appliedCount: number }> {
+): Promise<{ appliedCount: number; newBadges: BadgeDefinition[] } & XpAward> {
   let response: Response;
   try {
     response = await fetch("/api/reviews/bulk", {
@@ -399,13 +434,13 @@ async function submitBulkReviewsOnce(
     );
     throw new BulkReviewsError(errorMessage, response.status);
   }
-  return safeJson<{ appliedCount: number }>(response);
+  return safeJson<{ appliedCount: number; newBadges: BadgeDefinition[] } & XpAward>(response);
 }
 
 export async function submitBulkReviews(
   reviews: Array<{ wordId: number; result: ReviewResult }>,
   options: { maxAttempts?: number } = {},
-): Promise<{ appliedCount: number }> {
+): Promise<{ appliedCount: number; newBadges: BadgeDefinition[] } & XpAward> {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -441,6 +476,24 @@ export async function importWordsFromJson(
   }>,
 ): Promise<{ importedWordsCount: number; importedTagsCount: number }> {
   return apiPost<{ importedWordsCount: number; importedTagsCount: number }>("/api/import", {
+    words,
+  });
+}
+
+export type GenerateWordsFromListResult = {
+  createdCount: number;
+  skippedCount: number;
+  errors: string[];
+  tag: Tag;
+  quota?: GeminiQuota;
+};
+
+export async function generateWordsFromList(
+  tagName: string,
+  words: string[],
+): Promise<GenerateWordsFromListResult> {
+  return apiPost<GenerateWordsFromListResult>("/api/words/generate-from-list", {
+    tagName,
     words,
   });
 }
@@ -483,8 +536,11 @@ export type GeneratedPhrase = {
 
 export type PhraseEvaluation = {
   isCorrect: boolean;
+  retryable?: boolean;
+  hint?: string | null;
   feedback: string | null;
   errorType: "particle" | "conjugation" | "kanji" | "other" | null;
+  xpAward?: XpAward | null;
 };
 
 export async function generatePhrases(constraints: PhraseConstraints): Promise<GeneratedPhrase[]> {
@@ -616,6 +672,7 @@ export type JlptConstraints = {
   count: number;
   paragraphLength?: "short" | "medium" | "long";
   customContext?: string;
+  level?: "N5" | "N4" | "N3" | "N2" | "N1";
 };
 
 export type JlptExercise = {
@@ -728,6 +785,7 @@ export type ConjugationEvaluation = {
   isCorrect: boolean;
   correctedAnswer: string;
   explanation: string;
+  xpAward?: XpAward | null;
 };
 
 export async function generateConjugationExercises(
@@ -747,25 +805,18 @@ export async function evaluateConjugation(
   expected: string,
   userAnswer: string,
 ): Promise<{ evaluation: ConjugationEvaluation; quota: GeminiQuota }> {
-  return apiPost<{ evaluation: ConjugationEvaluation; quota: GeminiQuota }>(
-    "/api/conjugation/evaluate",
-    { prompt, expected, userAnswer },
-    "Erreur lors de l'évaluation",
-  );
+  const payload = await apiPost<{
+    evaluation: ConjugationEvaluation;
+    quota: GeminiQuota;
+    xpAward?: XpAward | null;
+  }>("/api/conjugation/evaluate", { prompt, expected, userAnswer }, "Erreur lors de l'évaluation");
+  return {
+    ...payload,
+    evaluation: { ...payload.evaluation, xpAward: payload.xpAward ?? payload.evaluation.xpAward },
+  };
 }
 
 // --- Badges ---
-
-export type BadgeDefinition = {
-  id: string;
-  category: string;
-  title: string;
-  description: string;
-  icon: string;
-  condition_type: string;
-  condition_value: number | null;
-  earned_at: string | null;
-};
 
 export async function fetchBadges(): Promise<BadgeDefinition[]> {
   const payload = await apiGet<{ badges: BadgeDefinition[] }>("/api/badges");
@@ -889,11 +940,10 @@ export async function fetchDailyChallenge(): Promise<DailyChallenge | null> {
 
 export async function submitDailyChallenge(
   answer: string,
-): Promise<{ isCorrect: boolean; expectedAnswer: string; newBadges: BadgeDefinition[] }> {
-  return apiPost<{ isCorrect: boolean; expectedAnswer: string; newBadges: BadgeDefinition[] }>(
-    "/api/daily-challenge/submit",
-    { answer },
-  );
+): Promise<{ isCorrect: boolean; expectedAnswer: string; newBadges: BadgeDefinition[] } & XpAward> {
+  return apiPost<
+    { isCorrect: boolean; expectedAnswer: string; newBadges: BadgeDefinition[] } & XpAward
+  >("/api/daily-challenge/submit", { answer });
 }
 
 // --- Listening / Dictée ---

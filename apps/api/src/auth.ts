@@ -7,6 +7,10 @@ export type PublicUser = {
   avatar_url: string | null;
   display_name: string | null;
   is_admin: number;
+  xp: number;
+  level: number;
+  xpInLevel: number;
+  xpForNextLevel: number;
   created_at: string;
 };
 
@@ -15,10 +19,9 @@ export async function hashPassword(plainPassword: string): Promise<string> {
   return await bcrypt.hash(plainPassword, saltRounds);
 }
 
-export async function verifyPassword(plainPassword: string, passwordHash: string): Promise<boolean> {
+export async function verifyPassword(
+  plainPassword: string,
+  passwordHash: string,
+): Promise<boolean> {
   return await bcrypt.compare(plainPassword, passwordHash);
 }
-
-
-
-
