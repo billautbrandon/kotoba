@@ -9,7 +9,7 @@ import {
   fetchDifficultWords,
   fetchDueWords,
   fetchGeminiQuota,
-  fetchSeriesWords,
+  fetchSeriesWordsByTagIds,
   fetchSrsWords,
   submitBulkReviews,
 } from "../../api";
@@ -47,6 +47,18 @@ export function TrainPage(props: { mode: TrainMode }) {
   const tagId = props.mode === "tag" ? Number(routeParams.tagId) : null;
   const srsCategory = (routeParams.category as SrsCategory | undefined) ?? "hard";
   const tagName = searchParams.get("name") ?? null;
+  const requestedTagIds = useMemo(() => {
+    if (props.mode !== "tag") return [];
+    const fromQuery = searchParams.get("ids");
+    if (fromQuery) {
+      return fromQuery
+        .split(",")
+        .map((value) => Number(value.trim()))
+        .filter((id) => Number.isInteger(id) && id > 0);
+    }
+    if (tagId && Number.isFinite(tagId) && tagId > 0) return [tagId];
+    return [];
+  }, [props.mode, searchParams, tagId]);
 
   const [phase, setPhase] = useState<TrainPhase>(props.mode === "srs" ? "setup" : "setup");
 
@@ -107,10 +119,13 @@ export function TrainPage(props: { mode: TrainMode }) {
   const modeLabel = useMemo(() => {
     if (props.mode === "difficult") return "Mots difficiles";
     if (props.mode === "srs") return `SRS — ${srsCategoryLabels[srsCategory]}`;
+    if (requestedTagIds.length > 1) {
+      return tagName ? tagName : `${requestedTagIds.length} séries`;
+    }
     if (tagName) return tagName;
-    if (tagId) return `Tag ${tagId}`;
+    if (requestedTagIds[0]) return `Tag ${requestedTagIds[0]}`;
     return "Série";
-  }, [props.mode, srsCategory, tagId, tagName]);
+  }, [props.mode, srsCategory, requestedTagIds, tagName]);
 
   async function startSession() {
     sessionMode.current = configSessionMode;
@@ -143,10 +158,10 @@ export function TrainPage(props: { mode: TrainMode }) {
         const bucketCategory = srsCategory as "hard" | "medium" | "easy";
         loadedWords = srsData[bucketCategory] ?? [];
       } else {
-        if (!tagId || !Number.isFinite(tagId)) {
+        if (requestedTagIds.length === 0) {
           throw new Error("Tag invalide");
         }
-        loadedWords = await fetchSeriesWords(tagId);
+        loadedWords = await fetchSeriesWordsByTagIds(requestedTagIds);
       }
 
       const shuffledWords = shuffleWords(loadedWords);
@@ -409,7 +424,7 @@ export function TrainPage(props: { mode: TrainMode }) {
   }
 
   function handleCancelSession() {
-    if (window.confirm("Annuler la serie ? Tes progres ne seront pas enregistres.")) {
+    if (window.confirm("Annuler la série ? Tes progrès ne seront pas enregistrés.")) {
       navigate(props.mode === "srs" ? "/srs" : props.mode === "difficult" ? "/difficult" : "/");
     }
   }
@@ -474,8 +489,8 @@ export function TrainPage(props: { mode: TrainMode }) {
   function getKeyboardInputLabels(word: WordWithStats): [string, string] {
     if (keyboardDirection.current === "fr") return ["Kanji", "Kana"];
     const promptField = getKeyboardPromptField(word);
-    if (promptField === "kanji") return ["Francais", "Kana"];
-    return ["Francais", "Kanji"];
+    if (promptField === "kanji") return ["Français", "Kana"];
+    return ["Français", "Kanji"];
   }
 
   const progressPercent = words && words.length > 0 ? (currentIndex / words.length) * 100 : 0;
@@ -503,7 +518,7 @@ export function TrainPage(props: { mode: TrainMode }) {
               <div>
                 <div className="trainSetup__optionLabel">Manuel</div>
                 <div className="trainSetup__optionHint">
-                  Avance avec <strong>&rarr;</strong> / <strong>Entree</strong>, reviens avec{" "}
+                  Avance avec <strong>&rarr;</strong> / <strong>Entrée</strong>, reviens avec{" "}
                   <strong>&larr;</strong>
                 </div>
               </div>
@@ -519,7 +534,7 @@ export function TrainPage(props: { mode: TrainMode }) {
               <div>
                 <div className="trainSetup__optionLabel">Clavier</div>
                 <div className="trainSetup__optionHint">
-                  Tape tes reponses au clavier, correction par IA a la fin
+                  Tape tes réponses au clavier, correction par IA à la fin
                 </div>
               </div>
             </label>
@@ -547,8 +562,8 @@ export function TrainPage(props: { mode: TrainMode }) {
             </div>
             <p className="trainSetup__optionHint" style={{ marginTop: "var(--space-3)" }}>
               {configKeyboardDirection === "fr"
-                ? "Le mot francais est affiche, tu tapes le kanji et le kana."
-                : "Le mot japonais est affiche, tu tapes le francais et l'autre forme japonaise."}
+                ? "Le mot français est affiché, tu tapes le kanji et le kana."
+                : "Le mot japonais est affiché, tu tapes le français et l'autre forme japonaise."}
             </p>
           </div>
         ) : (
@@ -581,7 +596,7 @@ export function TrainPage(props: { mode: TrainMode }) {
                 onClick={() => setConfigShuffleMode(true)}
                 style={configShuffleMode ? undefined : { border: "2px dashed var(--color-border)" }}
               >
-                Aleatoire
+                Aléatoire
               </button>
             </div>
             {configShuffleMode && (
@@ -596,7 +611,7 @@ export function TrainPage(props: { mode: TrainMode }) {
 
         <div className="trainSetup__actions">
           <button className="button button--primary" type="button" onClick={startSession}>
-            Demarrer
+            Démarrer
           </button>
           <Link className="button" to={props.mode === "srs" ? "/srs" : "/"}>
             Retour
@@ -656,7 +671,7 @@ export function TrainPage(props: { mode: TrainMode }) {
 
         {isLoading && (
           <div className="muted" style={{ textAlign: "center", marginTop: "var(--space-8)" }}>
-            Chargement...
+            Chargement…
           </div>
         )}
         {errorMessage && (
@@ -744,7 +759,7 @@ export function TrainPage(props: { mode: TrainMode }) {
         <div className="trainSession__footer">
           Mode <strong>clavier</strong> &mdash; Direction:{" "}
           <strong>{keyboardDirection.current === "fr" ? "FR \u2192 JPN" : "JPN \u2192 FR"}</strong>{" "}
-          &mdash; <strong>Entree</strong> pour avancer
+          &mdash; <strong>Entrée</strong> pour avancer
         </div>
       </div>
     );
@@ -787,7 +802,7 @@ export function TrainPage(props: { mode: TrainMode }) {
 
         {isLoading && (
           <div className="muted" style={{ textAlign: "center", marginTop: "var(--space-8)" }}>
-            Chargement...
+            Chargement…
           </div>
         )}
         {errorMessage && (
@@ -924,7 +939,7 @@ export function TrainPage(props: { mode: TrainMode }) {
           Mode <strong>{shuffleMode.current ? "manuel (aleatoire)" : "manuel"}</strong> &mdash;
           Question: <strong>{promptLabel}</strong> &mdash; Clique ou <strong>1</strong> &#x2713;{" "}
           <strong>2</strong> &#x26A0; <strong>3</strong> &#x2717; pour noter,{" "}
-          <strong>&rarr;</strong>/<strong>Entree</strong> avancer, <strong>&larr;</strong> revenir
+          <strong>&rarr;</strong>/<strong>Entrée</strong> avancer, <strong>&larr;</strong> revenir
         </div>
 
         {showKanjiViewer && selectedKanjiForViewer && (
@@ -956,7 +971,7 @@ export function TrainPage(props: { mode: TrainMode }) {
               <div className="trainCorrecting__spinner" />
               <h2 className="trainCorrecting__title">Correction par IA en cours...</h2>
               <p className="muted">
-                Gemini analyse tes {words?.length ?? 0} reponses. Cela peut prendre quelques
+                Gemini analyse tes {words?.length ?? 0} réponses. Cela peut prendre quelques
                 secondes.
               </p>
             </>
@@ -1030,9 +1045,9 @@ export function TrainPage(props: { mode: TrainMode }) {
           <table className="table table--compact">
             <thead>
               <tr>
-                <th>Francais</th>
+                <th>Français</th>
                 <th>JP</th>
-                {sessionMode.current === "keyboard" && <th>Tes reponses</th>}
+                {sessionMode.current === "keyboard" && <th>Tes réponses</th>}
                 {sessionMode.current === "keyboard" && <th>Correction</th>}
                 <th>Note</th>
               </tr>

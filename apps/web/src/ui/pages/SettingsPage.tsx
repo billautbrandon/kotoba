@@ -2,10 +2,16 @@ import type React from "react";
 import { useEffect, useState } from "react";
 
 import type { User } from "../../api";
-import { changePassword, fetchMe, updateProfile, uploadAvatar } from "../../api";
+import {
+  changePassword,
+  downloadMissingKanjiSvgs,
+  fetchMe,
+  updateProfile,
+  uploadAvatar,
+} from "../../api";
 import { WordsPage } from "./WordsPage";
 
-type SettingsTab = "profile" | "password" | "vocabulary";
+type SettingsTab = "profile" | "password" | "vocabulary" | "tools";
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
@@ -13,8 +19,10 @@ export function SettingsPage() {
   return (
     <div>
       <div className="pageHeader">
-        <h1 className="pageTitle">Parametres</h1>
-        <p className="pageSubtitle">Gere ton profil et la securite de ton compte.</p>
+        <div>
+          <h1 className="pageTitle">Paramètres</h1>
+          <p className="pageSubtitle">Gère ton profil, la sécurité de ton compte et tes données.</p>
+        </div>
       </div>
 
       <div className="settingsTabs">
@@ -39,11 +47,19 @@ export function SettingsPage() {
         >
           Vocabulaire
         </button>
+        <button
+          className={`settingsTabs__tab ${activeTab === "tools" ? "settingsTabs__tab--active" : ""}`}
+          type="button"
+          onClick={() => setActiveTab("tools")}
+        >
+          Outils
+        </button>
       </div>
 
       {activeTab === "profile" && <ProfileSection />}
       {activeTab === "password" && <PasswordSection />}
       {activeTab === "vocabulary" && <WordsPage />}
+      {activeTab === "tools" && <ToolsSection />}
     </div>
   );
 }
@@ -113,7 +129,7 @@ function ProfileSection() {
         display_name: displayName.trim() || null,
       });
       setCurrentUser(updatedUser);
-      setSuccessMessage("Profil mis a jour.");
+      setSuccessMessage("Profil mis à jour.");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
@@ -123,7 +139,7 @@ function ProfileSection() {
   }
 
   if (isLoading) {
-    return <div className="muted">Chargement...</div>;
+    return <div className="muted">Chargement…</div>;
   }
 
   return (
@@ -226,7 +242,7 @@ function PasswordSection() {
         return;
       }
       if (newPassword.length < 8) {
-        setErrorMessage("Le nouveau mot de passe doit contenir au moins 8 caracteres.");
+        setErrorMessage("Le nouveau mot de passe doit contenir au moins 8 caractères.");
         return;
       }
       if (newPassword !== confirmPassword) {
@@ -235,7 +251,7 @@ function PasswordSection() {
       }
 
       await changePassword(currentPassword, newPassword);
-      setSuccessMessage("Mot de passe modifie.");
+      setSuccessMessage("Mot de passe modifié.");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
@@ -295,5 +311,58 @@ function PasswordSection() {
         </button>
       </div>
     </form>
+  );
+}
+
+function ToolsSection() {
+  const [isDownloadingKanji, setIsDownloadingKanji] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleDownloadKanji() {
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setIsDownloadingKanji(true);
+    try {
+      const result = await downloadMissingKanjiSvgs();
+      setStatusMessage(
+        `Terminé : ${result.downloaded} kanji téléchargé(s) sur ${result.missingCount} manquant(s). ${result.failed} échec(s).`,
+      );
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    } finally {
+      setIsDownloadingKanji(false);
+    }
+  }
+
+  return (
+    <div className="settingsSection">
+      <div className="emptyState">
+        <p className="emptyState__title">Traits de kanji</p>
+        <p className="emptyState__text">
+          Télécharge les SVG manquants pour afficher le tracé des kanji pendant tes sessions.
+        </p>
+        <div className="emptyState__actions">
+          <button
+            className="button button--primary"
+            type="button"
+            disabled={isDownloadingKanji}
+            onClick={() => void handleDownloadKanji()}
+          >
+            {isDownloadingKanji ? "Téléchargement…" : "Télécharger les kanji manquants"}
+          </button>
+        </div>
+      </div>
+      {errorMessage ? (
+        <div className="formError" style={{ marginTop: "var(--space-4)" }}>
+          {errorMessage}
+        </div>
+      ) : null}
+      {statusMessage ? (
+        <div className="formSuccess" style={{ marginTop: "var(--space-4)" }}>
+          {statusMessage}
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -493,11 +493,11 @@ export function DictionaryPage() {
                             <div className="dictionaryCard__face">
                               <span
                                 className="dictionaryCard__expand"
-                                onClick={(e) => {
-                                  e.stopPropagation();
+                                onClick={(event) => {
+                                  event.stopPropagation();
                                   setExpandedWord(word);
                                 }}
-                                onKeyDown={(e) => e.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
                                 title="Voir en grand"
                               >
                                 <svg
@@ -547,11 +547,11 @@ export function DictionaryPage() {
                             <div className="dictionaryCard__face dictionaryCard__face--back">
                               <span
                                 className="dictionaryCard__expand"
-                                onClick={(e) => {
-                                  e.stopPropagation();
+                                onClick={(event) => {
+                                  event.stopPropagation();
                                   setExpandedWord(word);
                                 }}
-                                onKeyDown={(e) => e.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
                                 title="Voir en grand"
                               >
                                 <svg
@@ -706,7 +706,7 @@ export function DictionaryPage() {
                                         style={{
                                           padding: "4px 10px",
                                           borderRadius: "var(--radius-md)",
-                                          background: "rgba(199, 62, 29, 0.08)",
+                                          background: "var(--color-primary-soft)",
                                           color: "var(--color-primary)",
                                           fontSize: "13px",
                                           fontWeight: 600,

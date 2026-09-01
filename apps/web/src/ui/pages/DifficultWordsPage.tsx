@@ -41,22 +41,20 @@ export function DifficultWordsPage() {
 
   return (
     <div>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+      <div className="pageHeader">
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>Mots difficiles</div>
-          <div className="muted" style={{ marginTop: 4 }}>
-            Vue filtrée: score bas ou fail rate élevé (seuils configurables côté API).
-          </div>
+          <h1 className="pageTitle">Mots difficiles</h1>
+          <p className="pageSubtitle">
+            Mots au score bas ou au taux d'échec élevé — à retravailler en priorité.
+          </p>
         </div>
-        <div className="row">
-          <button
-            type="button"
-            className="button button--primary"
-            onClick={() => navigate("/train/difficult")}
-          >
-            Entraîner ces mots
-          </button>
-        </div>
+        <button
+          type="button"
+          className="button button--primary"
+          onClick={() => navigate("/train/difficult")}
+        >
+          Entraîner ces mots
+        </button>
       </div>
 
       {isLoading ? (
@@ -72,8 +70,11 @@ export function DifficultWordsPage() {
       ) : null}
 
       {!isLoading && words && words.length === 0 ? (
-        <div style={{ marginTop: 16 }} className="muted">
-          Aucun mot ne matche la règle “difficile” pour le moment.
+        <div className="emptyState">
+          <p className="emptyState__title">Aucun mot difficile</p>
+          <p className="emptyState__text">
+            Les mots avec un score bas ou un taux d'échec élevé apparaîtront ici.
+          </p>
         </div>
       ) : null}
 

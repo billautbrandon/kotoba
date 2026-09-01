@@ -1,5 +1,4 @@
-import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type Tag,
@@ -10,10 +9,10 @@ import {
   exportBackup,
   fetchTags,
   fetchWordsWithTags,
-  importWordsFromJson,
   resetAllWordScores,
 } from "../../api";
 import { AudioButton } from "../components/AudioButton";
+import { ImportPanel } from "../components/ImportPanel";
 import { WordFormModal } from "../components/WordFormModal";
 
 export function WordsPage() {
@@ -29,9 +28,8 @@ export function WordsPage() {
   const [activeTagFilterId, setActiveTagFilterId] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
-  const [jsonImportText, setJsonImportText] = useState<string>("");
   const [jsonImportStatus, setJsonImportStatus] = useState<string | null>(null);
-  const jsonImportTextareaId = "json-import";
+  const importSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -159,71 +157,20 @@ export function WordsPage() {
     }
   }
 
-  async function handleImportJson() {
-    setErrorMessage(null);
-    setJsonImportStatus(null);
-
-    const trimmedText = jsonImportText.trim();
-    if (!trimmedText) return;
-
-    try {
-      const parsed: unknown = JSON.parse(trimmedText);
-      const wordsToImport = Array.isArray(parsed)
-        ? parsed
-        : typeof parsed === "object" && parsed !== null && "words" in parsed
-          ? (parsed as { words: unknown }).words
-          : null;
-      if (!Array.isArray(wordsToImport)) {
-        throw new Error("Format invalide: attendu un tableau ou un objet { words: [...] }");
-      }
-
-      const result = await importWordsFromJson(wordsToImport);
-      await refreshWordsAndTags();
-      setJsonImportStatus(
-        `Import OK: ${result.importedWordsCount} mots, ${result.importedTagsCount} nouveaux tags.`,
-      );
-      setJsonImportText("");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-    }
-  }
-
-  async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setErrorMessage(null);
-    setJsonImportStatus(null);
-    event.target.value = "";
-
-    try {
-      const fileText = await file.text();
-      const parsed: unknown = JSON.parse(fileText);
-      const wordsToImport = Array.isArray(parsed)
-        ? parsed
-        : typeof parsed === "object" && parsed !== null && "words" in parsed
-          ? (parsed as { words: unknown }).words
-          : null;
-      if (!Array.isArray(wordsToImport)) {
-        setErrorMessage(
-          "Le fichier JSON doit contenir un tableau de mots ou un objet avec une propriété 'words'.",
-        );
-        return;
-      }
-      const result = await importWordsFromJson(wordsToImport);
-      await refreshWordsAndTags();
-      setJsonImportStatus(
-        `Import OK: ${result.importedWordsCount} mots, ${result.importedTagsCount} nouveaux tags.`,
-      );
-      setJsonImportText("");
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : "Erreur lors de la lecture du fichier",
-      );
-    }
-  }
-
   const hasWords = (words?.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (!isLoading && !hasWords) {
+      setShowAdvanced(true);
+    }
+  }, [isLoading, hasWords]);
+
+  function openImport() {
+    setShowAdvanced(true);
+    window.requestAnimationFrame(() => {
+      importSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 
   return (
     <div className="wordsPage">
@@ -284,11 +231,19 @@ export function WordsPage() {
       ) : null}
 
       {!isLoading && !hasWords ? (
-        <div className="wordsPage__empty">
-          <p className="muted">Aucun mot pour l'instant.</p>
-          <button className="button button--primary" type="button" onClick={openAddModal}>
-            + Ajouter ton premier mot
-          </button>
+        <div className="wordsPage__empty emptyState emptyState--center">
+          <p className="emptyState__title">Aucun mot pour l'instant</p>
+          <p className="emptyState__text">
+            Ajoute tes premiers mots à la main, ou importe un fichier JSON pour démarrer plus vite.
+          </p>
+          <div className="emptyState__actions">
+            <button className="button button--primary" type="button" onClick={openAddModal}>
+              + Ajouter un mot
+            </button>
+            <button className="button" type="button" onClick={openImport}>
+              Importer un fichier
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -308,7 +263,7 @@ export function WordsPage() {
         </div>
       ) : null}
 
-      <div className="wordsPage__advanced">
+      <div className="wordsPage__advanced" ref={importSectionRef}>
         <button
           type="button"
           className="sectionHeader"
@@ -354,91 +309,15 @@ export function WordsPage() {
               </button>
             </div>
 
-            <div className="field">
-              <label htmlFor={jsonImportTextareaId}>JSON à importer</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-                <label
-                  className="button"
-                  style={{ cursor: "pointer", display: "inline-block", alignSelf: "flex-start" }}
-                >
-                  📁 Importer un fichier JSON
-                  <input
-                    type="file"
-                    accept=".json,application/json"
-                    onChange={handleImportFile}
-                    style={{ display: "none" }}
-                  />
-                </label>
-                <div className="muted" style={{ fontSize: "14px" }}>
-                  ou colle le JSON ci-dessous :
-                </div>
-                <textarea
-                  id={jsonImportTextareaId}
-                  className="textarea"
-                  value={jsonImportText}
-                  onChange={(event) => setJsonImportText(event.target.value)}
-                  placeholder='[{"french":"bonjour","romaji":"konnichiwa","kana":"こんにちは","kanji":"今日は","examples":[{"jp":"今日は!","kana":"こんにちは!","fr":"Bonjour !"}],"tags":["salutations"]}]'
-                  style={{ minHeight: "120px" }}
-                />
+            <ImportPanel
+              onImported={refreshWordsAndTags}
+              onError={(message) => setErrorMessage(message)}
+            />
+            {jsonImportStatus ? (
+              <div className="importPanel__status" style={{ marginTop: "var(--space-3)" }}>
+                {jsonImportStatus}
               </div>
-            </div>
-            <div
-              className="row"
-              style={{
-                marginTop: "var(--space-4)",
-                gap: "var(--space-3)",
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <button
-                className="button"
-                type="button"
-                onClick={() => void handleImportJson()}
-                disabled={!jsonImportText.trim()}
-              >
-                Importer depuis le texte
-              </button>
-              <button
-                className="button"
-                type="button"
-                onClick={async () => {
-                  const example = [
-                    {
-                      french: "bonjour",
-                      romaji: "konnichiwa",
-                      kana: "こんにちは",
-                      kanji: "今日は",
-                      examples: [
-                        {
-                          jp: "今日は良い天気ですね。",
-                          kana: "きょうはいいてんきですね。",
-                          fr: "Il fait beau aujourd'hui.",
-                        },
-                      ],
-                      tags: ["salutations"],
-                    },
-                    {
-                      french: "merci",
-                      romaji: "arigatou",
-                      kana: "ありがとう",
-                      kanji: "有難う",
-                      tags: ["salutations"],
-                    },
-                  ];
-                  await navigator.clipboard.writeText(JSON.stringify(example, null, 2));
-                  setJsonImportStatus("Exemple copié dans le presse-papier !");
-                  setTimeout(() => setJsonImportStatus(null), 3000);
-                }}
-              >
-                Copier un exemple
-              </button>
-              {jsonImportStatus ? (
-                <div className="muted" style={{ fontSize: "15px" }}>
-                  {jsonImportStatus}
-                </div>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         ) : null}
       </div>

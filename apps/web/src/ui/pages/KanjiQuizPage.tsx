@@ -145,8 +145,10 @@ export function KanjiQuizPage() {
     return (
       <div>
         <div className="pageHeader">
-          <h1 className="pageTitle">Quiz Kanji</h1>
-          <p className="pageSubtitle">Teste tes connaissances des kanji de ton vocabulaire</p>
+          <div>
+            <h1 className="pageTitle">Quiz Kanji</h1>
+            <p className="pageSubtitle">Teste tes connaissances des kanji de ton vocabulaire</p>
+          </div>
         </div>
 
         <div className="trainSetup">

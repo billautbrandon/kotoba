@@ -61,6 +61,10 @@ export function LoginPage(props: { onAuthenticated: (user: User) => void }) {
   return (
     <div className="auth">
       <div className="authCard">
+        <div className="authCard__brand">
+          <span className="authCard__brandName">Kotoba</span>
+          <span className="authCard__brandKana">言葉</span>
+        </div>
         <div className="authCard__header">
           <h1 className="authCard__title">{title}</h1>
           <p className="authCard__subtitle">Tes mots et séries sont liés à ton profil.</p>

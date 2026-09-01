@@ -76,7 +76,7 @@ export function KanjiLearningPage() {
 
       <div>
         {isLoading ? (
-          <div className="muted">Chargement...</div>
+          <div className="muted">Chargement…</div>
         ) : errorMessage ? (
           <div className="formError">{errorMessage}</div>
         ) : wordsWithKanji.length === 0 ? (
