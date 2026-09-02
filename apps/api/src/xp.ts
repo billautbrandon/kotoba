@@ -13,6 +13,8 @@ export const XP_PERFECT_SESSION = 30;
 export const XP_DAILY_GOAL = 25;
 export const XP_PRACTICE_CORRECT = 8;
 export const XP_DAILY_CHALLENGE = 15;
+export const XP_NO_HIT_CLEAR = 40;
+export const XP_NO_HIT_BREAK = -25;
 export const PERFECT_SESSION_MIN_REVIEWS = 5;
 
 export function xpToReachLevel(level: number): number {

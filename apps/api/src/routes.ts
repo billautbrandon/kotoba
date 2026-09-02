@@ -32,7 +32,14 @@ import {
   isGeminiConfigured,
 } from "./gemini.js";
 import { downloadKanjiSvgsFromText, downloadMissingKanjiSvgs } from "./kanji-downloader.js";
-import { XP_DAILY_CHALLENGE, XP_PRACTICE_CORRECT, computeSessionXp, levelFromXp } from "./xp.js";
+import {
+  XP_DAILY_CHALLENGE,
+  XP_NO_HIT_BREAK,
+  XP_NO_HIT_CLEAR,
+  XP_PRACTICE_CORRECT,
+  computeSessionXp,
+  levelFromXp,
+} from "./xp.js";
 
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
   const wrapAsync =
@@ -134,6 +141,12 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       combo: sessionXp.maxCombo,
       perfectSession: sessionXp.perfectBonus > 0,
     };
+  }
+
+  function noHitExtraXp(noHit: "clear" | "broken" | undefined): number {
+    if (noHit === "clear") return XP_NO_HIT_CLEAR;
+    if (noHit === "broken") return XP_NO_HIT_BREAK;
+    return 0;
   }
 
   function practiceEvalPayload<T extends { isCorrect: boolean }>(
@@ -1122,6 +1135,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
           result: z.enum(["success", "partial", "fail"]),
         }),
       ),
+      noHit: z.enum(["clear", "broken"]).optional(),
     });
 
     let body: z.infer<typeof bodySchema>;
@@ -1222,7 +1236,11 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
     }
 
     const newBadges = checkAndAwardBadges(database, userId);
-    const xpAward = awardReviewXp(userId, appliedResults);
+    if (body.noHit === "clear") {
+      const noHitBadge = awardEventBadge(database, userId, "no_hit");
+      if (noHitBadge) newBadges.push(noHitBadge);
+    }
+    const xpAward = awardReviewXp(userId, appliedResults, noHitExtraXp(body.noHit));
     res.status(201).json({ appliedCount, newBadges, ...xpAward });
   });
 

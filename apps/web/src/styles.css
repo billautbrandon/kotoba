@@ -661,14 +661,14 @@ a {
 }
 
 .button--warning {
-  border-color: var(--color-warning);
+  border-color: var(--color-warning-dark);
   background: var(--color-warning);
-  color: #ffffff;
+  color: var(--color-warning-ink);
 }
 
 .button--warning:hover:not(:disabled) {
-  background: var(--color-accent-light);
-  border-color: var(--color-accent-light);
+  background: var(--color-warning-dark);
+  border-color: var(--color-warning-dark);
   color: #ffffff;
 }
 
@@ -1887,6 +1887,15 @@ select.input:focus {
   border-radius: 999px;
 }
 
+.trainSession__noHit {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-warning-ink);
+  background: var(--color-warning-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
 .trainSession__timer {
   font-size: 13px;
   color: var(--color-muted);
@@ -2065,7 +2074,8 @@ select.input:focus {
 }
 
 .trainSession__ratingBtn--success:hover:not(:disabled) {
-  background: rgba(45, 74, 82, 0.06);
+  background: var(--color-success-soft);
+  color: var(--color-success-dark);
 }
 
 .trainSession__ratingBtn--success.trainSession__ratingBtn--selected {
@@ -2073,18 +2083,27 @@ select.input:focus {
   color: #ffffff;
 }
 
+.trainSession__ratingBtn--success.trainSession__ratingBtn--selected:hover:not(:disabled) {
+  color: var(--color-success-dark);
+}
+
 .trainSession__ratingBtn--warning {
-  border-color: var(--color-warning);
-  color: #b8942e;
+  border-color: var(--color-warning-dark);
+  color: var(--color-warning-ink);
 }
 
 .trainSession__ratingBtn--warning:hover:not(:disabled) {
-  background: rgba(201, 169, 97, 0.06);
+  background: var(--color-warning-soft);
+  color: var(--color-warning-ink);
 }
 
 .trainSession__ratingBtn--warning.trainSession__ratingBtn--selected {
   background: var(--color-warning);
-  color: #ffffff;
+  color: var(--color-warning-ink);
+}
+
+.trainSession__ratingBtn--warning.trainSession__ratingBtn--selected:hover:not(:disabled) {
+  color: #3d2e00;
 }
 
 .trainSession__ratingBtn--danger {
@@ -2093,12 +2112,17 @@ select.input:focus {
 }
 
 .trainSession__ratingBtn--danger:hover:not(:disabled) {
-  background: var(--color-primary-softer);
+  background: var(--color-danger-soft);
+  color: var(--color-danger-dark);
 }
 
 .trainSession__ratingBtn--danger.trainSession__ratingBtn--selected {
   background: var(--color-danger);
   color: #ffffff;
+}
+
+.trainSession__ratingBtn--danger.trainSession__ratingBtn--selected:hover:not(:disabled) {
+  color: var(--color-danger-dark);
 }
 
 .trainSession__secondaryActions {
@@ -2224,7 +2248,7 @@ select.input:focus {
   color: var(--color-success);
 }
 .trainRecap__stat--warning {
-  color: #b8942e;
+  color: var(--color-warning-ink);
 }
 .trainRecap__stat--danger {
   color: var(--color-danger);
@@ -2653,8 +2677,9 @@ select.input:focus {
    ======================================== */
 
 .pratique {
-  max-width: 720px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   padding: 0;
 }
 
@@ -4050,7 +4075,6 @@ select.input:focus {
 
 [data-theme="dark"] .trainSession__ratingBtn {
   background: var(--color-panel);
-  color: var(--color-text);
 }
 
 [data-theme="dark"] .trainRecap__tableWrap {
@@ -6578,7 +6602,8 @@ select.input:focus {
 }
 
 .pratique--hub {
-  max-width: 960px;
+  width: 100%;
+  max-width: none;
 }
 
 .pratiqueHub__card {
@@ -6639,6 +6664,7 @@ select.input:focus {
 
 .pratique--setup {
   width: 100%;
+  max-width: none;
 }
 
 .pratiqueSetup {

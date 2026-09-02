@@ -635,6 +635,15 @@ const BADGE_SEEDS: Array<{
     condition_value: null,
   },
   {
+    id: "no_hit",
+    category: "milestone",
+    title: "No-hit",
+    description: "Terminer une série en no-hit, sans aucun écart",
+    icon: "🎯",
+    condition_type: "event",
+    condition_value: null,
+  },
+  {
     id: "first_dialogue",
     category: "milestone",
     title: "Conversation",
@@ -801,16 +810,16 @@ export type XpAward = LevelProgress & {
 };
 
 export function grantXp(database: Database.Database, userId: number, amount: number): XpAward {
-  const xpGained = Math.max(0, Math.trunc(amount));
   const currentRow = database
     .prepare("SELECT COALESCE(xp, 0) AS xp FROM users WHERE id = ?")
     .get(userId) as { xp: number } | undefined;
   const previousProgress = levelFromXp(currentRow?.xp ?? 0);
-  const nextProgress = levelFromXp(previousProgress.totalXp + xpGained);
+  const nextTotal = Math.max(0, previousProgress.totalXp + Math.trunc(amount));
+  const nextProgress = levelFromXp(nextTotal);
   database.prepare("UPDATE users SET xp = ? WHERE id = ?").run(nextProgress.totalXp, userId);
   return {
     ...nextProgress,
-    xpGained,
+    xpGained: nextProgress.totalXp - previousProgress.totalXp,
     leveledUp: nextProgress.level > previousProgress.level,
   };
 }

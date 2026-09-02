@@ -16,6 +16,7 @@ import {
   submitBulkReviews,
 } from "../../api";
 import { extractKanji } from "../../utils/kanji";
+import { scrollAppToTop } from "../../utils/scroll";
 import { previewReviewXp } from "../../utils/xp";
 import { AudioButton } from "../components/AudioButton";
 import { BadgeNotification } from "../components/BadgeNotification";
@@ -36,6 +37,7 @@ type TrainPhase = "setup" | "training" | "correcting" | "finished";
 type PersistedSeriesSettings = {
   sessionMode: SessionMode;
   promptMode: PromptMode;
+  noHitMode: boolean;
 };
 
 const SETTINGS_KEY = "kotoba.seriesSettings.v1";
@@ -92,11 +94,14 @@ export function TrainPage(props: { mode: TrainMode }) {
   );
   const [configShuffleMode, setConfigShuffleMode] = useState<boolean>(false);
   const [configKeyboardDirection, setConfigKeyboardDirection] = useState<KeyboardDirection>("fr");
+  const [configNoHitMode, setConfigNoHitMode] = useState<boolean>(() => loadSettings().noHitMode);
 
   const sessionMode = useRef<SessionMode>("manual");
   const basePromptMode = useRef<PromptMode>("french");
   const shuffleMode = useRef<boolean>(false);
   const keyboardDirection = useRef<KeyboardDirection>("fr");
+  const noHitMode = useRef<boolean>(false);
+  const originalSeriesWordsRef = useRef<WordWithStats[] | null>(null);
 
   const [words, setWords] = useState<WordWithStats[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -129,13 +134,15 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [newBadges, setNewBadges] = useState<BadgeDefinition[]>([]);
   const [leveledUpTo, setLeveledUpTo] = useState<number | null>(null);
   const [followUpRound, setFollowUpRound] = useState(0);
+  const [noHitBroken, setNoHitBroken] = useState(false);
 
   useEffect(() => {
     saveSettings({
       sessionMode: configSessionMode,
       promptMode: configPromptMode,
+      noHitMode: configNoHitMode,
     });
-  }, [configSessionMode, configPromptMode]);
+  }, [configSessionMode, configPromptMode, configNoHitMode]);
 
   useEffect(() => {
     if (configSessionMode === "keyboard") {
@@ -161,6 +168,8 @@ export function TrainPage(props: { mode: TrainMode }) {
     basePromptMode.current = configPromptMode;
     shuffleMode.current = configShuffleMode;
     keyboardDirection.current = configKeyboardDirection;
+    noHitMode.current = configNoHitMode;
+    setNoHitBroken(false);
 
     setPhase("training");
     setIsLoading(true);
@@ -208,8 +217,10 @@ export function TrainPage(props: { mode: TrainMode }) {
       }
 
       const shuffledWords = shuffleWords(loadedWords);
+      originalSeriesWordsRef.current = shuffledWords;
       setWords(shuffledWords);
       setRandomPromptModes(generateRandomPromptModes(shuffledWords.length));
+      scrollAppToTop();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
       setWords([]);
@@ -260,8 +271,14 @@ export function TrainPage(props: { mode: TrainMode }) {
     });
   }, [words]);
 
-  function beginTrainingRound(roundWords: WordWithStats[], nextFollowUpRound: number) {
+  function beginTrainingRound(
+    roundWords: WordWithStats[],
+    nextFollowUpRound: number,
+    options?: { noHit?: boolean },
+  ) {
     const reshuffled = shuffleWords(roundWords);
+    noHitMode.current = Boolean(options?.noHit);
+    setNoHitBroken(false);
     setWords(reshuffled);
     setRandomPromptModes(generateRandomPromptModes(reshuffled.length));
     setCurrentIndex(0);
@@ -281,6 +298,7 @@ export function TrainPage(props: { mode: TrainMode }) {
     setLeveledUpTo(null);
     setFollowUpRound(nextFollowUpRound);
     setErrorMessage(null);
+    scrollAppToTop();
   }
 
   function restartSession() {
@@ -300,6 +318,10 @@ export function TrainPage(props: { mode: TrainMode }) {
   }, [phase]);
 
   useEffect(() => {
+    if (phase !== "setup") scrollAppToTop();
+  }, [phase]);
+
+  useEffect(() => {
     if (phase !== "training") return;
     const intervalId = window.setInterval(() => setClockNowMs(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
@@ -312,15 +334,19 @@ export function TrainPage(props: { mode: TrainMode }) {
 
   const handleRatingKey = useCallback(
     (rating: SessionRating) => {
-      if (currentWordId) {
-        setRatingsByWordId((prev) => ({ ...prev, [currentWordId]: rating }));
-        const nextCombo = rating === "success" ? comboCountRef.current + 1 : 0;
-        comboCountRef.current = nextCombo;
-        setComboCount(nextCombo);
-        setXpFlash(previewReviewXp(rating, nextCombo));
-        window.setTimeout(() => setXpFlash(null), 700);
-        advanceToNextWord();
+      if (!currentWordId) return;
+      setRatingsByWordId((previous) => ({ ...previous, [currentWordId]: rating }));
+      const nextCombo = rating === "success" ? comboCountRef.current + 1 : 0;
+      comboCountRef.current = nextCombo;
+      setComboCount(nextCombo);
+      setXpFlash(previewReviewXp(rating, nextCombo));
+      window.setTimeout(() => setXpFlash(null), 700);
+      if (noHitMode.current && rating !== "success") {
+        setNoHitBroken(true);
+        setPhase("finished");
+        return;
       }
+      advanceToNextWord();
     },
     [advanceToNextWord, currentWordId],
   );
@@ -460,21 +486,36 @@ export function TrainPage(props: { mode: TrainMode }) {
     setRatingsByWordId((prev) => ({ ...prev, [wordId]: rating }));
   }
 
-  async function submitRatings(): Promise<boolean> {
+  async function submitRatings(
+    ratingsOverride?: Record<number, SessionRating | null>,
+  ): Promise<boolean> {
     if (!words) return false;
+    const ratings = ratingsOverride ?? ratingsByWordId;
     const reviews = words
       .map((word) => {
-        const rating = ratingsByWordId[word.id];
+        const rating = ratings[word.id];
         if (!rating) return null;
         return { wordId: word.id, result: rating as SessionRating };
       })
       .filter((review): review is { wordId: number; result: SessionRating } => review !== null);
 
     if (reviews.length === 0) return false;
+    const hasMiss = words.some((word) => {
+      const rating = ratings[word.id];
+      return rating === "partial" || rating === "fail";
+    });
+    const allSuccess = words.every((word) => ratings[word.id] === "success");
+    const noHitOutcome = noHitMode.current
+      ? allSuccess
+        ? "clear"
+        : hasMiss
+          ? "broken"
+          : undefined
+      : undefined;
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
-      const result = await submitBulkReviews(reviews);
+      const result = await submitBulkReviews(reviews, { noHit: noHitOutcome });
       setIsRatingsSubmitted(true);
       setXpResult(result);
       if (result.newBadges?.length) setNewBadges(result.newBadges);
@@ -488,6 +529,19 @@ export function TrainPage(props: { mode: TrainMode }) {
     }
   }
 
+  const noHitAutoSubmitRef = useRef(false);
+  const submitRatingsRef = useRef(submitRatings);
+  submitRatingsRef.current = submitRatings;
+  useEffect(() => {
+    if (phase !== "finished") {
+      noHitAutoSubmitRef.current = false;
+      return;
+    }
+    if (!noHitMode.current || isRatingsSubmitted || noHitAutoSubmitRef.current) return;
+    noHitAutoSubmitRef.current = true;
+    void submitRatingsRef.current();
+  }, [phase, isRatingsSubmitted]);
+
   async function startFailedWordsFollowUp() {
     const wordsToRetry = failedWords;
     if (wordsToRetry.length === 0) return;
@@ -496,6 +550,18 @@ export function TrainPage(props: { mode: TrainMode }) {
       if (!didSave) return;
     }
     beginTrainingRound(wordsToRetry, followUpRound + 1);
+  }
+
+  function startNoHitAttempt() {
+    const originalWords = originalSeriesWordsRef.current;
+    if (!originalWords || originalWords.length === 0) return;
+    void (async () => {
+      if (!isRatingsSubmitted) {
+        const didSave = await submitRatings();
+        if (!didSave) return;
+      }
+      beginTrainingRound(originalWords, followUpRound, { noHit: true });
+    })();
   }
 
   function goToPreviousWord() {
@@ -558,6 +624,8 @@ export function TrainPage(props: { mode: TrainMode }) {
       }
       setKeyboardCorrections(correctionsMap);
       setRatingsByWordId(ratingsMap);
+      const hasMiss = Object.values(ratingsMap).some((rating) => rating !== "success");
+      if (noHitMode.current && hasMiss) setNoHitBroken(true);
       setPhase("finished");
     } catch (error) {
       setCorrectingError(error instanceof Error ? error.message : "Erreur inconnue");
@@ -593,12 +661,13 @@ export function TrainPage(props: { mode: TrainMode }) {
       : props.mode === "difficult"
         ? "← Mots difficiles"
         : "← Toutes les séries";
-  const setupSummary =
+  const setupSummary = `${
     configSessionMode === "keyboard"
       ? `Clavier · ${configKeyboardDirection === "fr" ? "vers le japonais" : "vers le français"}`
       : configShuffleMode
         ? "Cartes · langue au hasard"
-        : `Cartes · question en ${promptModeLabels[configPromptMode]}`;
+        : `Cartes · question en ${promptModeLabels[configPromptMode]}`
+  }${configNoHitMode ? " · No-hit" : ""}`;
 
   // --- SETUP PHASE ---
   if (phase === "setup") {
@@ -712,6 +781,40 @@ export function TrainPage(props: { mode: TrainMode }) {
               </div>
             </section>
           )}
+
+          <section className="pratiqueStep">
+            <header className="pratiqueStep__header">
+              <span className="pratiqueStep__index">3</span>
+              <div>
+                <h2 className="pratiqueStep__title">Défi</h2>
+                <p className="pratiqueStep__hint">
+                  En no-hit, un mot partiel ou incorrect arrête la série et retire des points.
+                </p>
+              </div>
+            </header>
+            <div className="pratiqueChoiceGrid">
+              <button
+                type="button"
+                className={`pratiqueChoice${!configNoHitMode ? " pratiqueChoice--active" : ""}`}
+                onClick={() => setConfigNoHitMode(false)}
+              >
+                <span className="pratiqueChoice__title">Série classique</span>
+                <span className="pratiqueChoice__text">
+                  Tu notes chaque mot, puis tu peux relancer les ratés.
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`pratiqueChoice${configNoHitMode ? " pratiqueChoice--active" : ""}`}
+                onClick={() => setConfigNoHitMode(true)}
+              >
+                <span className="pratiqueChoice__title">No-hit</span>
+                <span className="pratiqueChoice__text">
+                  Un seul écart et c’est terminé. Réussis pour un bonus, échoue et tu perds de l’XP.
+                </span>
+              </button>
+            </div>
+          </section>
         </div>
 
         {configSessionMode === "keyboard" && geminiQuota ? <QuotaBar quota={geminiQuota} /> : null}
@@ -770,6 +873,7 @@ export function TrainPage(props: { mode: TrainMode }) {
             {followUpRound > 0 ? (
               <span className="trainSession__followUp">Relance {followUpRound}</span>
             ) : null}
+            {noHitMode.current ? <span className="trainSession__noHit">No-hit</span> : null}
             <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
             {comboCount >= 2 ? (
               <span className="trainSession__combo">🔥 Combo {comboCount}</span>
@@ -898,6 +1002,7 @@ export function TrainPage(props: { mode: TrainMode }) {
             {followUpRound > 0 ? (
               <span className="trainSession__followUp">Relance {followUpRound}</span>
             ) : null}
+            {noHitMode.current ? <span className="trainSession__noHit">No-hit</span> : null}
             <span className="trainSession__timer">Temps: {formatMs(elapsedTimeMs)}</span>
             {comboCount >= 2 ? (
               <span className="trainSession__combo">🔥 Combo {comboCount}</span>
@@ -1141,12 +1246,22 @@ export function TrainPage(props: { mode: TrainMode }) {
   const failedWordsLabel = `${failedWordCount} mot${failedWordCount > 1 ? "s" : ""} raté${
     failedWordCount > 1 ? "s" : ""
   }`;
+  const noHitCleared = noHitMode.current && !noHitBroken && failedWordCount === 0;
+  const allWordsSucceeded = Boolean(words && recapCounts.successCount === words.length);
+  const canStartNoHit =
+    allWordsSucceeded &&
+    Boolean(originalSeriesWordsRef.current && originalSeriesWordsRef.current.length > 0);
+  const recapTitle = noHitBroken
+    ? "No-hit brisé"
+    : noHitCleared
+      ? "No-hit réussi"
+      : followUpRound > 0
+        ? `Relance ${followUpRound}`
+        : "Fin de serie";
 
   return (
     <div className="trainRecap">
-      <h2 className="trainRecap__title">
-        {followUpRound > 0 ? `Relance ${followUpRound}` : "Fin de serie"}
-      </h2>
+      <h2 className="trainRecap__title">{recapTitle}</h2>
       <div className="trainRecap__summary">
         {recapCounts.successCount + recapCounts.partialCount + recapCounts.failCount} mot(s) note(s)
         sur {words?.length ?? 0}.
@@ -1165,13 +1280,20 @@ export function TrainPage(props: { mode: TrainMode }) {
           </span>
         )}
       </div>
-      {failedWordCount > 0 ? (
+      {noHitBroken ? (
+        <p className="trainRecap__followUpHint">
+          Un écart a annulé le no-hit et les points de cette série sont appliqués, y compris la
+          pénalité. Relance les mots ratés, puis retente le no-hit.
+        </p>
+      ) : failedWordCount > 0 ? (
         <p className="trainRecap__followUpHint">
           Relance uniquement les mots partiels et incorrects, autant de fois que tu veux, jusqu’à
           tout réussir.
         </p>
       ) : null}
-      {followUpRound > 0 && failedWordCount === 0 ? (
+      {noHitCleared ? (
+        <p className="trainRecap__followUpDone">Série parfaite : aucun écart, bonus no-hit.</p>
+      ) : followUpRound > 0 && failedWordCount === 0 ? (
         <p className="trainRecap__followUpDone">Tous les mots de cette relance sont réussis.</p>
       ) : null}
       {errorMessage ? <div className="formError">{errorMessage}</div> : null}
@@ -1179,7 +1301,9 @@ export function TrainPage(props: { mode: TrainMode }) {
       <div className="trainRecap__score">
         {xpResult ? (
           <>
-            <div className="trainRecap__xp">+{xpResult.xpGained} XP</div>
+            <div className="trainRecap__xp">
+              {xpResult.xpGained >= 0 ? `+${xpResult.xpGained}` : xpResult.xpGained} XP
+            </div>
             {xpResult.combo ? (
               <div className="trainRecap__combo">Combo max {xpResult.combo}</div>
             ) : null}
@@ -1281,8 +1405,18 @@ export function TrainPage(props: { mode: TrainMode }) {
               : `Enregistrer et revoir les ${failedWordsLabel}`}
           </button>
         ) : null}
+        {canStartNoHit ? (
+          <button
+            className="button button--primary"
+            type="button"
+            onClick={startNoHitAttempt}
+            disabled={isSubmitting}
+          >
+            {noHitCleared ? "Retenter un no-hit" : "Tenter un no-hit"}
+          </button>
+        ) : null}
         <button
-          className={failedWordCount > 0 ? "button" : "button button--primary"}
+          className={failedWordCount > 0 || canStartNoHit ? "button" : "button button--primary"}
           type="button"
           onClick={() => void submitRatings()}
           disabled={isSubmitting || isRatingsSubmitted}
@@ -1343,7 +1477,7 @@ function formatMs(milliseconds: number): string {
 function loadSettings(): PersistedSeriesSettings {
   try {
     const rawValue = window.localStorage.getItem(SETTINGS_KEY);
-    if (!rawValue) return { sessionMode: "manual", promptMode: "french" };
+    if (!rawValue) return { sessionMode: "manual", promptMode: "french", noHitMode: false };
     const parsed = JSON.parse(rawValue) as Partial<PersistedSeriesSettings>;
     const sessionMode: SessionMode =
       parsed.sessionMode === "manual" || parsed.sessionMode === "keyboard"
@@ -1354,9 +1488,9 @@ function loadSettings(): PersistedSeriesSettings {
     )
       ? (parsed.promptMode as PromptMode)
       : "french";
-    return { sessionMode, promptMode };
+    return { sessionMode, promptMode, noHitMode: parsed.noHitMode === true };
   } catch {
-    return { sessionMode: "manual", promptMode: "french" };
+    return { sessionMode: "manual", promptMode: "french", noHitMode: false };
   }
 }
 

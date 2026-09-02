@@ -418,6 +418,7 @@ export class BulkReviewsError extends Error {
 
 async function submitBulkReviewsOnce(
   reviews: Array<{ wordId: number; result: ReviewResult }>,
+  noHit?: "clear" | "broken",
 ): Promise<{ appliedCount: number; newBadges: BadgeDefinition[] } & XpAward> {
   let response: Response;
   try {
@@ -425,7 +426,7 @@ async function submitBulkReviewsOnce(
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reviews }),
+      body: JSON.stringify({ reviews, noHit }),
     });
   } catch (networkError) {
     const message = networkError instanceof Error ? networkError.message : "Erreur réseau inconnue";
@@ -443,13 +444,13 @@ async function submitBulkReviewsOnce(
 
 export async function submitBulkReviews(
   reviews: Array<{ wordId: number; result: ReviewResult }>,
-  options: { maxAttempts?: number } = {},
+  options: { maxAttempts?: number; noHit?: "clear" | "broken" } = {},
 ): Promise<{ appliedCount: number; newBadges: BadgeDefinition[] } & XpAward> {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await submitBulkReviewsOnce(reviews);
+      return await submitBulkReviewsOnce(reviews, options.noHit);
     } catch (error) {
       lastError = error;
       if (!(error instanceof BulkReviewsError) || !error.isRetryable) {
