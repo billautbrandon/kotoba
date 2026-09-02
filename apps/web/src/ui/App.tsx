@@ -2,8 +2,9 @@ import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
-import type { User } from "../api";
-import { type SrsSummary, fetchMe, fetchSrsSummary, logoutUser } from "../api";
+import type { SrsSummary, User } from "../api";
+import { fetchMe, fetchSrsSummary, logoutUser } from "../api";
+import { scrollAppToTop } from "../utils/scroll";
 import { PracticeNavIcon, SrsNavIcon, VocabNavIcon, WordsNavIcon } from "./components/NavIcons";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { AdminPage } from "./pages/AdminPage";
@@ -227,6 +228,11 @@ export function App() {
       isMounted = false;
     };
   }, [isAuthenticated, location.pathname]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll whenever the route changes
+  useEffect(() => {
+    scrollAppToTop();
+  }, [location.pathname, location.search]);
 
   const isHomeActive = location.pathname === "/";
   const isVocabActive =

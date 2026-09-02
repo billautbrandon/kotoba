@@ -26,6 +26,7 @@ export function WordsPage() {
 
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeTagFilterId, setActiveTagFilterId] = useState<number | null>(null);
+  const autoSelectedTagFromSearch = useRef<number | null>(null);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState<boolean>(false);
   const [isResettingScores, setIsResettingScores] = useState<boolean>(false);
   const [toolsStatus, setToolsStatus] = useState<string | null>(null);
@@ -136,6 +137,34 @@ export function WordsPage() {
       return haystack.includes(normalizedQuery);
     });
   }, [words, searchQuery, activeTagFilterId]);
+
+  useEffect(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) {
+      if (autoSelectedTagFromSearch.current !== null) {
+        setActiveTagFilterId(null);
+        autoSelectedTagFromSearch.current = null;
+      }
+      return;
+    }
+    if (!words) return;
+    const matchingWords = words.filter((word) => {
+      const haystack = [word.french, word.kana, word.kanji, word.romaji, word.note]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+    const matchingTagIds = new Set<number>();
+    for (const word of matchingWords) {
+      for (const tag of word.tags) matchingTagIds.add(tag.id);
+    }
+    if (matchingTagIds.size === 1) {
+      const matchingTagId = [...matchingTagIds][0];
+      setActiveTagFilterId(matchingTagId);
+      autoSelectedTagFromSearch.current = matchingTagId;
+    }
+  }, [searchQuery, words]);
 
   async function handleExportBackup() {
     setErrorMessage(null);
@@ -335,6 +364,7 @@ export function WordsPage() {
       {hasWords && filteredWords.length > 0 ? (
         <WordsGroupedByTag
           words={filteredWords}
+          expandGroups={searchQuery.trim().length > 0}
           startEdit={openEditModal}
           handleDelete={handleDelete}
         />
@@ -363,6 +393,7 @@ export function WordsPage() {
 
 function WordsGroupedByTag(props: {
   words: WordWithTags[];
+  expandGroups: boolean;
   startEdit: (word: WordWithTags) => void;
   handleDelete: (wordId: number) => Promise<void>;
 }) {
@@ -390,17 +421,21 @@ function WordsGroupedByTag(props: {
 
   const [collapsedByGroupKey, setCollapsedByGroupKey] = useState<Record<string, boolean>>({});
 
+  useEffect(() => {
+    if (props.expandGroups) setCollapsedByGroupKey({});
+  }, [props.expandGroups]);
+
   function toggleGroup(groupKey: string) {
     setCollapsedByGroupKey((previousValue) => ({
       ...previousValue,
-      [groupKey]: !(previousValue[groupKey] ?? true),
+      [groupKey]: !(previousValue[groupKey] ?? !props.expandGroups),
     }));
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {groups.map((group) => {
-        const isCollapsed = collapsedByGroupKey[group.groupKey] ?? true;
+        const isCollapsed = collapsedByGroupKey[group.groupKey] ?? !props.expandGroups;
         return (
           <div key={group.groupKey}>
             <button

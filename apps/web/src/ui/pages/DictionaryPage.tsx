@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { Tag, WordWithStatsAndTags, WordWithTags } from "../../api";
@@ -11,6 +11,7 @@ import {
   fetchWordsWithTags,
   resetTagWordScores,
 } from "../../api";
+import { scrollAppToTop } from "../../utils/scroll";
 import { AudioButton } from "../components/AudioButton";
 import { EyeIcon, LayersIcon, PlayIcon } from "../components/NavIcons";
 import { WordFormModal } from "../components/WordFormModal";
@@ -192,6 +193,7 @@ export function DictionaryPage() {
     setFlippedWordIds(new Set());
     setIsResetConfirmOpen(false);
     setResetStatus(null);
+    scrollAppToTop();
   }, [openSeriesKey]);
 
   async function reloadVocabulary() {
@@ -249,6 +251,27 @@ export function DictionaryPage() {
   }, [words]);
 
   const query = searchQuery.trim().toLowerCase();
+  const lastAutoOpenedQuery = useRef("");
+
+  useEffect(() => {
+    if (!query) {
+      lastAutoOpenedQuery.current = "";
+      return;
+    }
+    if (query.length < 2) return;
+    if (lastAutoOpenedQuery.current === query) return;
+    const seriesNameHits = seriesList.filter((series) =>
+      series.tagName.toLowerCase().includes(query),
+    );
+    const seriesWithWord = seriesList.filter((series) =>
+      series.words.some((word) => wordMatchesQuery(word, query)),
+    );
+    if (seriesNameHits.length > 0 && seriesWithWord.length === 0) return;
+    if (seriesWithWord.length >= 1) {
+      lastAutoOpenedQuery.current = query;
+      setOpenSeriesKey(seriesWithWord[0].key);
+    }
+  }, [query, seriesList]);
   const visibleSeries = useMemo(() => {
     const filtered = !query
       ? seriesList
