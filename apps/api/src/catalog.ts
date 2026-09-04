@@ -10,9 +10,16 @@ const currentFilePath = fileURLToPath(import.meta.url);
 const currentDirectoryPath = path.dirname(currentFilePath);
 
 function resolveCatalogDataDirectory(): string {
-  const besideSource = path.join(currentDirectoryPath, "data");
-  if (fs.existsSync(path.join(besideSource, "openjlpt-n5-vocab.json"))) return besideSource;
-  return path.join(currentDirectoryPath, "../src/data");
+  const candidates = [
+    path.join(currentDirectoryPath, "catalog-seed"),
+    path.join(currentDirectoryPath, "../src/catalog-seed"),
+  ];
+  for (const directoryPath of candidates) {
+    if (fs.existsSync(path.join(directoryPath, "openjlpt-n5-vocab.json"))) {
+      return directoryPath;
+    }
+  }
+  return candidates[0];
 }
 
 const dataDirectoryPath = resolveCatalogDataDirectory();

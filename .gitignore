@@ -6,7 +6,7 @@ dist/
 .env.prod.example
 apps/web/public/kanji/
 
-# SQLite volume at repo root (do not ignore apps/api/src/data)
+# SQLite volume at repo root (catalog seed lives in apps/api/src/catalog-seed)
 /data/
 apps/api/data/
 *.sqlite

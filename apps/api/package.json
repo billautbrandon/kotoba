@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/catalog-seed && cp src/catalog-seed/*.json dist/catalog-seed/",
     "start": "node dist/index.js",
     "download-kanji-svg": "tsx src/scripts/download-kanji-svg.ts"
   },

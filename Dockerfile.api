@@ -25,13 +25,12 @@ COPY package*.json ./
 COPY apps/api/package.json ./apps/api/
 RUN npm ci --omit=dev
 
-# Copy built files
+# Copy built files (dist/catalog-seed is filled by the API build script)
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
-# tsc does not copy JSON; seedCatalog reads ../src/data from dist/
-COPY --from=builder /app/apps/api/src/data ./apps/api/src/data
+RUN test -f /app/apps/api/dist/catalog-seed/openjlpt-n5-vocab.json
 
-# Create data directory
+# SQLite volume mount point (not the catalog seed)
 RUN mkdir -p /app/data
 
 WORKDIR /app/apps/api

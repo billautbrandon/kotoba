@@ -1,6 +1,8 @@
 node_modules
 dist
-/data
 .git
+# SQLite volume only — never ignore apps/api/src/catalog-seed
+/data
+/data/**
 
 
