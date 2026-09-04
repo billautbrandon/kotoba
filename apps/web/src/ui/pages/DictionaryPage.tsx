@@ -13,7 +13,10 @@ import {
 } from "../../api";
 import { scrollAppToTop } from "../../utils/scroll";
 import { AudioButton } from "../components/AudioButton";
+import { CatalogBadge } from "../components/CatalogBadge";
 import { EyeIcon, LayersIcon, PlayIcon } from "../components/NavIcons";
+import { SearchBar } from "../components/SearchBar";
+import { WordExtras } from "../components/WordExtras";
 import { WordFormModal } from "../components/WordFormModal";
 
 type DictionaryLanguage = "fr" | "romaji" | "kana" | "kanji";
@@ -504,47 +507,21 @@ export function DictionaryPage() {
       </div>
 
       <div className="vocabToolbar">
-        <div className="dictionarySearch vocabToolbar__search">
-          <svg
-            className="dictionarySearch__icon"
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="M20 20l-3.2-3.2" />
-          </svg>
-          <input
-            className="dictionarySearch__input"
-            type="text"
-            placeholder={
-              openSeries ? "Filtrer les mots de cette série…" : "Rechercher une série ou un mot…"
-            }
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-          />
-          {searchQuery ? (
-            <button
-              className="dictionarySearch__clear"
-              type="button"
-              aria-label="Effacer la recherche"
-              onClick={() => setSearchQuery("")}
-            >
-              ×
-            </button>
-          ) : null}
-          {query ? (
-            <span className="dictionarySearch__count">
-              {openSeries
+        <SearchBar
+          className="vocabToolbar__search"
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder={
+            openSeries ? "Filtrer les mots de cette série…" : "Rechercher une série ou un mot…"
+          }
+          countLabel={
+            query
+              ? openSeries
                 ? pluralize(openSeriesWords.length, "mot", "mots")
-                : pluralize(visibleSeries.length, "série", "séries")}
-            </span>
-          ) : null}
-        </div>
+                : pluralize(visibleSeries.length, "série", "séries")
+              : undefined
+          }
+        />
         {openSeries ? (
           <div className="vocabToolbar__side vocabPage__filters">
             <fieldset className="segmented" aria-label="Langue de face">
@@ -971,7 +948,9 @@ function WordDetailModal({
         </button>
         {kanjiValue ? (
           <div className="wordDetailModal__section">
-            <div className="wordDetailModal__label">Kanji</div>
+            <div className="wordDetailModal__label">
+              Kanji {word.jlpt_level ? <CatalogBadge level={word.jlpt_level} /> : null}
+            </div>
             <div className="wordDetailModal__kanji">
               {renderWithFurigana(kanjiValue, kanaValue)}
             </div>
@@ -1002,6 +981,13 @@ function WordDetailModal({
             <div className="wordDetailModal__note">{word.note}</div>
           </div>
         ) : null}
+        <WordExtras
+          jlptLevel={word.jlpt_level}
+          senseContext={word.sense_context}
+          mnemonic={word.mnemonic}
+          breakdown={word.kanji_breakdown}
+          examples={word.examples}
+        />
       </div>
     </div>
   );

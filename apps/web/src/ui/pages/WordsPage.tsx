@@ -13,6 +13,7 @@ import {
 } from "../../api";
 import { AudioButton } from "../components/AudioButton";
 import { ImportPanel } from "../components/ImportPanel";
+import { SearchBar } from "../components/SearchBar";
 import { WordFormModal } from "../components/WordFormModal";
 
 export function WordsPage() {
@@ -273,43 +274,17 @@ export function WordsPage() {
 
       {hasWords ? (
         <div className="wordsPage__toolbar">
-          <div className="dictionarySearch wordsPage__searchBar">
-            <svg
-              className="dictionarySearch__icon"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <circle cx="11" cy="11" r="7" />
-              <path d="M20 20l-3.2-3.2" />
-            </svg>
-            <input
-              className="dictionarySearch__input"
-              type="text"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Rechercher un mot (français, kana, kanji, rōmaji…)"
-            />
-            {searchQuery ? (
-              <button
-                className="dictionarySearch__clear"
-                type="button"
-                aria-label="Effacer la recherche"
-                onClick={() => setSearchQuery("")}
-              >
-                ×
-              </button>
-            ) : null}
-            {searchQuery.trim() ? (
-              <span className="dictionarySearch__count">
-                {filteredWords.length} mot{filteredWords.length > 1 ? "s" : ""}
-              </span>
-            ) : null}
-          </div>
+          <SearchBar
+            className="wordsPage__searchBar"
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Rechercher un mot (français, kana, kanji, rōmaji…)"
+            countLabel={
+              searchQuery.trim()
+                ? `${filteredWords.length} mot${filteredWords.length > 1 ? "s" : ""}`
+                : undefined
+            }
+          />
           <div className="wordsPage__tagFilters">
             <button
               type="button"
@@ -443,7 +418,10 @@ function WordsGroupedByTag(props: {
               type="button"
               onClick={() => toggleGroup(group.groupKey)}
             >
-              <span className="sectionHeader__chevron">{isCollapsed ? "▸" : "▾"}</span>
+              <span
+                className={`collapseChevron${isCollapsed ? "" : " collapseChevron--open"}`}
+                aria-hidden="true"
+              />
               <span className="sectionHeader__title">{group.groupKey}</span>
               <span className="sectionHeader__meta muted">{group.words.length} mot(s)</span>
             </button>

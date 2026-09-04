@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { type GrammarNote, deleteGrammarNote, fetchGrammarNotes } from "../../api";
+import { SearchBar } from "../components/SearchBar";
 
 export function GrammarPage() {
   const [notes, setNotes] = useState<GrammarNote[]>([]);
@@ -47,16 +48,16 @@ export function GrammarPage() {
         </div>
       </div>
 
-      <div style={{ marginBottom: "var(--space-4)" }}>
-        <input
-          type="text"
-          className="input"
-          placeholder="Rechercher un sujet..."
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          style={{ maxWidth: "300px" }}
-        />
-      </div>
+      <SearchBar
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Rechercher un sujet…"
+        countLabel={
+          searchQuery
+            ? `${filteredNotes.length} fiche${filteredNotes.length > 1 ? "s" : ""}`
+            : undefined
+        }
+      />
 
       {isLoading ? (
         <div className="muted">Chargement…</div>
@@ -82,8 +83,14 @@ export function GrammarPage() {
                 overflow: "hidden",
               }}
             >
-              <div
+              <button
+                type="button"
                 style={{
+                  width: "100%",
+                  border: 0,
+                  font: "inherit",
+                  color: "inherit",
+                  textAlign: "left",
                   padding: "var(--space-3) var(--space-4)",
                   display: "flex",
                   justifyContent: "space-between",
@@ -92,14 +99,6 @@ export function GrammarPage() {
                   background: expandedNoteId === note.id ? "var(--color-surface)" : "transparent",
                 }}
                 onClick={() => setExpandedNoteId(expandedNoteId === note.id ? null : note.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setExpandedNoteId(expandedNoteId === note.id ? null : note.id);
-                  }
-                }}
-                tabIndex={0}
-                role="button"
               >
                 <div>
                   <span style={{ fontWeight: 600, fontSize: "15px" }}>{note.topic}</span>
@@ -116,8 +115,7 @@ export function GrammarPage() {
                 <span style={{ fontSize: "14px", color: "var(--color-text-soft)" }}>
                   {expandedNoteId === note.id ? "▲" : "▼"}
                 </span>
-              </div>
-
+              </button>
               {expandedNoteId === note.id && (
                 <div
                   style={{

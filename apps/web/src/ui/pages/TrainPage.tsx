@@ -24,6 +24,7 @@ import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
 import { LevelUpOverlay } from "../components/LevelUpOverlay";
 import { PlayIcon } from "../components/NavIcons";
 import { QuotaBar } from "../components/QuotaBar";
+import { WordExtras } from "../components/WordExtras";
 import { XpBar } from "../components/XpBar";
 
 type TrainMode = "tag" | "srs" | "difficult";
@@ -40,7 +41,7 @@ type PersistedSeriesSettings = {
   noHitMode: boolean;
 };
 
-const SETTINGS_KEY = "kotoba.seriesSettings.v1";
+const SETTINGS_KEY = "kotoba.seriesSettings.v3";
 
 const srsCategoryLabels: Record<SrsCategory, string> = {
   hard: "Difficile",
@@ -1077,6 +1078,13 @@ export function TrainPage(props: { mode: TrainMode }) {
                 </div>
 
                 {currentWord.note && <div className="trainSession__note">{currentWord.note}</div>}
+                <WordExtras
+                  jlptLevel={currentWord.jlpt_level}
+                  senseContext={currentWord.sense_context}
+                  mnemonic={currentWord.mnemonic}
+                  breakdown={currentWord.kanji_breakdown}
+                  examples={currentWord.examples}
+                />
 
                 <div className="trainSession__ratingRow">
                   <button
@@ -1477,12 +1485,9 @@ function formatMs(milliseconds: number): string {
 function loadSettings(): PersistedSeriesSettings {
   try {
     const rawValue = window.localStorage.getItem(SETTINGS_KEY);
-    if (!rawValue) return { sessionMode: "manual", promptMode: "french", noHitMode: false };
+    if (!rawValue) return { sessionMode: "manual", promptMode: "kanji", noHitMode: false };
     const parsed = JSON.parse(rawValue) as Partial<PersistedSeriesSettings>;
-    const sessionMode: SessionMode =
-      parsed.sessionMode === "manual" || parsed.sessionMode === "keyboard"
-        ? parsed.sessionMode
-        : "manual";
+    const sessionMode: SessionMode = parsed.sessionMode === "keyboard" ? "keyboard" : "manual";
     const promptMode: PromptMode = (["french", "romaji", "kana", "kanji"] as PromptMode[]).includes(
       parsed.promptMode as PromptMode,
     )
