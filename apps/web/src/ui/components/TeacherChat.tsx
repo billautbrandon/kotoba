@@ -9,7 +9,14 @@ type TeacherChatProps = {
   direction?: "fr-to-jp" | "jp-to-fr";
   mode?: "phrases" | "construction" | "jlpt" | "conjugaison" | "dialogue" | "ecoute";
   resetKey: string | number;
+  defaultOpen?: boolean;
+  variant?: "inline" | "afterReview";
+  errorType?: string | null;
+  feedback?: string | null;
+  suggestionChips?: string[];
 };
+
+const DEFAULT_REVIEW_CHIPS = ["Pourquoi cette particule ?", "Un autre exemple", "Ce kanji ?"];
 
 export function TeacherChat({
   prompt,
@@ -18,19 +25,28 @@ export function TeacherChat({
   direction,
   mode,
   resetKey,
+  defaultOpen = false,
+  variant = "inline",
+  errorType,
+  feedback,
+  suggestionChips,
 }: TeacherChatProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const [question, setQuestion] = useState("");
   const [history, setHistory] = useState<AskTeacherTurn[]>([]);
   const [isAsking, setIsAsking] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [seenResetKey, setSeenResetKey] = useState(resetKey);
+  const previousVariant = useRef(variant);
 
-  const previousResetKey = useRef(resetKey);
-  if (previousResetKey.current !== resetKey) {
-    previousResetKey.current = resetKey;
+  if (seenResetKey !== resetKey) {
+    setSeenResetKey(resetKey);
+    previousVariant.current = variant;
     setQuestion("");
     setHistory([]);
     setErrorMessage(null);
+    setIsAsking(false);
+    setIsOpen(defaultOpen);
   }
 
   const userAnswerRef = useRef(userAnswer);
@@ -38,9 +54,23 @@ export function TeacherChat({
     userAnswerRef.current = userAnswer;
   }, [userAnswer]);
 
-  async function handleAsk() {
-    const trimmedQuestion = question.trim();
+  useEffect(() => {
+    if (variant === "afterReview" && previousVariant.current !== "afterReview") {
+      setIsOpen(true);
+    }
+    previousVariant.current = variant;
+  }, [variant]);
+
+  const chips = suggestionChips ?? (variant === "afterReview" ? DEFAULT_REVIEW_CHIPS : []);
+
+  function handleClose() {
+    setIsOpen(false);
+  }
+
+  async function handleAsk(nextQuestion?: string) {
+    const trimmedQuestion = (nextQuestion ?? question).trim();
     if (!trimmedQuestion || isAsking) return;
+    setIsOpen(true);
     setIsAsking(true);
     setErrorMessage(null);
     try {
@@ -51,6 +81,8 @@ export function TeacherChat({
         userAnswer: userAnswerRef.current,
         direction,
         mode,
+        errorType,
+        feedback,
         history,
       });
       setHistory((previous) => [...previous, { question: trimmedQuestion, answer: result.answer }]);
@@ -73,16 +105,32 @@ export function TeacherChat({
   return (
     <div className="teacherChat">
       <div className="teacherChat__header">
-        <span className="teacherChat__title">Question au prof</span>
+        <span className="teacherChat__title">Une question ?</span>
         <button
           type="button"
           className="teacherChat__close"
-          onClick={() => setIsOpen(false)}
+          onClick={handleClose}
           aria-label="Fermer"
         >
           ×
         </button>
       </div>
+
+      {chips.length > 0 && history.length === 0 ? (
+        <div className="teacherChat__chips">
+          {chips.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              className="teacherChat__chip"
+              disabled={isAsking}
+              onClick={() => void handleAsk(chip)}
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {history.length > 0 && (
         <div className="teacherChat__history">
@@ -104,7 +152,7 @@ export function TeacherChat({
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
               event.preventDefault();
-              handleAsk();
+              void handleAsk();
             }
           }}
           rows={2}
@@ -114,7 +162,7 @@ export function TeacherChat({
         <button
           type="button"
           className="button button--primary teacherChat__send"
-          onClick={handleAsk}
+          onClick={() => void handleAsk()}
           disabled={isAsking || question.trim().length === 0}
         >
           {isAsking ? "…" : "Demander"}

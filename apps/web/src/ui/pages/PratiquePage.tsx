@@ -13,6 +13,7 @@ import {
   type ListeningExercise,
   type PhraseConstraints,
   type PhraseEvaluation,
+  type PracticeReview,
   type Tag,
   createTag,
   createWord,
@@ -24,11 +25,13 @@ import {
   fetchGrammarNote,
   fetchSeriesWords,
   fetchTags,
+  flattenPracticeReview,
   generateConjugationExercises,
   generateConstructionPhrases,
   generateJlptExercises,
   generateListeningExercises,
   generatePhrases,
+  practiceReviewFromEvaluation,
   savePhrase,
   submitBulkReviews,
 } from "../../api";
@@ -36,9 +39,11 @@ import { AnswerDiff } from "../components/AnswerDiff";
 import { AudioButton } from "../components/AudioButton";
 import { PillNav } from "../components/PillNav";
 import { QuotaBar } from "../components/QuotaBar";
+import { SearchBar } from "../components/SearchBar";
 import { SentenceBuilder, joinBlocks } from "../components/SentenceBuilder";
 import { TeacherChat } from "../components/TeacherChat";
 import { VoiceButton } from "../components/VoiceButton";
+import { hasJapaneseScript } from "../utils/kanaToRomaji";
 
 type PratiqueTab = "phrases" | "jlpt" | "conjugaison" | "construction" | "ecoute";
 type HubMode = "phrases" | "jlpt" | "conjugaison";
@@ -179,6 +184,18 @@ const CONJUGATION_FORMS = [
 const CORE_CONJUGATION_FORMS = CONJUGATION_FORMS.slice(0, 4);
 const EXTRA_CONJUGATION_FORMS = CONJUGATION_FORMS.slice(4);
 
+const ERROR_TYPE_LABELS: Record<string, string> = {
+  particle: "Particule",
+  conjugation: "Conjugaison",
+  kanji: "Kanji",
+  kana: "Kana",
+  vocabulary: "Vocabulaire",
+  grammar: "Grammaire",
+  meaning: "Sens",
+  pronunciation: "Prononciation",
+  other: "Autre",
+};
+
 type UnifiedExercise = {
   prompt: string;
   answer: string;
@@ -218,6 +235,8 @@ export function PratiquePage() {
   const [results, setResults] = useState<UnifiedResult[]>([]);
   const [hasCheckedCurrent, setHasCheckedCurrent] = useState(false);
   const [currentFeedback, setCurrentFeedback] = useState<string | null>(null);
+  const [currentReview, setCurrentReview] = useState<PracticeReview | null>(null);
+  const [currentErrorType, setCurrentErrorType] = useState<string | null>(null);
   const [currentIsCorrect, setCurrentIsCorrect] = useState<boolean | null>(null);
   const [currentHint, setCurrentHint] = useState<string | null>(null);
   const [isRetryingPhrase, setIsRetryingPhrase] = useState(false);
@@ -303,6 +322,10 @@ export function PratiquePage() {
   const [listeningIndex, setListeningIndex] = useState(0);
   const [listeningTranscript, setListeningTranscript] = useState("");
   const [listeningRevealed, setListeningRevealed] = useState(false);
+  const [listeningChecked, setListeningChecked] = useState(false);
+  const [listeningIsCorrect, setListeningIsCorrect] = useState<boolean | null>(null);
+  const [listeningReview, setListeningReview] = useState<PracticeReview | null>(null);
+  const [listeningErrorType, setListeningErrorType] = useState<string | null>(null);
   const [listeningResults, setListeningResults] = useState<
     Array<{
       exercise: ListeningExercise;
@@ -329,6 +352,33 @@ export function PratiquePage() {
     fetchGeminiQuota()
       .then(setQuota)
       .catch(() => {});
+  }
+
+  useEffect(() => {
+    const inSession = phase === "training";
+    document.body.classList.toggle("kotoba-session", inSession);
+    return () => document.body.classList.remove("kotoba-session");
+  }, [phase]);
+
+  function applyEvaluation(evaluation: PhraseEvaluation) {
+    const review = practiceReviewFromEvaluation(evaluation);
+    setCurrentIsCorrect(evaluation.isCorrect);
+    setCurrentReview(review);
+    setCurrentFeedback(evaluation.feedback ?? flattenPracticeReview(review));
+    setCurrentErrorType(evaluation.errorType ?? null);
+  }
+
+  function clearQuestionState() {
+    setUserAnswer("");
+    setCurrentIsCorrect(null);
+    setCurrentFeedback(null);
+    setCurrentReview(null);
+    setCurrentErrorType(null);
+    setCurrentHint(null);
+    setIsRetryingPhrase(false);
+    setPhraseRetryUsed(false);
+    setHasCheckedCurrent(false);
+    setErrorMessage(null);
   }
 
   useEffect(() => {
@@ -458,6 +508,8 @@ export function PratiquePage() {
     setResults([]);
     setHasCheckedCurrent(false);
     setCurrentFeedback(null);
+    setCurrentReview(null);
+    setCurrentErrorType(null);
     setCurrentIsCorrect(null);
     setCurrentHint(null);
     setIsRetryingPhrase(false);
@@ -466,6 +518,15 @@ export function PratiquePage() {
     setReviewsSubmitted(false);
     setAddedToVocab(new Set());
     setConjEvaluationCache(new Map());
+    setListeningExercises([]);
+    setListeningIndex(0);
+    setListeningTranscript("");
+    setListeningRevealed(false);
+    setListeningChecked(false);
+    setListeningIsCorrect(null);
+    setListeningReview(null);
+    setListeningErrorType(null);
+    setListeningResults([]);
   }
 
   // ---- GENERATION ----
@@ -664,6 +725,10 @@ export function PratiquePage() {
       setListeningIndex(0);
       setListeningTranscript("");
       setListeningRevealed(false);
+      setListeningChecked(false);
+      setListeningIsCorrect(null);
+      setListeningReview(null);
+      setListeningErrorType(null);
       setListeningResults([]);
       setPhase("training");
     } catch (error) {
@@ -718,27 +783,40 @@ export function PratiquePage() {
         currentListeningExercise.french,
       );
       refreshQuota();
-      setListeningResults((previous) => [
-        ...previous,
-        {
-          exercise: currentListeningExercise,
-          userTranscript: listeningTranscript.trim(),
-          isCorrect: evaluation.isCorrect ?? false,
-          feedback: evaluation.feedback ?? null,
-          revealed: listeningRevealed,
-        },
-      ]);
-      if (listeningIndex + 1 < listeningExercises.length) {
-        setListeningIndex(listeningIndex + 1);
-        setListeningTranscript("");
-        setListeningRevealed(false);
-      } else {
-        setPhase("recap");
-      }
+      setListeningIsCorrect(evaluation.isCorrect ?? false);
+      setListeningReview(practiceReviewFromEvaluation(evaluation));
+      setListeningErrorType(evaluation.errorType ?? null);
+      setListeningChecked(true);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur de vérification");
     } finally {
       setIsEvaluating(false);
+    }
+  }
+
+  function handleListeningNext() {
+    const currentListeningExercise = listeningExercises[listeningIndex];
+    if (!currentListeningExercise) return;
+    setListeningResults((previous) => [
+      ...previous,
+      {
+        exercise: currentListeningExercise,
+        userTranscript: listeningTranscript.trim(),
+        isCorrect: listeningIsCorrect ?? false,
+        feedback: flattenPracticeReview(listeningReview),
+        revealed: listeningRevealed,
+      },
+    ]);
+    if (listeningIndex + 1 < listeningExercises.length) {
+      setListeningIndex(listeningIndex + 1);
+      setListeningTranscript("");
+      setListeningRevealed(false);
+      setListeningChecked(false);
+      setListeningIsCorrect(null);
+      setListeningReview(null);
+      setListeningErrorType(null);
+    } else {
+      setPhase("recap");
     }
   }
 
@@ -788,14 +866,15 @@ export function PratiquePage() {
           setCurrentHint(evaluation.hint ?? evaluation.feedback);
           setCurrentIsCorrect(false);
           setCurrentFeedback(null);
+          setCurrentReview(null);
+          setCurrentErrorType(evaluation.errorType ?? null);
           setHasCheckedCurrent(false);
           refreshQuota();
           return;
         }
         setIsRetryingPhrase(false);
         setCurrentHint(null);
-        setCurrentIsCorrect(evaluation.isCorrect);
-        setCurrentFeedback(evaluation.feedback);
+        applyEvaluation(evaluation);
       } else if (activeTab === "jlpt") {
         const evaluation = await evaluateJlptAnswer(
           userAnswer.trim(),
@@ -803,16 +882,21 @@ export function PratiquePage() {
           currentExercise.prompt,
           jlptDirection,
         );
-        setCurrentIsCorrect(evaluation.isCorrect);
-        setCurrentFeedback(evaluation.feedback);
+        applyEvaluation(evaluation);
       } else {
         const result = await evaluateConjugation(
           currentExercise.prompt,
           currentExercise.answer,
           userAnswer.trim(),
         );
-        setCurrentIsCorrect(result.evaluation.isCorrect);
-        setCurrentFeedback(result.evaluation.explanation);
+        applyEvaluation({
+          isCorrect: result.evaluation.isCorrect,
+          feedback: result.evaluation.explanation,
+          summary: result.evaluation.summary,
+          rule: result.evaluation.rule,
+          example: result.evaluation.example,
+          errorType: "conjugation",
+        });
         setConjEvaluationCache((previous) =>
           new Map(previous).set(currentIndex, result.evaluation),
         );
@@ -843,14 +927,7 @@ export function PratiquePage() {
       setPhase("recap");
     } else {
       setCurrentIndex(nextIndex);
-      setUserAnswer("");
-      setCurrentIsCorrect(null);
-      setCurrentFeedback(null);
-      setCurrentHint(null);
-      setIsRetryingPhrase(false);
-      setPhraseRetryUsed(false);
-      setHasCheckedCurrent(false);
-      setErrorMessage(null);
+      clearQuestionState();
       setTimeout(() => {
         if (activeTab === "conjugaison") inputRef.current?.focus();
       }, 50);
@@ -875,14 +952,7 @@ export function PratiquePage() {
       setPhase("recap");
     } else {
       setCurrentIndex(nextIndex);
-      setUserAnswer("");
-      setCurrentIsCorrect(null);
-      setCurrentFeedback(null);
-      setCurrentHint(null);
-      setIsRetryingPhrase(false);
-      setPhraseRetryUsed(false);
-      setHasCheckedCurrent(false);
-      setErrorMessage(null);
+      clearQuestionState();
     }
   }
 
@@ -1643,7 +1713,18 @@ export function PratiquePage() {
           {listeningIndex + 1} / {listeningExercises.length}
         </div>
 
-        <div className="phrasesTraining__card" style={{ textAlign: "center" }}>
+        <div
+          className={`phrasesTraining__card${isEvaluating ? " phrasesTraining__card--busy" : ""}`}
+          style={{ textAlign: "center" }}
+        >
+          {isEvaluating ? (
+            <div className="phrasesTraining__overlay" aria-live="polite">
+              <span className="phrasesTraining__overlayPill">
+                <span className="phrasesTraining__spinner" aria-hidden="true" />
+                Correction…
+              </span>
+            </div>
+          ) : null}
           <p
             style={{
               fontSize: "14px",
@@ -1698,6 +1779,10 @@ export function PratiquePage() {
             onChange={(event) => setListeningTranscript(event.target.value)}
             rows={3}
             style={{ marginBottom: "var(--space-4)" }}
+            disabled={listeningChecked}
+            spellCheck={false}
+            autoComplete="off"
+            lang="ja"
           />
 
           {listeningRevealed && (
@@ -1728,34 +1813,85 @@ export function PratiquePage() {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: "var(--space-3)", justifyContent: "center" }}>
-            {!listeningRevealed && (
-              <button type="button" className="button" onClick={() => setListeningRevealed(true)}>
-                Révéler le texte
+          {!listeningChecked ? (
+            <div className="phrasesTraining__actionRow">
+              {!listeningRevealed ? (
+                <button type="button" className="button" onClick={() => setListeningRevealed(true)}>
+                  Révéler le texte
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={!listeningTranscript.trim() || isEvaluating}
+                onClick={() => void handleListeningCheck()}
+              >
+                {isEvaluating ? "Correction…" : "Vérifier"}
               </button>
-            )}
-            <button
-              type="button"
-              className="button button--primary"
-              disabled={!listeningTranscript.trim() || isEvaluating}
-              onClick={handleListeningCheck}
-            >
-              {isEvaluating ? "Vérification…" : "Vérifier"}
-            </button>
-          </div>
+            </div>
+          ) : null}
+
+          {listeningChecked && listeningIsCorrect !== null ? (
+            <PracticeReviewCard
+              isCorrect={listeningIsCorrect}
+              errorType={listeningErrorType}
+              review={listeningReview}
+              expectedAnswer={currentListeningExercise.japanese}
+              expectedKana={currentListeningExercise.japanese_kana}
+              expectedAlt={currentListeningExercise.french}
+              userAnswer={listeningTranscript}
+              diffGranularity="character"
+              onGrammar={() =>
+                handleGrammarLink(
+                  flattenPracticeReview(listeningReview) ?? "écoute",
+                  currentListeningExercise.japanese,
+                )
+              }
+            />
+          ) : null}
+
+          <TeacherChat
+            key={`ecoute-${listeningIndex}`}
+            prompt={currentListeningExercise.french}
+            expectedAnswer={currentListeningExercise.japanese}
+            userAnswer={listeningTranscript}
+            mode="ecoute"
+            resetKey={`ecoute-${listeningIndex}`}
+            defaultOpen={listeningChecked}
+            variant={listeningChecked ? "afterReview" : "inline"}
+            errorType={listeningErrorType}
+            feedback={flattenPracticeReview(listeningReview)}
+          />
         </div>
 
-        <div className="phrasesTraining__footActions">
-          <button type="button" className="button" onClick={resetSession}>
-            Quitter
-          </button>
-        </div>
+        {listeningChecked ? (
+          <div className="phrasesTraining__sessionBar">
+            <button className="button button--primary" type="button" onClick={handleListeningNext}>
+              {listeningIndex + 1 >= listeningExercises.length
+                ? "Voir le récapitulatif"
+                : "Suivant →"}
+            </button>
+          </div>
+        ) : (
+          <div className="phrasesTraining__sessionBar">
+            <button type="button" className="button" onClick={resetSession}>
+              Quitter
+            </button>
+          </div>
+        )}
 
         {errorMessage && (
           <div className="formError" style={{ marginTop: "var(--space-3)" }}>
             {errorMessage}
           </div>
         )}
+
+        <GrammarDrawer
+          isOpen={showGrammarDrawer}
+          isLoading={isLoadingGrammar}
+          note={grammarNote}
+          onClose={() => setShowGrammarDrawer(false)}
+        />
       </div>
     );
   }
@@ -1799,7 +1935,17 @@ export function PratiquePage() {
           </button>
         </div>
 
-        <div className="phrasesTraining__card">
+        <div
+          className={`phrasesTraining__card${isEvaluating ? " phrasesTraining__card--busy" : ""}`}
+        >
+          {isEvaluating ? (
+            <div className="phrasesTraining__overlay" aria-live="polite">
+              <span className="phrasesTraining__overlayPill">
+                <span className="phrasesTraining__spinner" aria-hidden="true" />
+                Correction…
+              </span>
+            </div>
+          ) : null}
           <div className="phrasesTraining__promptBlock">
             <p className="phrasesTraining__promptLabel">{promptLabel}</p>
             <div
@@ -1851,6 +1997,11 @@ export function PratiquePage() {
                   value={userAnswer}
                   onChange={(event) => setUserAnswer(event.target.value)}
                   disabled={hasCheckedCurrent}
+                  spellCheck={answerDirection === "jp-to-fr"}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  lang={answerDirection === "jp-to-fr" ? "fr" : "ja"}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.shiftKey && !hasCheckedCurrent) {
                       event.preventDefault();
@@ -1876,7 +2027,7 @@ export function PratiquePage() {
                 onClick={handleCheck}
                 disabled={!userAnswer.trim() || isEvaluating}
               >
-                {isEvaluating ? "Vérification…" : isRetryingPhrase ? "Corriger" : "Vérifier"}
+                {isEvaluating ? "Correction…" : isRetryingPhrase ? "Corriger" : "Vérifier"}
                 <kbd className="kbdHint">Ctrl+↵</kbd>
               </button>
               {!isConjugation && (
@@ -1903,77 +2054,60 @@ export function PratiquePage() {
             </div>
           )}
 
+          {hasCheckedCurrent && currentIsCorrect !== null ? (
+            <PracticeReviewCard
+              isCorrect={currentIsCorrect}
+              errorType={currentErrorType}
+              review={currentReview}
+              expectedAnswer={currentExercise.answer}
+              expectedKana={currentExercise.answerAlt}
+              userAnswer={userAnswer}
+              diffGranularity={
+                activeTab === "phrases" && direction === "jp-to-fr" ? "word" : "character"
+              }
+              explanation={currentExercise.explanation}
+              onGrammar={
+                currentIsCorrect
+                  ? undefined
+                  : () =>
+                      handleGrammarLink(
+                        currentFeedback ?? currentReview?.summary ?? "erreur",
+                        currentExercise.prompt,
+                      )
+              }
+            />
+          ) : null}
+
           <TeacherChat
+            key={`${activeTab}-${currentIndex}`}
             prompt={currentExercise.prompt}
             expectedAnswer={currentExercise.answer}
             userAnswer={userAnswer}
             direction={currentExercise.direction ?? direction}
             mode={activeTab}
             resetKey={`${activeTab}-${currentIndex}`}
+            defaultOpen={hasCheckedCurrent}
+            variant={hasCheckedCurrent ? "afterReview" : "inline"}
+            errorType={currentErrorType}
+            feedback={currentFeedback}
           />
-
-          {hasCheckedCurrent && currentIsCorrect !== null && (
-            <div className="phrasesTraining__feedback">
-              <div
-                className={`phrasesTraining__resultBadge ${currentIsCorrect ? "phrasesTraining__resultBadge--success" : "phrasesTraining__resultBadge--error"}`}
-              >
-                {currentIsCorrect ? "✓ Réussi" : "✗ Incorrect"}
-              </div>
-
-              <div className="phrasesTraining__expectedAnswer">
-                <div className="phrasesTraining__expectedLabel">Réponse attendue</div>
-                <div className="phrasesTraining__expectedKanji">{currentExercise.answer}</div>
-                {currentExercise.answerAlt && (
-                  <div className="phrasesTraining__expectedKana">{currentExercise.answerAlt}</div>
-                )}
-              </div>
-
-              {!currentIsCorrect && userAnswer.trim().length > 0 && (
-                <AnswerDiff
-                  userAnswer={userAnswer.trim()}
-                  expectedAnswer={currentExercise.answer}
-                  granularity={
-                    activeTab === "phrases" && direction === "jp-to-fr" ? "word" : "character"
-                  }
-                />
-              )}
-
-              {currentFeedback && (
-                <div className="phrasesTraining__tip">
-                  <div className="phrasesTraining__tipTitle">Conseil</div>
-                  <div className="phrasesTraining__tipContent">{currentFeedback}</div>
-                </div>
-              )}
-
-              {!currentIsCorrect && (
-                <button
-                  type="button"
-                  className="button"
-                  style={{ marginTop: "var(--space-3)", fontSize: "13px" }}
-                  onClick={() =>
-                    handleGrammarLink(currentFeedback ?? "erreur", currentExercise.prompt)
-                  }
-                >
-                  Comprendre cette erreur
-                </button>
-              )}
-
-              {currentExercise.explanation && (
-                <div className="phrasesTraining__explanation">{currentExercise.explanation}</div>
-              )}
-
-              <button
-                className="button button--primary"
-                type="button"
-                onClick={handleNext}
-                style={{ marginTop: "var(--space-5)" }}
-              >
-                {currentIndex + 1 >= exercises.length ? "Voir le récapitulatif" : "Suivant →"}
-                <kbd className="kbdHint">Ctrl+→</kbd>
-              </button>
-            </div>
-          )}
         </div>
+
+        {hasCheckedCurrent ? (
+          <div className="phrasesTraining__sessionBar">
+            <button className="button button--primary" type="button" onClick={handleNext}>
+              {currentIndex + 1 >= exercises.length ? "Voir le récapitulatif" : "Suivant →"}
+              <kbd className="kbdHint">Ctrl+→</kbd>
+            </button>
+          </div>
+        ) : null}
+
+        <GrammarDrawer
+          isOpen={showGrammarDrawer}
+          isLoading={isLoadingGrammar}
+          note={grammarNote}
+          onClose={() => setShowGrammarDrawer(false)}
+        />
       </div>
     );
   }
@@ -2236,54 +2370,136 @@ export function PratiquePage() {
         </Link>
       </div>
 
-      {showGrammarDrawer && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: "400px",
-            maxWidth: "90vw",
-            background: "var(--color-bg)",
-            borderLeft: "2px solid var(--color-border)",
-            boxShadow: "-4px 0 12px rgba(0,0,0,0.1)",
-            zIndex: 100,
-            overflow: "auto",
-            padding: "var(--space-5)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "var(--space-4)",
-            }}
-          >
-            <h3 style={{ margin: 0 }}>Explication grammaticale</h3>
-            <button
-              type="button"
-              className="button"
-              onClick={() => setShowGrammarDrawer(false)}
-              style={{ padding: "2px 8px" }}
-            >
-              Fermer
-            </button>
-          </div>
-          {isLoadingGrammar ? (
-            <div className="muted">Chargement…</div>
-          ) : grammarNote ? (
-            <div style={{ fontSize: "14px", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-              <h4 style={{ marginTop: 0 }}>{grammarNote.topic}</h4>
-              {grammarNote.content}
-            </div>
-          ) : (
-            <div className="muted">Impossible de charger la note de grammaire.</div>
-          )}
-        </div>
-      )}
+      <GrammarDrawer
+        isOpen={showGrammarDrawer}
+        isLoading={isLoadingGrammar}
+        note={grammarNote}
+        onClose={() => setShowGrammarDrawer(false)}
+      />
     </div>
+  );
+}
+
+function PracticeReviewCard({
+  isCorrect,
+  errorType,
+  review,
+  expectedAnswer,
+  expectedKana,
+  expectedAlt,
+  userAnswer,
+  diffGranularity,
+  explanation,
+  onGrammar,
+}: {
+  isCorrect: boolean;
+  errorType: string | null;
+  review: PracticeReview | null;
+  expectedAnswer: string;
+  expectedKana?: string | null;
+  expectedAlt?: string | null;
+  userAnswer: string;
+  diffGranularity: "word" | "character";
+  explanation?: string;
+  onGrammar?: () => void;
+}) {
+  const errorLabel = errorType ? (ERROR_TYPE_LABELS[errorType] ?? errorType) : null;
+  const kanaReading = expectedKana && hasJapaneseScript(expectedKana) ? expectedKana : null;
+  const frenchAlt = expectedAlt && !hasJapaneseScript(expectedAlt) ? expectedAlt : null;
+
+  return (
+    <div className="phrasesTraining__feedback">
+      <div className="phrasesTraining__verdict">
+        <div
+          className={`phrasesTraining__resultBadge ${isCorrect ? "phrasesTraining__resultBadge--success" : "phrasesTraining__resultBadge--error"}`}
+        >
+          {isCorrect ? "Juste" : "À revoir"}
+        </div>
+        {errorLabel && !isCorrect ? (
+          <span className="phrasesTraining__errorType">{errorLabel}</span>
+        ) : null}
+      </div>
+
+      <AnswerDiff
+        userAnswer={userAnswer.trim()}
+        expectedAnswer={expectedAnswer}
+        expectedKana={kanaReading}
+        granularity={diffGranularity}
+      />
+
+      {frenchAlt ? <div className="phrasesTraining__expectedKana">{frenchAlt}</div> : null}
+
+      {review?.summary ? (
+        <div className="phrasesTraining__tip">
+          <div className="phrasesTraining__tipTitle">{isCorrect ? "Retour" : "L’erreur"}</div>
+          <div className="phrasesTraining__tipContent">{review.summary}</div>
+        </div>
+      ) : null}
+
+      {review?.rule ? (
+        <div className="phrasesTraining__tip">
+          <div className="phrasesTraining__tipTitle">La règle</div>
+          <div className="phrasesTraining__tipContent">{review.rule}</div>
+        </div>
+      ) : null}
+
+      {review?.example ? (
+        <div className="phrasesTraining__tip">
+          <div className="phrasesTraining__tipTitle">Exemple</div>
+          <div className="phrasesTraining__tipContent">{review.example}</div>
+        </div>
+      ) : null}
+
+      {onGrammar ? (
+        <button type="button" className="button phrasesTraining__grammarBtn" onClick={onGrammar}>
+          Comprendre cette erreur
+        </button>
+      ) : null}
+
+      {explanation ? <div className="phrasesTraining__explanation">{explanation}</div> : null}
+    </div>
+  );
+}
+
+function GrammarDrawer({
+  isOpen,
+  isLoading,
+  note,
+  onClose,
+}: {
+  isOpen: boolean;
+  isLoading: boolean;
+  note: GrammarNote | null;
+  onClose: () => void;
+}) {
+  if (!isOpen) return null;
+  return (
+    <dialog className="grammarDrawer" open aria-label="Explication grammaticale">
+      <button
+        type="button"
+        className="grammarDrawer__backdrop"
+        onClick={onClose}
+        aria-label="Fermer"
+      />
+      <div className="grammarDrawer__panel">
+        <div className="grammarDrawer__header">
+          <h3 className="grammarDrawer__title">Explication grammaticale</h3>
+          <button type="button" className="button" onClick={onClose}>
+            Fermer
+          </button>
+        </div>
+        {isLoading ? (
+          <div className="muted">Chargement…</div>
+        ) : note ? (
+          <div className="grammarDrawer__body">
+            <h4>{note.topic}</h4>
+            {note.content}
+          </div>
+        ) : (
+          <div className="muted">Impossible de charger la note de grammaire.</div>
+        )}
+      </div>
+    </dialog>
   );
 }
 
@@ -2438,12 +2654,16 @@ function SeriesPicker({
   return (
     <div className="pratiqueSeries">
       {tags.length > 6 ? (
-        <input
-          className="input pratiqueSeries__search"
-          type="text"
+        <SearchBar
+          className="pratiqueSeries__search"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={setQuery}
           placeholder="Filtrer les séries…"
+          countLabel={
+            normalizedQuery
+              ? `${visibleTags.length} série${visibleTags.length > 1 ? "s" : ""}`
+              : undefined
+          }
         />
       ) : null}
       {multiple && tags.length > 1 ? (

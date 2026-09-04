@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { hasJapaneseScript, kanaToRomaji } from "../utils/kanaToRomaji";
+import { FuriganaText } from "./FuriganaText";
 
 type DiffSegment = {
   text: string;
@@ -107,6 +109,7 @@ function tokenizeWords(text: string): string[] {
 type AnswerDiffProps = {
   userAnswer: string;
   expectedAnswer: string;
+  expectedKana?: string | null;
   granularity?: "character" | "word";
   userLabel?: string;
   expectedLabel?: string;
@@ -115,25 +118,36 @@ type AnswerDiffProps = {
 export function AnswerDiff({
   userAnswer,
   expectedAnswer,
+  expectedKana,
   granularity = "character",
   userLabel = "Ta réponse",
   expectedLabel = "Attendu",
 }: AnswerDiffProps) {
+  const comparableScripts = hasJapaneseScript(userAnswer) === hasJapaneseScript(expectedAnswer);
+  const kanaReading = expectedKana && expectedKana !== expectedAnswer ? expectedKana : null;
+  const romajiReading = useMemo(() => {
+    const source = kanaReading || (hasJapaneseScript(expectedAnswer) ? expectedAnswer : "");
+    if (!source || !hasJapaneseScript(source)) return null;
+    const converted = kanaToRomaji(source);
+    return converted && converted !== source ? converted : null;
+  }, [expectedAnswer, kanaReading]);
+
   const diff = useMemo(() => {
+    if (!comparableScripts) return null;
     const tokenize = granularity === "word" ? tokenizeWords : tokenizeCharacters;
     const userTokens = tokenize(userAnswer);
     const expectedTokens = tokenize(expectedAnswer);
     return diffTokens(userTokens, expectedTokens);
-  }, [userAnswer, expectedAnswer, granularity]);
+  }, [userAnswer, expectedAnswer, granularity, comparableScripts]);
 
   return (
     <div className="answerDiff">
       <div className="answerDiff__row">
         <div className="answerDiff__label">{userLabel}</div>
         <div className="answerDiff__text">
-          {diff.userSegments.length === 0 ? (
+          {!userAnswer.trim() ? (
             <span className="answerDiff__empty">—</span>
-          ) : (
+          ) : diff ? (
             diff.userSegments.map((segment, index) => (
               <span
                 // biome-ignore lint/suspicious/noArrayIndexKey: diff segments have no stable id
@@ -143,21 +157,33 @@ export function AnswerDiff({
                 {segment.text}
               </span>
             ))
+          ) : (
+            <span className="answerDiff__userPlain">{userAnswer}</span>
           )}
         </div>
       </div>
-      <div className="answerDiff__row">
+      <div className="answerDiff__row answerDiff__row--expected">
         <div className="answerDiff__label">{expectedLabel}</div>
-        <div className="answerDiff__text">
-          {diff.expectedSegments.map((segment, index) => (
-            <span
-              // biome-ignore lint/suspicious/noArrayIndexKey: diff segments have no stable id
-              key={index}
-              className={segment.match ? "answerDiff__match" : "answerDiff__missing"}
-            >
-              {segment.text}
-            </span>
-          ))}
+        <div className="answerDiff__expectedBody">
+          <div className="answerDiff__text answerDiff__text--expected">
+            {kanaReading ? (
+              <FuriganaText kanji={expectedAnswer} kana={kanaReading} />
+            ) : diff ? (
+              diff.expectedSegments.map((segment, index) => (
+                <span
+                  // biome-ignore lint/suspicious/noArrayIndexKey: diff segments have no stable id
+                  key={index}
+                  className={segment.match ? "answerDiff__match" : "answerDiff__missing"}
+                >
+                  {segment.text}
+                </span>
+              ))
+            ) : (
+              expectedAnswer
+            )}
+          </div>
+          {kanaReading ? <div className="answerDiff__kana">{kanaReading}</div> : null}
+          {romajiReading ? <div className="answerDiff__romaji">{romajiReading}</div> : null}
         </div>
       </div>
     </div>
