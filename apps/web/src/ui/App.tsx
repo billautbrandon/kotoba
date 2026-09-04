@@ -5,9 +5,16 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from
 import type { SrsSummary, User } from "../api";
 import { fetchMe, fetchSrsSummary, logoutUser } from "../api";
 import { scrollAppToTop } from "../utils/scroll";
-import { PracticeNavIcon, SrsNavIcon, VocabNavIcon, WordsNavIcon } from "./components/NavIcons";
+import {
+  CatalogNavIcon,
+  PracticeNavIcon,
+  SrsNavIcon,
+  VocabNavIcon,
+  WordsNavIcon,
+} from "./components/NavIcons";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { AdminPage } from "./pages/AdminPage";
+import { CataloguePage } from "./pages/CataloguePage";
 import { DialoguePage } from "./pages/DialoguePage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
@@ -17,6 +24,7 @@ import { KanjiLearningPage } from "./pages/KanjiLearningPage";
 import { KanjiQuizPage } from "./pages/KanjiQuizPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PhraseBankPage } from "./pages/PhraseBankPage";
+import { PlacementPage } from "./pages/PlacementPage";
 import { PratiquePage } from "./pages/PratiquePage";
 import { ReadingPage } from "./pages/ReadingPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -40,18 +48,24 @@ type TopNavLinkProps = {
   icon: React.ReactNode;
   badge?: React.ReactNode;
   isActive?: boolean;
+  variant?: "top" | "mobile";
 };
 
-function TopNavLink({ to, label, icon, badge, isActive }: TopNavLinkProps) {
+function TopNavLink({ to, label, icon, badge, isActive, variant = "top" }: TopNavLinkProps) {
+  const isMobile = variant === "mobile";
   return (
     <NavLink
       to={to}
-      className={({ isActive: routeActive }) =>
-        `topNav__link ${(isActive ?? routeActive) ? "topNav__link--active" : ""}`
-      }
+      className={({ isActive: routeActive }) => {
+        const active = isActive ?? routeActive;
+        if (isMobile) {
+          return `mobileBar__link${active ? " mobileBar__link--active" : ""}`;
+        }
+        return `topNav__link${active ? " topNav__link--active" : ""}`;
+      }}
     >
       {icon}
-      <span className="topNav__linkLabel">{label}</span>
+      <span className={isMobile ? "mobileBar__label" : "topNav__linkLabel"}>{label}</span>
       {badge}
     </NavLink>
   );
@@ -240,6 +254,40 @@ export function App() {
     location.pathname.startsWith("/train/tag/") ||
     location.pathname.startsWith("/train/tags");
   const isSrsActive = location.pathname === "/srs" || location.pathname.startsWith("/train/srs/");
+  const isTrainSession = location.pathname.startsWith("/train/");
+
+  const primaryLinks = (
+    <>
+      <TopNavLink
+        to="/dictionary"
+        label="Vocabulaire"
+        icon={<VocabNavIcon className="topNav__icon" />}
+        isActive={isVocabActive}
+      />
+      <TopNavLink
+        to="/catalogue"
+        label="Catalogue"
+        icon={<CatalogNavIcon className="topNav__icon" />}
+      />
+      <TopNavLink
+        to="/srs"
+        label="SRS"
+        icon={<SrsNavIcon className="topNav__icon" />}
+        isActive={isSrsActive}
+        badge={
+          srsSummary && srsSummary.dueCount > 0 ? (
+            <span className="topNav__badge">{srsSummary.dueCount}</span>
+          ) : null
+        }
+      />
+      <TopNavLink
+        to="/pratique"
+        label="Pratique"
+        icon={<PracticeNavIcon className="topNav__icon" />}
+      />
+      <TopNavLink to="/words" label="Mots" icon={<WordsNavIcon className="topNav__icon" />} />
+    </>
+  );
 
   async function handleLogout() {
     await logoutUser();
@@ -248,7 +296,9 @@ export function App() {
   }
 
   return (
-    <div className={`app${isAuthenticated ? " app--withNav" : ""}`}>
+    <div
+      className={`app${isAuthenticated ? " app--withNav" : ""}${isTrainSession ? " app--session" : ""}`}
+    >
       {isAuthenticated && currentUser ? (
         <header className="topNav">
           <Link className={`topNav__brand${isHomeActive ? " topNav__brand--active" : ""}`} to="/">
@@ -256,29 +306,7 @@ export function App() {
             <span className="topNav__brandKana">言葉</span>
           </Link>
           <nav className="topNav__links" aria-label="Navigation principale">
-            <TopNavLink
-              to="/dictionary"
-              label="Vocabulaire"
-              icon={<VocabNavIcon className="topNav__icon" />}
-              isActive={isVocabActive}
-            />
-            <TopNavLink
-              to="/srs"
-              label="SRS"
-              icon={<SrsNavIcon className="topNav__icon" />}
-              isActive={isSrsActive}
-              badge={
-                srsSummary && srsSummary.dueCount > 0 ? (
-                  <span className="topNav__badge">{srsSummary.dueCount}</span>
-                ) : null
-              }
-            />
-            <TopNavLink
-              to="/pratique"
-              label="Pratique"
-              icon={<PracticeNavIcon className="topNav__icon" />}
-            />
-            <TopNavLink to="/words" label="Mots" icon={<WordsNavIcon className="topNav__icon" />} />
+            {primaryLinks}
           </nav>
           <AccountMenu currentUser={currentUser} onLogout={handleLogout} />
         </header>
@@ -307,8 +335,12 @@ export function App() {
                   />
                 ) : (
                   <LoginPage
-                    onAuthenticated={(user) => {
+                    onAuthenticated={(user, options) => {
                       setCurrentUser(user);
+                      if (options?.isNewAccount && !user.placement_completed_at) {
+                        navigate("/placement", { replace: true });
+                        return;
+                      }
                       const from =
                         typeof location.state === "object" &&
                         location.state &&
@@ -325,6 +357,11 @@ export function App() {
               }
             />
             <Route path="/" element={requireAuth(<HomePage currentUser={currentUser} />)} />
+            <Route
+              path="/placement"
+              element={requireAuth(<PlacementPage onCompleted={(user) => setCurrentUser(user)} />)}
+            />
+            <Route path="/catalogue" element={requireAuth(<CataloguePage />)} />
             <Route path="/train" element={<Navigate to="/" replace />} />
             <Route path="/train/difficult" element={requireAuth(<TrainPage mode="difficult" />)} />
             <Route path="/train/tag/:tagId" element={requireAuth(<TrainPage mode="tag" />)} />
@@ -355,6 +392,47 @@ export function App() {
           </Routes>
         </main>
       </div>
+      {isAuthenticated && currentUser && !isTrainSession ? (
+        <nav className="mobileBar" aria-label="Navigation mobile">
+          <TopNavLink
+            variant="mobile"
+            to="/dictionary"
+            label="Vocabulaire"
+            icon={<VocabNavIcon className="topNav__icon" />}
+            isActive={isVocabActive}
+          />
+          <TopNavLink
+            variant="mobile"
+            to="/catalogue"
+            label="Catalogue"
+            icon={<CatalogNavIcon className="topNav__icon" />}
+          />
+          <TopNavLink
+            variant="mobile"
+            to="/srs"
+            label="SRS"
+            icon={<SrsNavIcon className="topNav__icon" />}
+            isActive={isSrsActive}
+            badge={
+              srsSummary && srsSummary.dueCount > 0 ? (
+                <span className="topNav__badge">{srsSummary.dueCount}</span>
+              ) : null
+            }
+          />
+          <TopNavLink
+            variant="mobile"
+            to="/pratique"
+            label="Pratique"
+            icon={<PracticeNavIcon className="topNav__icon" />}
+          />
+          <TopNavLink
+            variant="mobile"
+            to="/words"
+            label="Mots"
+            icon={<WordsNavIcon className="topNav__icon" />}
+          />
+        </nav>
+      ) : null}
       {isShortcutsOpen && <ShortcutsModal onClose={() => setIsShortcutsOpen(false)} />}
     </div>
   );

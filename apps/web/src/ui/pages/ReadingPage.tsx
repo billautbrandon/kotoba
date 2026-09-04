@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  type CatalogUserState,
   type GeminiQuota,
   type ReadingParagraph,
   type ReadingQuestion,
@@ -8,6 +9,7 @@ import {
   fetchGeminiQuota,
   fetchTags,
   generateReading,
+  queueCatalogEntry,
 } from "../../api";
 import { AudioButton } from "../components/AudioButton";
 import { QuotaBar } from "../components/QuotaBar";
@@ -33,8 +35,15 @@ export function ReadingPage() {
 
   const [paragraphs, setParagraphs] = useState<ReadingParagraph[]>([]);
   const [questions, setQuestions] = useState<ReadingQuestion[]>([]);
-  const [showFurigana, setShowFurigana] = useState(false);
-  const [hoveredWord, setHoveredWord] = useState<{ text: string; reading: string; meaning: string } | null>(null);
+  const [showFurigana, setShowFurigana] = useState(true);
+  const [hoveredWord, setHoveredWord] = useState<{
+    text: string;
+    reading: string;
+    meaning: string;
+    catalogEntryId?: number | null;
+    catalogState?: CatalogUserState | null;
+  } | null>(null);
+  const [queueMessage, setQueueMessage] = useState<string | null>(null);
 
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questionAnswer, setQuestionAnswer] = useState("");
@@ -52,9 +61,7 @@ export function ReadingPage() {
 
   function toggleTag(tagId: number) {
     setSelectedTagIds((previous) =>
-      previous.includes(tagId)
-        ? previous.filter((id) => id !== tagId)
-        : [...previous, tagId],
+      previous.includes(tagId) ? previous.filter((id) => id !== tagId) : [...previous, tagId],
     );
   }
 
@@ -63,7 +70,11 @@ export function ReadingPage() {
     setIsGenerating(true);
     setErrorMessage(null);
     try {
-      const result = await generateReading({ tagIds: selectedTagIds, difficulty, length: textLength });
+      const result = await generateReading({
+        tagIds: selectedTagIds,
+        difficulty,
+        length: textLength,
+      });
       setParagraphs(result.paragraphs);
       setQuestions(result.questions);
       setQuota(result.quota);
@@ -80,13 +91,20 @@ export function ReadingPage() {
     if (!question || !questionAnswer.trim()) return;
     setIsEvaluating(true);
     try {
-      const result = await checkReadingAnswer(question.question, question.answer, questionAnswer.trim());
-      const newResults = [...questionResults, {
-        question: question.question,
-        userAnswer: questionAnswer.trim(),
-        isCorrect: result.isCorrect,
-        feedback: result.feedback,
-      }];
+      const result = await checkReadingAnswer(
+        question.question,
+        question.answer,
+        questionAnswer.trim(),
+      );
+      const newResults = [
+        ...questionResults,
+        {
+          question: question.question,
+          userAnswer: questionAnswer.trim(),
+          isCorrect: result.isCorrect,
+          feedback: result.feedback,
+        },
+      ];
       setQuestionResults(newResults);
       setQuestionAnswer("");
 
@@ -128,7 +146,7 @@ export function ReadingPage() {
 
         <div className="pratique__setup">
           <div className="pratique__field">
-            <label className="label">Tags (vocabulaire)</label>
+            <div className="label">Tags (vocabulaire)</div>
             <div className="pratique__chipGroup">
               {tags.map((tag) => (
                 <button
@@ -145,19 +163,35 @@ export function ReadingPage() {
 
           <div className="pratique__row">
             <div className="pratique__field">
-              <label className="label">Difficulté</label>
-              <select className="input" value={difficulty} onChange={(event) => setDifficulty(event.target.value as "debutant" | "intermediaire")}>
-                <option value="debutant">Débutant</option>
-                <option value="intermediaire">Intermédiaire</option>
-              </select>
+              <label className="label">
+                Difficulté
+                <select
+                  className="input"
+                  value={difficulty}
+                  onChange={(event) =>
+                    setDifficulty(event.target.value as "debutant" | "intermediaire")
+                  }
+                >
+                  <option value="debutant">Débutant</option>
+                  <option value="intermediaire">Intermédiaire</option>
+                </select>
+              </label>
             </div>
             <div className="pratique__field">
-              <label className="label">Longueur</label>
-              <select className="input" value={textLength} onChange={(event) => setTextLength(event.target.value as "short" | "medium" | "long")}>
-                <option value="short">Court (3-4 phrases)</option>
-                <option value="medium">Moyen (5-6 phrases)</option>
-                <option value="long">Long (7-8 phrases)</option>
-              </select>
+              <label className="label">
+                Longueur
+                <select
+                  className="input"
+                  value={textLength}
+                  onChange={(event) =>
+                    setTextLength(event.target.value as "short" | "medium" | "long")
+                  }
+                >
+                  <option value="short">Court (3-4 phrases)</option>
+                  <option value="medium">Moyen (5-6 phrases)</option>
+                  <option value="long">Long (7-8 phrases)</option>
+                </select>
+              </label>
             </div>
           </div>
 
@@ -172,7 +206,9 @@ export function ReadingPage() {
           </button>
 
           {errorMessage && (
-            <div className="formError" style={{ marginTop: "var(--space-3)" }}>{errorMessage}</div>
+            <div className="formError" style={{ marginTop: "var(--space-3)" }}>
+              {errorMessage}
+            </div>
           )}
         </div>
       </div>
@@ -188,35 +224,53 @@ export function ReadingPage() {
         <div>
           <h1 className="pageTitle">Lecture</h1>
           <p className="pageSubtitle">
-            {phase === "reading" ? "Lis le texte, clique sur les mots pour voir la traduction" :
-             phase === "questions" ? "Réponds aux questions de compréhension" :
-             "Résultats"}
+            {phase === "reading"
+              ? "Lis le texte, clique sur les mots pour voir la traduction"
+              : phase === "questions"
+                ? "Réponds aux questions de compréhension"
+                : "Résultats"}
           </p>
         </div>
         <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
           <AudioButton text={fullText} size="large" />
-          <label style={{ fontSize: "13px", display: "flex", alignItems: "center", gap: "var(--space-1)", cursor: "pointer" }}>
-            <input type="checkbox" checked={showFurigana} onChange={(event) => setShowFurigana(event.target.checked)} />
+          <label
+            style={{
+              fontSize: "13px",
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-1)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showFurigana}
+              onChange={(event) => setShowFurigana(event.target.checked)}
+            />
             Furigana
           </label>
         </div>
       </div>
 
-      <div style={{
-        border: "2px solid var(--color-border)",
-        borderRadius: "var(--radius-lg)",
-        padding: "var(--space-5)",
-        marginBottom: "var(--space-5)",
-        lineHeight: 2.2,
-        fontSize: "18px",
-        position: "relative",
-      }}>
-        {paragraphs.map((paragraph, paragraphIndex) => (
-          <div key={paragraphIndex} style={{ marginBottom: "var(--space-4)" }}>
+      {queueMessage ? <div className="muted">{queueMessage}</div> : null}
+
+      <div
+        style={{
+          border: "2px solid var(--color-border)",
+          borderRadius: "var(--radius-lg)",
+          padding: "var(--space-5)",
+          marginBottom: "var(--space-5)",
+          lineHeight: 2.2,
+          fontSize: "18px",
+          position: "relative",
+        }}
+      >
+        {paragraphs.map((paragraph) => (
+          <div key={paragraph.japanese} style={{ marginBottom: "var(--space-4)" }}>
             <p style={{ margin: 0 }}>
-              {paragraph.words.map((word, wordIndex) => (
+              {paragraph.words.map((word) => (
                 <span
-                  key={wordIndex}
+                  key={`${word.text}-${word.reading}-${word.meaning}`}
                   style={{
                     cursor: "pointer",
                     borderBottom: "1px dashed var(--color-text-soft)",
@@ -227,42 +281,52 @@ export function ReadingPage() {
                   onMouseLeave={() => setHoveredWord(null)}
                 >
                   {showFurigana && word.reading && (
-                    <span style={{
-                      position: "absolute",
-                      top: "-14px",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      fontSize: "10px",
-                      color: "var(--color-text-soft)",
-                      whiteSpace: "nowrap",
-                    }}>
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: "-14px",
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        fontSize: "10px",
+                        color: "var(--color-text-soft)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {word.reading}
                     </span>
                   )}
                   {word.text}
                   {hoveredWord === word && (
-                    <span style={{
-                      position: "absolute",
-                      bottom: "100%",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      background: "var(--color-surface)",
-                      border: "1px solid var(--color-border)",
-                      borderRadius: "var(--radius-md)",
-                      padding: "var(--space-1) var(--space-2)",
-                      fontSize: "12px",
-                      whiteSpace: "nowrap",
-                      zIndex: 10,
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                      marginBottom: "4px",
-                    }}>
-                      {word.reading} — {word.meaning}
+                    <span className="readingGloss">
+                      <span className="readingGloss__text">
+                        {word.reading} — {word.meaning}
+                      </span>
+                      {word.catalogEntryId && word.catalogState === "idle" ? (
+                        <button
+                          type="button"
+                          className="readingGloss__add"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void queueCatalogEntry(word.catalogEntryId as number)
+                              .then(() => setQueueMessage("Ajouté à la file"))
+                              .catch(() => setQueueMessage("Impossible d’ajouter"));
+                          }}
+                        >
+                          +
+                        </button>
+                      ) : null}
                     </span>
                   )}
                 </span>
               ))}
             </p>
-            <p style={{ fontSize: "14px", color: "var(--color-text-soft)", margin: "var(--space-1) 0 0" }}>
+            <p
+              style={{
+                fontSize: "14px",
+                color: "var(--color-text-soft)",
+                margin: "var(--space-1) 0 0",
+              }}
+            >
               {paragraph.french}
             </p>
           </div>
@@ -274,7 +338,10 @@ export function ReadingPage() {
           <button
             type="button"
             className="button button--primary"
-            onClick={() => { setPhase("questions"); setCurrentQuestionIndex(0); }}
+            onClick={() => {
+              setPhase("questions");
+              setCurrentQuestionIndex(0);
+            }}
           >
             Passer aux questions
           </button>
@@ -282,13 +349,15 @@ export function ReadingPage() {
       )}
 
       {phase === "questions" && questions[currentQuestionIndex] && (
-        <div style={{
-          border: "2px solid var(--color-border)",
-          borderRadius: "var(--radius-lg)",
-          padding: "var(--space-5)",
-          maxWidth: "600px",
-          margin: "0 auto",
-        }}>
+        <div
+          style={{
+            border: "2px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            padding: "var(--space-5)",
+            maxWidth: "600px",
+            margin: "0 auto",
+          }}
+        >
           <p style={{ fontSize: "13px", color: "var(--color-text-soft)" }}>
             Question {currentQuestionIndex + 1}/{questions.length}
           </p>
@@ -301,7 +370,9 @@ export function ReadingPage() {
               className="input"
               value={questionAnswer}
               onChange={(event) => setQuestionAnswer(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") handleAnswerQuestion(); }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") handleAnswerQuestion();
+              }}
               placeholder="Ta réponse..."
               style={{ flex: 1 }}
             />
@@ -319,27 +390,37 @@ export function ReadingPage() {
 
       {phase === "done" && (
         <div>
-          <div style={{
-            border: "2px solid var(--color-border)",
-            borderRadius: "var(--radius-lg)",
-            padding: "var(--space-5)",
-            marginBottom: "var(--space-4)",
-          }}>
+          <div
+            style={{
+              border: "2px solid var(--color-border)",
+              borderRadius: "var(--radius-lg)",
+              padding: "var(--space-5)",
+              marginBottom: "var(--space-4)",
+            }}
+          >
             <h3 style={{ marginTop: 0 }}>Résultats de compréhension</h3>
             {questionResults.map((result, index) => (
-              <div key={index} style={{
-                padding: "var(--space-3)",
-                borderBottom: index < questionResults.length - 1 ? "1px solid var(--color-border)" : "none",
-              }}>
+              <div
+                key={result.question}
+                style={{
+                  padding: "var(--space-3)",
+                  borderBottom:
+                    index < questionResults.length - 1 ? "1px solid var(--color-border)" : "none",
+                }}
+              >
                 <p style={{ fontWeight: 600, margin: "0 0 var(--space-1)" }}>{result.question}</p>
                 <p style={{ margin: "0 0 var(--space-1)", fontSize: "14px" }}>
                   Ta réponse : {result.userAnswer}
                 </p>
-                <p style={{
-                  margin: 0,
-                  fontSize: "14px",
-                  color: result.isCorrect ? "var(--color-success, #22c55e)" : "var(--color-danger, #ef4444)",
-                }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: "14px",
+                    color: result.isCorrect
+                      ? "var(--color-success, #22c55e)"
+                      : "var(--color-danger, #ef4444)",
+                  }}
+                >
                   {result.isCorrect ? "Correct !" : "Incorrect"} — {result.feedback}
                 </p>
               </div>

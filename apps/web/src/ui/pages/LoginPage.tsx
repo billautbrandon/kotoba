@@ -6,7 +6,9 @@ import { loginUser, registerUser } from "../../api";
 
 type Mode = "login" | "register";
 
-export function LoginPage(props: { onAuthenticated: (user: User) => void }) {
+export function LoginPage(props: {
+  onAuthenticated: (user: User, options?: { isNewAccount?: boolean }) => void;
+}) {
   const [mode, setMode] = useState<Mode>("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -46,7 +48,7 @@ export function LoginPage(props: { onAuthenticated: (user: User) => void }) {
         mode === "login"
           ? await loginUser(normalizedUsername, password, rememberMe)
           : await registerUser(normalizedUsername, password);
-      props.onAuthenticated(user);
+      props.onAuthenticated(user, { isNewAccount: mode === "register" });
     } catch {
       setErrorMessage(
         mode === "login"

@@ -142,6 +142,27 @@ export function WordsNavIcon({ className }: NavIconProps) {
   );
 }
 
+export function CatalogNavIcon({ className }: NavIconProps) {
+  return (
+    <svg
+      className={className ?? "sidebar__icon"}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <title>Catalogue</title>
+      <rect x="4" y="5" width="7" height="7" rx="1.6" />
+      <rect x="13" y="5" width="7" height="7" rx="1.6" />
+      <rect x="4" y="14" width="7" height="5" rx="1.6" />
+      <rect x="13" y="14" width="7" height="5" rx="1.6" />
+    </svg>
+  );
+}
+
 export function LayersIcon({ className }: NavIconProps) {
   return (
     <svg

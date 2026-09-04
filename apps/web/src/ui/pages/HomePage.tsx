@@ -104,6 +104,10 @@ export function HomePage({ currentUser }: HomePageProps) {
                   : "Rien à réviser"}
               </span>
             </Link>
+            <Link className="dashShortcuts__item" to="/catalogue">
+              <span className="dashShortcuts__label">Catalogue N5</span>
+              <span className="dashShortcuts__hint">Cherche, ajoute, la file d’abord</span>
+            </Link>
             <Link className="dashShortcuts__item" to="/pratique">
               <span className="dashShortcuts__label">Pratique</span>
               <span className="dashShortcuts__hint">Phrases, JLPT, conjugaison</span>
