@@ -28,6 +28,8 @@ RUN npm ci --omit=dev
 # Copy built files
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
+# tsc does not copy JSON; seedCatalog reads ../src/data from dist/
+COPY --from=builder /app/apps/api/src/data ./apps/api/src/data
 
 # Create data directory
 RUN mkdir -p /app/data

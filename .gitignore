@@ -6,8 +6,9 @@ dist/
 .env.prod.example
 apps/web/public/kanji/
 
-# SQLite
-data/
+# SQLite volume at repo root (do not ignore apps/api/src/data)
+/data/
+apps/api/data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

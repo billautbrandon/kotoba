@@ -89,7 +89,11 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const database = openDatabase();
-seedCatalog(database);
+try {
+  seedCatalog(database);
+} catch (error) {
+  console.error("[kotoba/api] catalog seed failed; API will still start", error);
+}
 registerApiRoutes(app, database);
 
 app.use(

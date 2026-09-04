@@ -441,6 +441,12 @@ function exampleKanaHint(japanese: string, wordKana: string): string {
 }
 
 export function seedCatalog(database: Database.Database): void {
+  const vocabPath = path.join(dataDirectoryPath, "openjlpt-n5-vocab.json");
+  if (!fs.existsSync(vocabPath)) {
+    console.warn(`[kotoba/api] catalog data missing in ${dataDirectoryPath}, skipping seed`);
+    return;
+  }
+
   const vocab = loadJsonFile<OpenJlptVocab[]>("openjlpt-n5-vocab.json");
   const kanjiList = loadJsonFile<OpenJlptKanji[]>("openjlpt-n5-kanji.json");
   const glosses = loadJsonFile<Record<string, string>>("french-glosses.json");
