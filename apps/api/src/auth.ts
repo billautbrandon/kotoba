@@ -12,6 +12,8 @@ export type PublicUser = {
   xpInLevel: number;
   xpForNextLevel: number;
   created_at: string;
+  placement_level: string | null;
+  placement_completed_at: string | null;
 };
 
 export async function hashPassword(plainPassword: string): Promise<string> {

@@ -3,6 +3,7 @@ import express from "express";
 import session from "express-session";
 import { ZodError } from "zod";
 
+import { seedCatalog } from "./catalog.js";
 import { avatarsDirectoryPath, openDatabase } from "./db.js";
 import { registerApiRoutes } from "./routes.js";
 
@@ -88,6 +89,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const database = openDatabase();
+seedCatalog(database);
 registerApiRoutes(app, database);
 
 app.use(

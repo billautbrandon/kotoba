@@ -28,6 +28,7 @@ export type WordRow = {
   kanji: string | null;
   note: string | null;
   examples: string | null;
+  catalog_entry_id: number | null;
   created_at: string;
 };
 
@@ -43,6 +44,8 @@ export type WordStatsRow = {
   srs_ease_factor: number;
   srs_next_review_at: string | null;
   srs_step: number;
+  intro_stage: number;
+  queued_at: string | null;
 };
 
 export type WordWithStatsRow = WordRow & {
@@ -56,6 +59,8 @@ export type WordWithStatsRow = WordRow & {
   srs_ease_factor: number;
   srs_next_review_at: string | null;
   srs_step: number;
+  intro_stage: number;
+  queued_at: string | null;
 };
 
 export type TagRow = {
@@ -145,6 +150,11 @@ function ensureSchema(database: Database.Database) {
   ensureColumnExists(database, "users", "daily_goal", "INTEGER DEFAULT 20");
   ensureColumnExists(database, "users", "xp", "INTEGER DEFAULT 0");
   ensureColumnExists(database, "users", "daily_goal_xp_on", "TEXT");
+  ensureColumnExists(database, "users", "placement_level", "TEXT");
+  ensureColumnExists(database, "users", "placement_completed_at", "TEXT");
+  ensureColumnExists(database, "words", "catalog_entry_id", "INTEGER");
+  ensureColumnExists(database, "word_stats", "intro_stage", "INTEGER DEFAULT 0");
+  ensureColumnExists(database, "word_stats", "queued_at", "TEXT");
   backfillUserXp(database);
 
   database.exec(`
@@ -233,6 +243,30 @@ function ensureSchema(database: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(user_id, challenge_date)
     );
+
+    CREATE TABLE IF NOT EXISTS catalog_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jlpt_level TEXT NOT NULL,
+      kanji TEXT,
+      kana TEXT NOT NULL,
+      romaji TEXT,
+      french TEXT NOT NULL,
+      sense_context TEXT,
+      mnemonic TEXT,
+      kanji_breakdown TEXT,
+      examples TEXT,
+      confusion_group TEXT,
+      search_text TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(jlpt_level, kana, french)
+    );
+  `);
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_catalog_search ON catalog_entries(jlpt_level, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_catalog_confusion ON catalog_entries(confusion_group);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_words_user_catalog
+      ON words(user_id, catalog_entry_id) WHERE catalog_entry_id IS NOT NULL;
   `);
 
   seedBadgeDefinitions(database);
@@ -861,6 +895,8 @@ export function applyReviewToStats(
     srs_interval: toSafeInteger(existingStats.srs_interval),
     srs_ease_factor: toSafeFloat(existingStats.srs_ease_factor, 2.5),
     srs_step: toSafeInteger(existingStats.srs_step),
+    intro_stage: toSafeInteger(existingStats.intro_stage),
+    queued_at: existingStats.queued_at ?? null,
   };
 
   const srsResult = computeSrsSchedule(
@@ -869,6 +905,8 @@ export function applyReviewToStats(
     safeExistingStats.srs_ease_factor,
     reviewResult,
   );
+
+  const displayStage = safeExistingStats.intro_stage === 0 ? 1 : safeExistingStats.intro_stage;
 
   return {
     ...safeExistingStats,
@@ -879,6 +917,8 @@ export function applyReviewToStats(
     last_reviewed_at: nowIso,
     consecutive_success_count:
       reviewResult === "success" ? safeExistingStats.consecutive_success_count + 1 : 0,
+    intro_stage: Math.min(5, displayStage + 1),
+    queued_at: null,
     ...srsResult,
   };
 }

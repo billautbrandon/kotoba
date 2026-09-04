@@ -10,12 +10,27 @@ export type User = {
   xpInLevel: number;
   xpForNextLevel: number;
   created_at: string;
+  placement_level: string | null;
+  placement_completed_at: string | null;
 };
 
 export type WordExample = {
   jp: string;
   kana: string;
   fr: string;
+};
+
+export type CatalogKanjiPart = {
+  char: string;
+  meaning: string;
+  reading: string;
+};
+
+export type ConfusionSibling = {
+  kanji: string | null;
+  kana: string | null;
+  french: string;
+  sense_context: string | null;
 };
 
 export type Word = {
@@ -27,6 +42,12 @@ export type Word = {
   note: string | null;
   examples: WordExample[];
   created_at: string;
+  catalog_entry_id?: number | null;
+  jlpt_level?: string | null;
+  sense_context?: string | null;
+  mnemonic?: string | null;
+  kanji_breakdown?: CatalogKanjiPart[];
+  confusion_group?: string | null;
 };
 
 export type Tag = {
@@ -42,6 +63,11 @@ export type WordWithStats = Word & {
   score: number;
   last_reviewed_at: string | null;
   consecutive_success_count: number;
+  intro_stage?: number;
+  queued_at?: string | null;
+  mcChoices?: string[];
+  kanaHint?: string | null;
+  confusionSiblings?: ConfusionSibling[];
 };
 
 export type WordWithTags = Word & {
@@ -229,6 +255,7 @@ export async function fetchDueWords(
 export type SrsSummary = {
   dueCount: number;
   newCount: number;
+  queuedCount?: number;
   learningCount: number;
   graduatedCount: number;
   masteredCount: number;
@@ -539,14 +566,45 @@ export type GeneratedPhrase = {
   wordIds: number[];
 };
 
+export type PracticeReview = {
+  summary: string | null;
+  rule: string | null;
+  example: string | null;
+};
+
 export type PhraseEvaluation = {
   isCorrect: boolean;
   retryable?: boolean;
   hint?: string | null;
   feedback: string | null;
-  errorType: "particle" | "conjugation" | "kanji" | "other" | null;
+  summary?: string | null;
+  rule?: string | null;
+  example?: string | null;
+  errorType: string | null;
   xpAward?: XpAward | null;
 };
+
+export function practiceReviewFromEvaluation(evaluation: {
+  summary?: string | null;
+  rule?: string | null;
+  example?: string | null;
+  feedback?: string | null;
+  explanation?: string | null;
+}): PracticeReview {
+  return {
+    summary: evaluation.summary ?? evaluation.feedback ?? evaluation.explanation ?? null,
+    rule: evaluation.rule ?? null,
+    example: evaluation.example ?? null,
+  };
+}
+
+export function flattenPracticeReview(review: PracticeReview | null | undefined): string | null {
+  if (!review) return null;
+  const parts = [review.summary, review.rule, review.example].filter((part): part is string =>
+    Boolean(part?.trim()),
+  );
+  return parts.length > 0 ? parts.join(" ") : null;
+}
 
 export async function generatePhrases(constraints: PhraseConstraints): Promise<GeneratedPhrase[]> {
   const payload = await apiPost<{ phrases: GeneratedPhrase[] }>(
@@ -584,6 +642,8 @@ export type AskTeacherParams = {
   userAnswer?: string;
   direction?: "fr-to-jp" | "jp-to-fr";
   mode?: "phrases" | "construction" | "jlpt" | "conjugaison" | "dialogue" | "ecoute";
+  errorType?: string | null;
+  feedback?: string | null;
   history?: AskTeacherTurn[];
 };
 
@@ -790,6 +850,9 @@ export type ConjugationEvaluation = {
   isCorrect: boolean;
   correctedAnswer: string;
   explanation: string;
+  summary?: string | null;
+  rule?: string | null;
+  example?: string | null;
   xpAward?: XpAward | null;
 };
 
@@ -984,12 +1047,114 @@ export async function evaluateListening(
   );
 }
 
+export type CatalogUserState = "idle" | "queued" | "learning" | "known";
+
+export type CatalogEntry = {
+  id: number;
+  jlpt_level: string;
+  kanji: string | null;
+  kana: string;
+  romaji: string | null;
+  french: string;
+  sense_context: string | null;
+  mnemonic: string | null;
+  kanji_breakdown: CatalogKanjiPart[];
+  examples: WordExample[];
+  confusion_group: string | null;
+  sort_order: number;
+  state: CatalogUserState;
+  word_id: number | null;
+};
+
+export type CatalogPayload = {
+  entries: CatalogEntry[];
+  queuedCount: number;
+  jlptTagId: number | null;
+};
+
+export async function fetchCatalog(query = "", level = "N5"): Promise<CatalogPayload> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (level) params.set("level", level);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiGet<CatalogPayload>(`/api/catalog${suffix}`);
+}
+
+export async function queueCatalogEntry(
+  catalogId: number,
+): Promise<{ queuedCount: number; jlptTagId?: number | null }> {
+  return apiPost<{ queuedCount: number; jlptTagId?: number | null }>(
+    `/api/catalog/${catalogId}/queue`,
+    {},
+  );
+}
+
+export async function queueCatalogBatch(
+  catalogIds: number[],
+  action: "queue" | "unqueue",
+): Promise<{ queuedCount: number; jlptTagId: number | null }> {
+  return apiPost<{ queuedCount: number; jlptTagId: number | null }>("/api/catalog/queue-batch", {
+    catalogIds,
+    action,
+  });
+}
+
+export async function unqueueCatalogEntry(
+  catalogId: number,
+): Promise<{ queuedCount: number; jlptTagId?: number | null }> {
+  const response = await fetch(`/api/catalog/${catalogId}/queue`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, `Erreur serveur (${response.status})`);
+    throw new Error(message);
+  }
+  return safeJson<{ queuedCount: number; jlptTagId?: number | null }>(response);
+}
+
+export type PlacementQuestion = {
+  index: number;
+  catalogId: number;
+  kanji: string | null;
+  kana: string;
+  choices: string[];
+};
+
+export async function fetchPlacementQuestions(): Promise<PlacementQuestion[]> {
+  const payload = await apiGet<{ questions: PlacementQuestion[] }>("/api/placement");
+  return payload.questions;
+}
+
+export async function skipPlacement(): Promise<User> {
+  const payload = await apiPost<{ user: User }>("/api/placement/skip", {});
+  return payload.user;
+}
+
+export async function submitPlacement(
+  answers: Array<{ catalogId: number; choice: string }>,
+): Promise<{
+  correctCount: number;
+  total: number;
+  placementLevel: string;
+  knownCount: number;
+  user: User;
+}> {
+  return apiPost("/api/placement/submit", { answers });
+}
+
 // --- Reading / Lecture ---
 
 export type ReadingParagraph = {
   japanese: string;
   french: string;
-  words: Array<{ text: string; reading: string; meaning: string }>;
+  words: Array<{
+    text: string;
+    reading: string;
+    meaning: string;
+    catalogEntryId?: number | null;
+    catalogState?: CatalogUserState | null;
+  }>;
 };
 
 export type ReadingQuestion = {

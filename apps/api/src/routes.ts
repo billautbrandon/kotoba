@@ -10,6 +10,22 @@ import type { Request } from "express";
 import { SchemaType } from "@google/generative-ai";
 import { type PublicUser, hashPassword, verifyPassword } from "./auth.js";
 import {
+  copyCatalogEntryToUser,
+  findCatalogIdBySurface,
+  getJlptTagId,
+  getQueuedCount,
+  introduceCurriculumWords,
+  kanaHintFromReading,
+  loadConfusionSiblings,
+  parseCatalogBreakdown,
+  pickMcChoices,
+  pickPlacementQuestions,
+  queueCatalogEntriesBatch,
+  searchCatalog,
+  unqueueCatalogEntry,
+  userHasCatalogProgress,
+} from "./catalog.js";
+import {
   type BadgeDefinition,
   type ReviewResult,
   type WordStatsRow,
@@ -41,6 +57,54 @@ import {
   levelFromXp,
 } from "./xp.js";
 
+type StructuredPracticeFeedback = {
+  summary: string | null;
+  rule: string | null;
+  example: string | null;
+};
+
+function flattenPracticeFeedback(feedback: StructuredPracticeFeedback): string | null {
+  const parts = [feedback.summary, feedback.rule, feedback.example].filter((part): part is string =>
+    Boolean(part?.trim()),
+  );
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
+function exactMatchPracticeFeedback(): StructuredPracticeFeedback {
+  return { summary: "C’est exact.", rule: null, example: null };
+}
+
+function structuredPracticeFeedbackFromEval(evaluation: {
+  isCorrect?: boolean;
+  feedback?: string | null;
+  summary?: string | null;
+  rule?: string | null;
+  example?: string | null;
+  explanation?: string | null;
+}): StructuredPracticeFeedback {
+  const summary =
+    evaluation.summary?.trim() ||
+    evaluation.feedback?.trim() ||
+    evaluation.explanation?.trim() ||
+    (evaluation.isCorrect ? "C’est exact." : null);
+  return {
+    summary,
+    rule: evaluation.rule?.trim() || null,
+    example: evaluation.example?.trim() || null,
+  };
+}
+
+function practiceFeedbackFields(
+  feedback: StructuredPracticeFeedback,
+): StructuredPracticeFeedback & {
+  feedback: string | null;
+} {
+  return {
+    ...feedback,
+    feedback: flattenPracticeFeedback(feedback),
+  };
+}
+
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
   const wrapAsync =
     (
@@ -69,7 +133,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   }
 
   const PUBLIC_USER_COLUMNS =
-    "id, username, email, avatar_url, display_name, COALESCE(is_admin, 0) as is_admin, COALESCE(xp, 0) as xp, created_at";
+    "id, username, email, avatar_url, display_name, COALESCE(is_admin, 0) as is_admin, COALESCE(xp, 0) as xp, created_at, placement_level, placement_completed_at";
 
   function formatPublicUser(row: {
     id: number;
@@ -80,6 +144,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     is_admin: number;
     xp: number;
     created_at: string;
+    placement_level: string | null;
+    placement_completed_at: string | null;
   }): PublicUser {
     const progress = levelFromXp(row.xp);
     return {
@@ -94,6 +160,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       xpInLevel: progress.xpInLevel,
       xpForNextLevel: progress.xpForNextLevel,
       created_at: row.created_at,
+      placement_level: row.placement_level,
+      placement_completed_at: row.placement_completed_at,
     };
   }
 
@@ -110,6 +178,8 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           is_admin: number;
           xp: number;
           created_at: string;
+          placement_level: string | null;
+          placement_completed_at: string | null;
         }
       | undefined;
     if (!userRow) return undefined;
@@ -574,6 +644,12 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           w.note,
           w.examples,
           w.created_at,
+          w.catalog_entry_id,
+          c.jlpt_level,
+          c.sense_context,
+          c.mnemonic,
+          c.kanji_breakdown,
+          c.confusion_group,
           COALESCE(s.success_count, 0) AS success_count,
           COALESCE(s.partial_count, 0) AS partial_count,
           COALESCE(s.fail_count, 0) AS fail_count,
@@ -583,6 +659,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           GROUP_CONCAT(t.id || ':' || t.name, '||') AS tags_concat
         FROM words w
         LEFT JOIN word_stats s ON s.word_id = w.id
+        LEFT JOIN catalog_entries c ON c.id = w.catalog_entry_id
         LEFT JOIN word_tags wt ON wt.word_id = w.id
         LEFT JOIN tags t ON t.id = wt.tag_id AND t.user_id = ?
         WHERE w.user_id = ?
@@ -595,7 +672,13 @@ export function registerApiRoutes(app: import("express").Express, database: Data
     const wordsWithOptionalTags = rows.map((row): WordWithStatsColumns | WordWithStatsAndTags => {
       const parsedTags = parseTagsConcat(row.tags_concat);
       const { tags_concat, ...restRow } = row satisfies WordJoinedRow;
-      const rowWithExamples = { ...restRow, examples: parseExamples(restRow.examples) };
+      const rowWithExamples = {
+        ...restRow,
+        examples: parseExamples(restRow.examples),
+        kanji_breakdown: parseCatalogBreakdown(
+          (restRow as { kanji_breakdown?: string | null }).kanji_breakdown ?? null,
+        ),
+      };
       if (!includeTags) {
         return rowWithExamples;
       }
@@ -1081,7 +1164,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
 
     const existingStats = database
       .prepare(
-        "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step FROM word_stats WHERE word_id = ?",
+        "SELECT word_id, success_count, partial_count, fail_count, score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step, COALESCE(intro_stage, 0) AS intro_stage, queued_at FROM word_stats WHERE word_id = ?",
       )
       .get(body.wordId) as WordStatsRow | undefined;
 
@@ -1095,7 +1178,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       .prepare(
         `UPDATE word_stats
          SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?,
-             consecutive_success_count = ?, srs_interval = ?, srs_ease_factor = ?, srs_next_review_at = ?, srs_step = ?
+             consecutive_success_count = ?, srs_interval = ?, srs_ease_factor = ?, srs_next_review_at = ?, srs_step = ?,
+             intro_stage = ?, queued_at = ?
          WHERE word_id = ?`,
       )
       .run(
@@ -1109,6 +1193,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
         updatedStats.srs_ease_factor,
         updatedStats.srs_next_review_at,
         updatedStats.srs_step,
+        updatedStats.intro_stage,
+        updatedStats.queued_at,
         updatedStats.word_id,
       );
 
@@ -1168,7 +1254,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       "SELECT 1 FROM words WHERE id = ? AND user_id = ?",
     );
     const selectStatsStatement = database.prepare(
-      "SELECT word_id, COALESCE(success_count, 0) AS success_count, COALESCE(partial_count, 0) AS partial_count, COALESCE(fail_count, 0) AS fail_count, COALESCE(score, 0) AS score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step FROM word_stats WHERE word_id = ?",
+      "SELECT word_id, COALESCE(success_count, 0) AS success_count, COALESCE(partial_count, 0) AS partial_count, COALESCE(fail_count, 0) AS fail_count, COALESCE(score, 0) AS score, last_reviewed_at, COALESCE(consecutive_success_count, 0) AS consecutive_success_count, COALESCE(srs_interval, 0) AS srs_interval, COALESCE(srs_ease_factor, 2.5) AS srs_ease_factor, srs_next_review_at, COALESCE(srs_step, 0) AS srs_step, COALESCE(intro_stage, 0) AS intro_stage, queued_at FROM word_stats WHERE word_id = ?",
     );
     const upsertStatsStatement = database.prepare(
       "INSERT OR IGNORE INTO word_stats (word_id) VALUES (?)",
@@ -1176,7 +1262,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
     const updateStatsStatement = database.prepare(
       `UPDATE word_stats
        SET success_count = ?, partial_count = ?, fail_count = ?, score = ?, last_reviewed_at = ?,
-           consecutive_success_count = ?, srs_interval = ?, srs_ease_factor = ?, srs_next_review_at = ?, srs_step = ?
+           consecutive_success_count = ?, srs_interval = ?, srs_ease_factor = ?, srs_next_review_at = ?, srs_step = ?,
+           intro_stage = ?, queued_at = ?
        WHERE word_id = ?`,
     );
 
@@ -1209,6 +1296,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
           updatedStats.srs_ease_factor,
           updatedStats.srs_next_review_at,
           updatedStats.srs_step,
+          updatedStats.intro_stage,
+          updatedStats.queued_at,
           updatedStats.word_id,
         );
         appliedCount += 1;
@@ -1326,15 +1415,23 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
           w.note,
           w.examples,
           w.created_at,
+          w.catalog_entry_id,
+          c.jlpt_level,
+          c.sense_context,
+          c.mnemonic,
+          c.kanji_breakdown,
+          c.confusion_group,
           COALESCE(s.success_count, 0) AS success_count,
           COALESCE(s.partial_count, 0) AS partial_count,
           COALESCE(s.fail_count, 0) AS fail_count,
           COALESCE(s.score, 0) AS score,
-          s.last_reviewed_at AS last_reviewed_at
+          s.last_reviewed_at AS last_reviewed_at,
+          COALESCE(s.intro_stage, 0) AS intro_stage
         FROM words w
         INNER JOIN word_tags wt ON wt.word_id = w.id
         INNER JOIN tags t ON t.id = wt.tag_id
         LEFT JOIN word_stats s ON s.word_id = w.id
+        LEFT JOIN catalog_entries c ON c.id = w.catalog_entry_id
         WHERE wt.tag_id IN (${placeholders}) AND w.user_id = ? AND t.user_id = ?
         GROUP BY w.id
         ORDER BY w.id DESC
@@ -1344,7 +1441,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       Record<string, unknown> & { examples: string | null }
     >;
 
-    const words = rows.map((row) => ({ ...row, examples: parseExamples(row.examples) }));
+    const words = rows.map((row) => mapDueWord(userId, row));
     res.json({ words });
   });
 
@@ -1368,22 +1465,30 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
           w.note,
           w.examples,
           w.created_at,
+          w.catalog_entry_id,
+          c.jlpt_level,
+          c.sense_context,
+          c.mnemonic,
+          c.kanji_breakdown,
+          c.confusion_group,
           COALESCE(s.success_count, 0) AS success_count,
           COALESCE(s.partial_count, 0) AS partial_count,
           COALESCE(s.fail_count, 0) AS fail_count,
           COALESCE(s.score, 0) AS score,
-          s.last_reviewed_at AS last_reviewed_at
+          s.last_reviewed_at AS last_reviewed_at,
+          COALESCE(s.intro_stage, 0) AS intro_stage
         FROM words w
         INNER JOIN word_tags wt ON wt.word_id = w.id
         INNER JOIN tags t ON t.id = wt.tag_id
         LEFT JOIN word_stats s ON s.word_id = w.id
+        LEFT JOIN catalog_entries c ON c.id = w.catalog_entry_id
         WHERE wt.tag_id = ? AND w.user_id = ? AND t.user_id = ?
         ORDER BY w.id DESC
       `,
       )
       .all(tagId, userId, userId) as Array<Record<string, unknown> & { examples: string | null }>;
 
-    const words = rows.map((row) => ({ ...row, examples: parseExamples(row.examples) }));
+    const words = rows.map((row) => mapDueWord(userId, row));
     res.json({ words });
   });
 
@@ -1444,15 +1549,59 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       w.note,
       w.examples,
       w.created_at,
+      w.catalog_entry_id,
+      c.jlpt_level,
+      c.sense_context,
+      c.mnemonic,
+      c.kanji_breakdown,
+      c.confusion_group,
       COALESCE(s.success_count, 0) AS success_count,
       COALESCE(s.partial_count, 0) AS partial_count,
       COALESCE(s.fail_count, 0) AS fail_count,
       COALESCE(s.score, 0) AS score,
       s.last_reviewed_at AS last_reviewed_at,
-      COALESCE(s.consecutive_success_count, 0) AS consecutive_success_count
+      COALESCE(s.consecutive_success_count, 0) AS consecutive_success_count,
+      COALESCE(s.intro_stage, 0) AS intro_stage,
+      s.queued_at AS queued_at
     FROM words w
     LEFT JOIN word_stats s ON s.word_id = w.id
+    LEFT JOIN catalog_entries c ON c.id = w.catalog_entry_id
   `;
+
+  function mapDueWord(userId: number, row: unknown) {
+    const wordRow = row as Record<string, unknown> & {
+      examples: string | null;
+      kanji_breakdown: string | null;
+      catalog_entry_id: number | null;
+      confusion_group: string | null;
+      intro_stage: number;
+      id: number;
+      french: string;
+      kana: string | null;
+    };
+    const introStage = Number(wordRow.intro_stage ?? 0);
+    return {
+      ...wordRow,
+      examples: parseExamples(wordRow.examples),
+      kanji_breakdown: parseCatalogBreakdown(wordRow.kanji_breakdown),
+      mcChoices:
+        introStage < 5
+          ? pickMcChoices(
+              database,
+              wordRow.catalog_entry_id,
+              wordRow.french,
+              wordRow.confusion_group,
+            )
+          : [],
+      kanaHint: introStage < 5 ? kanaHintFromReading(wordRow.kana) : null,
+      confusionSiblings: loadConfusionSiblings(
+        database,
+        userId,
+        wordRow.confusion_group,
+        wordRow.id,
+      ),
+    };
+  }
 
   app.get("/api/srs/words", (req, res) => {
     const userId = getRequiredUserId(req);
@@ -1569,20 +1718,65 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       )
     `;
 
-    const dueWords = database
+    const queuedWords = database
       .prepare(
         `${srsWordSelect}
+           WHERE w.user_id = ?
+             AND s.queued_at IS NOT NULL
+             AND COALESCE(s.intro_stage, 0) = 0
+             AND s.srs_next_review_at IS NULL
+           ORDER BY s.queued_at ASC
+           LIMIT ?`,
+      )
+      .all(userId, dueLimit);
+
+    const selectedIds = new Set((queuedWords as Array<{ id: number }>).map((row) => row.id));
+    const remainingAfterQueue = Math.max(0, dueLimit - queuedWords.length);
+
+    const dueWords =
+      remainingAfterQueue > 0
+        ? database
+            .prepare(
+              `${srsWordSelect}
            WHERE w.user_id = ?
              AND s.srs_next_review_at IS NOT NULL
              AND s.srs_next_review_at <= ?
            ORDER BY s.srs_next_review_at ASC
            LIMIT ?`,
-      )
-      .all(userId, nowIso, dueLimit);
+            )
+            .all(userId, nowIso, remainingAfterQueue)
+            .filter((row) => !selectedIds.has((row as { id: number }).id))
+        : [];
+    for (const row of dueWords as Array<{ id: number }>) selectedIds.add(row.id);
 
-    const remainingSlots = requestedLimit ? Math.max(0, requestedLimit - dueWords.length) : 20;
-    const newLimit = Math.min(20, remainingSlots);
+    let remainingSlots = Math.max(0, dueLimit - selectedIds.size);
+    const curriculumRows: unknown[] = [];
+    if (remainingSlots > 0 && userHasCatalogProgress(database, userId)) {
+      const dailyGoalRow = database
+        .prepare("SELECT COALESCE(daily_goal, 20) AS daily_goal FROM users WHERE id = ?")
+        .get(userId) as { daily_goal: number };
+      const curriculumLimit = Math.min(remainingSlots, Math.min(20, dailyGoalRow.daily_goal));
+      introduceCurriculumWords(database, userId, curriculumLimit);
+      const curriculumWords = database
+        .prepare(
+          `${srsWordSelect}
+           WHERE w.user_id = ?
+             AND w.catalog_entry_id IS NOT NULL
+             AND (s.word_id IS NULL OR (COALESCE(s.intro_stage, 0) = 0 AND s.srs_next_review_at IS NULL AND s.queued_at IS NULL))
+           ORDER BY c.sort_order ASC
+           LIMIT ?`,
+        )
+        .all(userId, remainingSlots) as Array<{ id: number }>;
+      for (const row of curriculumWords) {
+        if (!selectedIds.has(row.id)) {
+          curriculumRows.push(row);
+          selectedIds.add(row.id);
+        }
+      }
+      remainingSlots = Math.max(0, dueLimit - selectedIds.size);
+    }
 
+    const newLimit = requestedLimit ? remainingSlots : Math.min(20, remainingSlots);
     const newWords =
       newLimit > 0
         ? database
@@ -1590,6 +1784,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
               `${srsWordSelect}
            WHERE w.user_id = ?
              AND (s.word_id IS NULL OR (COALESCE(s.srs_step, 0) = 0 AND s.srs_next_review_at IS NULL))
+             AND (s.queued_at IS NULL)
+             AND w.catalog_entry_id IS NULL
              ${startedSeriesFilter}
            ORDER BY w.id ASC
            LIMIT ?`,
@@ -1597,10 +1793,9 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
             .all(userId, newLimit)
         : [];
 
-    const allDueWords = [...dueWords, ...newWords].map((row) => {
-      const wordRow = row as Record<string, unknown> & { examples: string | null };
-      return { ...wordRow, examples: parseExamples(wordRow.examples) };
-    });
+    const allDueWords = [...queuedWords, ...dueWords, ...curriculumRows, ...newWords].map((row) =>
+      mapDueWord(userId, row),
+    );
     res.json({ words: allDueWords, dueCount: allDueWords.length });
   });
 
@@ -1660,9 +1855,12 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       )
       .get(userId) as { count: number };
 
+    const queuedCount = getQueuedCount(database, userId);
+
     res.json({
-      dueCount: dueRow.count + newRow.count,
-      newCount: newRow.count,
+      dueCount: dueRow.count + newRow.count + queuedCount,
+      newCount: newRow.count + queuedCount,
+      queuedCount,
       learningCount: learningRow.count,
       graduatedCount: graduatedRow.count,
       masteredCount: masteredRow.count,
@@ -1961,6 +2159,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
         is_admin: number;
         xp: number;
         created_at: string;
+        placement_level: string | null;
+        placement_completed_at: string | null;
       }>;
       res.json({ users: users.map((row) => formatPublicUser(row)) });
     }),
@@ -2224,7 +2424,15 @@ Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qu
       const normalizedExpected = body.expectedAnswer.trim().normalize("NFKC");
 
       if (normalizedUser === normalizedExpected) {
-        res.json(practiceEvalPayload(userId, { isCorrect: true, feedback: null, errorType: null }));
+        res.json(
+          practiceEvalPayload(userId, {
+            isCorrect: true,
+            retryable: false,
+            hint: null,
+            errorType: null,
+            ...practiceFeedbackFields(exactMatchPracticeFeedback()),
+          }),
+        );
         return;
       }
 
@@ -2236,13 +2444,13 @@ Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qu
         : "";
 
       const pedagogicalRules = `Règles de classification (très important) :
-- "correct" : la réponse est juste ou pleinement acceptable (synonymes, romaji phonétiquement exact, kana au lieu de kanji). isCorrect=true, retryable=false, hint=null.
-- "almost" : le SENS est bon, mais il y a une petite erreur (particule, conjugaison, un mot proche, politesse, ordre). Donne une seconde chance. isCorrect=false, retryable=true. Le champ hint est un indice court qui N'EN DONNE PAS la phrase complète (ex. "Regarde la particule après 本"). feedback=null.
-- "wrong" : le sens est faux, ou trop d'erreurs. isCorrect=false, retryable=false, hint=null. Le feedback corrige directement :
-  1. Une phrase qui identifie l'erreur.
-  2. Une phrase qui explique la règle.
-  3. Une phrase facultative avec un exemple court.
-- Style : professeur clair, posé. Aucun emoji, pas de "Bravo". Maximum 3 phrases pour hint ou feedback.`;
+- "correct" : la réponse est juste ou pleinement acceptable (synonymes, romaji phonétiquement exact, kana au lieu de kanji). isCorrect=true, retryable=false, hint=null. summary = une phrase qui valide (et éventuellement la lecture). rule et example restent null.
+- "almost" : le SENS est bon, mais il y a une petite erreur (particule, conjugaison, un mot proche, politesse, ordre). Donne une seconde chance. isCorrect=false, retryable=true. hint = un indice court qui N'EN DONNE PAS la phrase complète. summary, rule et example restent null.
+- "wrong" : le sens est faux, ou trop d'erreurs. isCorrect=false, retryable=false, hint=null.
+  summary = une phrase qui identifie l'erreur.
+  rule = une phrase qui explique la règle.
+  example = une phrase facultative avec un exemple court, sinon null.
+- Style : professeur clair, posé. Aucun emoji, pas de "Bravo". Maximum une phrase par champ.`;
 
       const prompt = isJpToFr
         ? `Tu es un professeur de japonais expérimenté qui corrige le devoir d'un élève. Un élève devait traduire cette phrase japonaise en français :
@@ -2252,7 +2460,7 @@ Réponse attendue (français) : "${body.expectedAnswer}"
 Réponse de l'élève : "${body.userAnswer}"
 
 Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cette structure exacte :
-{"isCorrect": false, "retryable": true, "errorType": "vocabulary|grammar|meaning|other", "hint": "Indice sans donner la réponse", "feedback": null}
+{"isCorrect": false, "retryable": true, "errorType": "vocabulary|grammar|meaning|other", "hint": "Indice sans donner la réponse", "summary": null, "rule": null, "example": null}
 
 Règles de classification :
 - Si la réponse est correcte ou acceptable (même formulée différemment ou avec des synonymes), mets isCorrect à true et errorType à null.
@@ -2267,7 +2475,7 @@ Réponse attendue : "${body.expectedAnswer}"
 Réponse de l'élève : "${body.userAnswer}"
 
 Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cette structure exacte :
-{"isCorrect": false, "retryable": true, "errorType": "particle|conjugation|kanji|other", "hint": "Indice sans donner la réponse", "feedback": null}
+{"isCorrect": false, "retryable": true, "errorType": "particle|conjugation|kanji|other", "hint": "Indice sans donner la réponse", "summary": null, "rule": null, "example": null}
 
 Règles de classification :
 - Si la réponse est correcte ou acceptable (même formulée différemment), mets isCorrect à true et errorType à null.
@@ -2283,6 +2491,9 @@ ${pedagogicalRules}`;
         errorType: z.string().nullable().optional(),
         hint: z.string().nullable().optional(),
         feedback: z.string().nullable().optional(),
+        summary: z.string().nullable().optional(),
+        rule: z.string().nullable().optional(),
+        example: z.string().nullable().optional(),
       });
       type EvalResult = z.infer<typeof phraseEvalSchema>;
 
@@ -2295,6 +2506,9 @@ ${pedagogicalRules}`;
             errorType: { type: SchemaType.STRING, nullable: true },
             hint: { type: SchemaType.STRING, nullable: true },
             feedback: { type: SchemaType.STRING, nullable: true },
+            summary: { type: SchemaType.STRING, nullable: true },
+            rule: { type: SchemaType.STRING, nullable: true },
+            example: { type: SchemaType.STRING, nullable: true },
           },
           required: ["isCorrect"],
         },
@@ -2314,13 +2528,18 @@ ${pedagogicalRules}`;
             .run(userId, evaluation.errorType, "phrases");
         }
 
+        const structured = retryable
+          ? { summary: null, rule: null, example: null }
+          : structuredPracticeFeedbackFromEval({ ...evaluation, isCorrect });
         res.json(
           practiceEvalPayload(userId, {
             isCorrect,
             retryable,
-            hint: retryable ? (evaluation.hint ?? evaluation.feedback ?? null) : null,
-            feedback: retryable ? null : (evaluation.feedback ?? null),
+            hint: retryable
+              ? (evaluation.hint ?? evaluation.feedback ?? evaluation.summary ?? null)
+              : null,
             errorType: evaluation.errorType ?? null,
+            ...practiceFeedbackFields(structured),
           }),
         );
       } catch (error) {
@@ -2590,7 +2809,11 @@ ${body.customContext ? `Contexte additionnel de l'élève : ${body.customContext
         expectedAnswer: z.string().min(1),
         userAnswer: z.string().max(2000).optional().default(""),
         direction: z.enum(["fr-to-jp", "jp-to-fr"]).optional(),
-        mode: z.enum(["phrases", "construction", "jlpt", "conjugaison", "dialogue"]).optional(),
+        mode: z
+          .enum(["phrases", "construction", "jlpt", "conjugaison", "dialogue", "ecoute"])
+          .optional(),
+        errorType: z.string().max(40).nullable().optional(),
+        feedback: z.string().max(2000).nullable().optional(),
         history: z
           .array(
             z.object({
@@ -2628,7 +2851,13 @@ Réponse correcte : "${body.expectedAnswer}"${
         body.userAnswer.trim().length > 0
           ? `\nRéponse en cours de l'élève : "${body.userAnswer}"`
           : ""
-      }${directionLabel ? `\nDirection : ${directionLabel}` : ""}
+      }${directionLabel ? `\nDirection : ${directionLabel}` : ""}${
+        body.errorType ? `\nType d'erreur identifié : ${body.errorType}` : ""
+      }${
+        body.feedback?.trim()
+          ? `\nCorrection déjà donnée à l'élève : "${body.feedback.trim()}"`
+          : ""
+      }
 ${historyBlock}
 Question de l'élève : "${body.question}"
 
@@ -2868,7 +3097,11 @@ Le champ used_words_fr contient les mots français du vocabulaire cible utilisé
         res.json(
           practiceEvalPayload(
             userId,
-            { isCorrect: true, feedback: null, errorType: null },
+            {
+              isCorrect: true,
+              errorType: null,
+              ...practiceFeedbackFields(exactMatchPracticeFeedback()),
+            },
             { dialogue: true },
           ),
         );
@@ -3088,7 +3321,15 @@ ${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le a
       const normalizedExpected = body.expectedAnswer.trim().normalize("NFKC");
 
       if (normalizedUser === normalizedExpected) {
-        res.json(practiceEvalPayload(userId, { isCorrect: true, feedback: null, errorType: null }));
+        res.json(
+          practiceEvalPayload(userId, {
+            isCorrect: true,
+            retryable: false,
+            hint: null,
+            errorType: null,
+            ...practiceFeedbackFields(exactMatchPracticeFeedback()),
+          }),
+        );
         return;
       }
 
@@ -3100,11 +3341,10 @@ ${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le a
         : "";
 
       const jlptPedagogicalRules = `Règles de feedback :
-- Si la réponse est correcte ou acceptable, mets isCorrect à true et feedback à une phrase brève qui valide la réponse.
-- Si la réponse est incorrecte, le feedback doit suivre cet ordre, sans titres ni emojis ni symboles décoratifs : (1) une phrase qui identifie précisément l'erreur, (2) une phrase qui explique la règle grammaticale ou lexicale concernée, (3) une phrase facultative avec un exemple court.
-- Style attendu : ton de professeur en classe — clair, direct, posé, professionnel. Pas de flagornerie, pas d'exclamations.
-- Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif (💚, 🎯, 📝, ✓, ✗, etc.).
-- Maximum 4 phrases. Le feedback est en français.`;
+- Si la réponse est correcte ou acceptable, mets isCorrect à true, errorType à null, summary à une phrase qui valide la réponse, rule et example à null.
+- Si la réponse est incorrecte : summary identifie l'erreur, rule explique la règle, example est un exemple court ou null.
+- Style attendu : ton de professeur en classe — clair, direct, posé. Pas d'emoji, pas de "Bravo".
+- Maximum une phrase par champ. Le texte est en français.`;
 
       const evalPrompt = isJpToFr
         ? `Tu es un professeur de japonais expérimenté (niveau JLPT N5) qui corrige le devoir d'un élève. Un élève devait traduire du japonais vers le français :
@@ -3114,7 +3354,7 @@ Réponse attendue (français) : "${body.expectedAnswer}"
 Réponse de l'élève : "${body.userAnswer}"
 
 Réponds UNIQUEMENT au format JSON :
-{"isCorrect": false, "errorType": "vocabulary|grammar|meaning|other", "feedback": "Conseil pédagogique"}
+{"isCorrect": false, "errorType": "vocabulary|grammar|meaning|other", "summary": "Erreur identifiée", "rule": "Règle", "example": null}
 
 Sois tolérant sur les formulations françaises si le sens est correct.
 
@@ -3126,7 +3366,7 @@ Réponse attendue (japonais) : "${body.expectedAnswer}"
 Réponse de l'élève : "${body.userAnswer}"
 
 Réponds UNIQUEMENT au format JSON :
-{"isCorrect": false, "errorType": "particle|conjugation|kanji|other", "feedback": "Conseil pédagogique"}
+{"isCorrect": false, "errorType": "particle|conjugation|kanji|other", "summary": "Erreur identifiée", "rule": "Règle", "example": null}
 
 Si la réponse est en kana au lieu de kanji mais correcte, accepte-la.
 L'élève peut aussi écrire en romaji ; si la transcription phonétique correspond à la réponse attendue, considère-la comme correcte.${jlptRomajiNote}
@@ -3137,6 +3377,9 @@ ${jlptPedagogicalRules}`;
         isCorrect: boolean;
         errorType: string | null;
         feedback: string | null;
+        summary?: string | null;
+        rule?: string | null;
+        example?: string | null;
       };
 
       try {
@@ -3149,11 +3392,14 @@ ${jlptPedagogicalRules}`;
             .run(userId, evaluation.errorType, "jlpt");
         }
 
+        const isCorrect = evaluation.isCorrect ?? false;
         res.json(
           practiceEvalPayload(userId, {
-            isCorrect: evaluation.isCorrect ?? false,
-            feedback: evaluation.feedback ?? null,
+            isCorrect,
             errorType: evaluation.errorType ?? null,
+            ...practiceFeedbackFields(
+              structuredPracticeFeedbackFromEval({ ...evaluation, isCorrect }),
+            ),
           }),
         );
       } catch (error) {
@@ -3421,25 +3667,33 @@ Réponse attendue : ${body.expected}
 Réponse de l'élève : ${body.userAnswer}
 
 Évalue la réponse. Retourne un objet JSON :
-{ "isCorrect": true/false, "correctedAnswer": "la réponse correcte", "explanation": "explication courte" }
+{ "isCorrect": true/false, "correctedAnswer": "la réponse correcte", "summary": "erreur ou validation", "rule": "règle de conjugaison ou null", "example": "exemple court ou null" }
 
-Règles pour le champ explanation :
-- Si la réponse est correcte, une phrase brève qui valide et précise éventuellement la règle de conjugaison appliquée.
-- Si la réponse est incorrecte : une phrase qui identifie l'erreur, puis une phrase qui rappelle la règle de conjugaison applicable. Une phrase d'exemple court est facultative.
-- Style attendu : ton de professeur — clair, direct, posé, professionnel.
-- Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif. Pas de "Bravo !", pas d'exclamations enthousiastes.
-- Maximum 3 phrases.`;
+Règles :
+- Si la réponse est correcte, summary valide et précise éventuellement la forme. rule/example facultatifs.
+- Si la réponse est incorrecte : summary identifie l'erreur, rule rappelle la conjugaison, example est facultatif.
+- Style : professeur clair, posé. Aucun emoji, pas de "Bravo".
+- Maximum une phrase par champ.`;
 
       incrementGeminiUsage(database);
       const evaluation = (await callGeminiJson(geminiPrompt)) as {
         isCorrect?: boolean;
         correctedAnswer?: string;
         explanation?: string;
+        summary?: string | null;
+        rule?: string | null;
+        example?: string | null;
       };
       const isCorrect = Boolean(evaluation.isCorrect);
+      const structured = structuredPracticeFeedbackFromEval({ ...evaluation, isCorrect });
       const xpAward = isCorrect ? grantXp(database, userId, XP_PRACTICE_CORRECT) : null;
       res.json({
-        evaluation: { ...evaluation, isCorrect },
+        evaluation: {
+          isCorrect,
+          correctedAnswer: evaluation.correctedAnswer ?? body.expected,
+          explanation: flattenPracticeFeedback(structured) ?? evaluation.explanation ?? "",
+          ...structured,
+        },
         quota: getGeminiQuota(database),
         xpAward,
       });
@@ -4032,7 +4286,15 @@ Réponds UNIQUEMENT au format JSON :
       const normalizedUser = body.userTranscript.trim().normalize("NFKC");
       const normalizedExpected = body.expectedJapanese.trim().normalize("NFKC");
       if (normalizedUser === normalizedExpected) {
-        res.json(practiceEvalPayload(userId, { isCorrect: true, feedback: null, errorType: null }));
+        res.json(
+          practiceEvalPayload(userId, {
+            isCorrect: true,
+            retryable: false,
+            hint: null,
+            errorType: null,
+            ...practiceFeedbackFields(exactMatchPracticeFeedback()),
+          }),
+        );
         return;
       }
 
@@ -4043,19 +4305,22 @@ Traduction française : "${body.frenchTranslation}"
 Ce que l'élève a écrit : "${body.userTranscript}"
 
 Analyse et réponds UNIQUEMENT au format JSON :
-{"isCorrect": false, "errorType": "kanji|kana|vocabulary|other", "feedback": "Ton conseil"}
+{"isCorrect": false, "errorType": "kanji|kana|vocabulary|other", "summary": "Erreur identifiée", "rule": "Règle courte ou null", "example": null}
 
 Règles :
-- Si la réponse est correcte ou quasi-identique, mets isCorrect à true.
+- Si la réponse est correcte ou quasi-identique, mets isCorrect à true et summary à une phrase qui valide.
 - Sois tolérant sur les espaces et la ponctuation.
 - Si l'élève a écrit en kana au lieu de kanji mais le contenu est correct, considère comme correct.
-- Feedback : 1-2 phrases max, ton professoral, pas d'emoji.`;
+- summary / rule / example : une phrase max chacun, ton professoral, pas d'emoji.`;
 
       try {
         const evaluation = await callGeminiJson<{
           isCorrect: boolean;
           errorType: string | null;
           feedback: string | null;
+          summary?: string | null;
+          rule?: string | null;
+          example?: string | null;
         }>(prompt);
         incrementGeminiUsage(database);
 
@@ -4067,11 +4332,14 @@ Règles :
             .run(userId, evaluation.errorType);
         }
 
+        const isCorrect = evaluation.isCorrect ?? false;
         res.json(
           practiceEvalPayload(userId, {
-            isCorrect: evaluation.isCorrect ?? false,
-            feedback: evaluation.feedback ?? null,
+            isCorrect,
             errorType: evaluation.errorType ?? null,
+            ...practiceFeedbackFields(
+              structuredPracticeFeedbackFromEval({ ...evaluation, isCorrect }),
+            ),
           }),
         );
       } catch (error) {
@@ -4084,6 +4352,167 @@ Règles :
       }
     }),
   );
+
+  // --- Catalogue N5 ---
+
+  app.get("/api/catalog", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const query = typeof req.query.q === "string" ? req.query.q : "";
+    const level = typeof req.query.level === "string" ? req.query.level : "N5";
+    const entries = searchCatalog(database, userId, query, level);
+    res.json({
+      entries,
+      queuedCount: getQueuedCount(database, userId),
+      jlptTagId: getJlptTagId(database, userId, level),
+    });
+  });
+
+  app.post("/api/catalog/queue-batch", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const parsed = z
+      .object({
+        catalogIds: z.array(z.number().int().positive()).min(1).max(200),
+        action: z.enum(["queue", "unqueue"]),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Requête invalide" });
+      return;
+    }
+    const result = queueCatalogEntriesBatch(
+      database,
+      userId,
+      parsed.data.catalogIds,
+      parsed.data.action,
+    );
+    res.json(result);
+  });
+
+  app.get("/api/catalog/queue", (req, res) => {
+    const userId = getRequiredUserId(req);
+    res.json({
+      queuedCount: getQueuedCount(database, userId),
+      jlptTagId: getJlptTagId(database, userId),
+    });
+  });
+
+  app.post("/api/catalog/:id/queue", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const catalogId = Number(req.params.id);
+    if (!Number.isFinite(catalogId)) {
+      res.status(400).json({ error: "Identifiant invalide" });
+      return;
+    }
+    copyCatalogEntryToUser(database, userId, catalogId, "queue");
+    res.status(201).json({
+      queuedCount: getQueuedCount(database, userId),
+      jlptTagId: getJlptTagId(database, userId),
+    });
+  });
+
+  app.delete("/api/catalog/:id/queue", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const catalogId = Number(req.params.id);
+    if (!Number.isFinite(catalogId)) {
+      res.status(400).json({ error: "Identifiant invalide" });
+      return;
+    }
+    unqueueCatalogEntry(database, userId, catalogId);
+    res.json({
+      queuedCount: getQueuedCount(database, userId),
+      jlptTagId: getJlptTagId(database, userId),
+    });
+  });
+
+  app.get("/api/catalog/match", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const text = typeof req.query.text === "string" ? req.query.text : "";
+    const reading = typeof req.query.reading === "string" ? req.query.reading : "";
+    const catalogId = findCatalogIdBySurface(database, text, reading);
+    if (!catalogId) {
+      res.json({ entry: null });
+      return;
+    }
+    const entries = searchCatalog(database, userId, "");
+    const entry = entries.find((item) => item.id === catalogId) ?? null;
+    res.json({ entry });
+  });
+
+  app.get("/api/placement", (req, res) => {
+    getRequiredUserId(req);
+    const questions = pickPlacementQuestions(database, 10);
+    res.json({
+      questions: questions.map((question, index) => ({
+        index,
+        catalogId: question.catalogId,
+        kanji: question.kanji,
+        kana: question.kana,
+        choices: question.choices,
+      })),
+    });
+  });
+
+  app.post("/api/placement/skip", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const nowIso = new Date().toISOString();
+    database
+      .prepare(
+        "UPDATE users SET placement_level = ?, placement_completed_at = ? WHERE id = ? AND placement_completed_at IS NULL",
+      )
+      .run("N5", nowIso, userId);
+    res.json({ user: loadPublicUser(userId) });
+  });
+
+  app.post("/api/placement/submit", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const bodySchema = z.object({
+      answers: z.array(
+        z.object({
+          catalogId: z.number().int().positive(),
+          choice: z.string().min(1),
+        }),
+      ),
+    });
+    const body = bodySchema.parse(req.body);
+    let correctCount = 0;
+    const correctCatalogIds: number[] = [];
+    for (const answer of body.answers) {
+      const entry = database
+        .prepare("SELECT id, french FROM catalog_entries WHERE id = ?")
+        .get(answer.catalogId) as { id: number; french: string } | undefined;
+      if (!entry) continue;
+      if (entry.french === answer.choice) {
+        correctCount += 1;
+        correctCatalogIds.push(entry.id);
+      }
+    }
+
+    let placementLevel = "N5";
+    if (correctCount >= 8) placementLevel = "N5-ready";
+    else if (correctCount >= 4) placementLevel = "N5";
+
+    if (correctCount >= 4) {
+      const markKnown = database.transaction(() => {
+        for (const catalogId of correctCatalogIds) {
+          copyCatalogEntryToUser(database, userId, catalogId, "known");
+        }
+      });
+      markKnown();
+    }
+
+    const nowIso = new Date().toISOString();
+    database
+      .prepare("UPDATE users SET placement_level = ?, placement_completed_at = ? WHERE id = ?")
+      .run(placementLevel, nowIso, userId);
+
+    res.json({
+      correctCount,
+      total: body.answers.length,
+      placementLevel,
+      knownCount: correctCount >= 4 ? correctCatalogIds.length : 0,
+      user: loadPublicUser(userId),
+    });
+  });
 
   // --- Reading / Lecture ---
 
@@ -4143,6 +4572,11 @@ ${JSON.stringify(
 
 Le texte doit raconter une petite histoire cohérente du quotidien.
 
+Tokenise CHAQUE paragraphe en mots ET particules séparés. Une particule (は, が, を, に, で, と, の, も, へ, から, まで, より, ね, よ, か, です, ます…) ne doit JAMAIS rester collée au mot voisin. Chaque token a :
+- "text" : la forme japonaise
+- "reading" : lecture hiragana
+- "meaning" : sens français (pour une particule : rôle grammatical, ex. « sujet », « objet », « lieu »)
+
 Après le texte, pose 2 questions de compréhension en français.
 
 Réponds UNIQUEMENT au format JSON :
@@ -4151,7 +4585,7 @@ Réponds UNIQUEMENT au format JSON :
     {
       "japanese": "日本語の文",
       "french": "Traduction française",
-      "words": [{"text": "日本語", "reading": "にほんご", "meaning": "japonais"}]
+      "words": [{"text": "私", "reading": "わたし", "meaning": "je"}, {"text": "は", "reading": "は", "meaning": "particule sujet"}]
     }
   ],
   "questions": [
@@ -4175,7 +4609,42 @@ Réponds UNIQUEMENT au format JSON :
           return;
         }
 
-        res.json({ ...result, quota: getGeminiQuota(database) });
+        const paragraphs = result.paragraphs.map((paragraph) => ({
+          ...paragraph,
+          words: (paragraph.words ?? []).map((word) => {
+            const catalogId = findCatalogIdBySurface(database, word.text, word.reading);
+            let catalogState: "idle" | "queued" | "learning" | "known" | null = null;
+            if (catalogId) {
+              const existing = database
+                .prepare(
+                  `SELECT w.id, COALESCE(s.intro_stage, 0) AS intro_stage, s.queued_at, s.srs_next_review_at
+                   FROM words w LEFT JOIN word_stats s ON s.word_id = w.id
+                   WHERE w.user_id = ? AND w.catalog_entry_id = ?`,
+                )
+                .get(userId, catalogId) as
+                | {
+                    id: number;
+                    intro_stage: number;
+                    queued_at: string | null;
+                    srs_next_review_at: string | null;
+                  }
+                | undefined;
+              if (!existing) catalogState = "idle";
+              else if (existing.intro_stage >= 5 && existing.srs_next_review_at)
+                catalogState = "known";
+              else if (
+                existing.queued_at &&
+                existing.intro_stage === 0 &&
+                !existing.srs_next_review_at
+              )
+                catalogState = "queued";
+              else catalogState = "learning";
+            }
+            return { ...word, catalogEntryId: catalogId, catalogState };
+          }),
+        }));
+
+        res.json({ paragraphs, questions: result.questions, quota: getGeminiQuota(database) });
       } catch (error) {
         if (error instanceof GeminiQuotaError) {
           res.status(503).json({ error: "Quota API Gemini atteint." });
