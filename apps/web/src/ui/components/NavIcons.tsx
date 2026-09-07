@@ -182,3 +182,37 @@ export function LayersIcon({ className }: NavIconProps) {
     </svg>
   );
 }
+
+export function ChevronLeftIcon({ className }: NavIconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M15 6 8 12l7 6" />
+    </svg>
+  );
+}
+
+export function ChevronRightIcon({ className }: NavIconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 6l7 6-7 6" />
+    </svg>
+  );
+}

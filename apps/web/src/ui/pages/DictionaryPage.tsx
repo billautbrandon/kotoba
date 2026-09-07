@@ -975,7 +975,7 @@ function WordDetailModal({
           <div className="wordDetailModal__label">Français</div>
           <div className="wordDetailModal__french">{frenchValue}</div>
         </div>
-        {word.note ? (
+        {word.note && word.note !== word.mnemonic ? (
           <div className="wordDetailModal__section">
             <div className="wordDetailModal__label">Note</div>
             <div className="wordDetailModal__note">{word.note}</div>
@@ -987,6 +987,9 @@ function WordDetailModal({
           mnemonic={word.mnemonic}
           breakdown={word.kanji_breakdown}
           examples={word.examples}
+          headwordKanji={word.kanji}
+          headwordKana={word.kana}
+          compact
         />
       </div>
     </div>

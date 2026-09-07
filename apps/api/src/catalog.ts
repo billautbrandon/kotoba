@@ -180,6 +180,7 @@ const KANJI_FR: Record<string, string> = {
   east: "est",
   four: "quatre",
   now: "maintenant",
+  morning: "matin",
   gold: "or",
   nine: "neuf",
   enter: "entrer",
@@ -399,6 +400,12 @@ function loadJsonFile<T>(fileName: string): T {
   return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
 }
 
+function loadOptionalJsonFile<T>(fileName: string, fallback: T): T {
+  const filePath = path.join(dataDirectoryPath, fileName);
+  if (!fs.existsSync(filePath)) return fallback;
+  return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+}
+
 function translateGloss(english: string, glosses: Record<string, string>): string {
   return glosses[english] ?? english;
 }
@@ -419,10 +426,13 @@ function buildKanjiBreakdown(
   for (const character of word) {
     if (!hasKanji(character)) continue;
     const kanjiRow = kanjiByChar.get(character);
+    const fallback = KANJI_CHAR_FALLBACK[character];
     const englishMeaning = kanjiRow?.meanings[0] ?? "";
     const meaning =
-      KANJI_FR[englishMeaning] ?? (translateGloss(englishMeaning, glosses) || "kanji");
-    const reading = kanjiRow?.kunyomi[0]?.replace(/[.-]/g, "") || kana;
+      fallback?.meaning ??
+      KANJI_FR[englishMeaning] ??
+      (translateGloss(englishMeaning, glosses) || "kanji");
+    const reading = readingForKanjiCharacter(character, kanjiRow) || kana;
     parts.push({ char: character, meaning, reading });
   }
   return parts;
@@ -442,9 +452,186 @@ function buildMnemonic(
   return `On retient ${word} : ${french}${senseContext ? ` (${senseContext})` : ""}.`;
 }
 
-function exampleKanaHint(japanese: string, wordKana: string): string {
+const KANJI_CHAR_FALLBACK: Record<string, { meaning: string; reading: string }> = {
+  吸: { meaning: "aspirer", reading: "す" },
+  油: { meaning: "huile", reading: "あぶら" },
+  虹: { meaning: "arc-en-ciel", reading: "にじ" },
+  彼: { meaning: "lui", reading: "かれ" },
+  晩: { meaning: "soir", reading: "ばん" },
+  顔: { meaning: "visage", reading: "かお" },
+  心: { meaning: "cœur", reading: "こころ" },
+  僕: { meaning: "moi", reading: "ぼく" },
+  君: { meaning: "toi", reading: "きみ" },
+  事: { meaning: "chose", reading: "こと" },
+  茶: { meaning: "thé", reading: "ちゃ" },
+  飯: { meaning: "repas", reading: "めし" },
+  週: { meaning: "semaine", reading: "しゅう" },
+};
+
+function katakanaToHiragana(text: string): string {
+  return text.replace(/[ァ-ヶ]/g, (character) =>
+    String.fromCharCode(character.charCodeAt(0) - 0x60),
+  );
+}
+
+const KANJI_READING_FALLBACK: Record<string, string> = {
+  特: "とく",
+  面: "めん",
+  買: "か",
+  意: "い",
+  切: "き",
+  歩: "ある",
+  立: "た",
+  通: "とお",
+  返: "かえ",
+  当: "あ",
+  乗: "の",
+  着: "き",
+  消: "け",
+  閉: "し",
+  分: "わ",
+  番: "ばん",
+  作: "つく",
+  開: "ひら",
+  眠: "ねむ",
+  理: "り",
+  降: "お",
+  歳: "さい",
+  飲: "の",
+  旅: "たび",
+  止: "と",
+  約: "やく",
+  調: "しら",
+  転: "ころ",
+  腹: "はら",
+  必: "ひつ",
+  要: "よう",
+  楽: "たの",
+  得: "え",
+  取: "と",
+  満: "み",
+  美: "うつく",
+  会: "あ",
+  良: "よ",
+  過: "す",
+  員: "いん",
+  曲: "ま",
+  正: "ただ",
+  冷: "つめ",
+  煙: "けむり",
+  借: "か",
+  携: "けい",
+  帯: "たい",
+  型: "がた",
+  熱: "ねつ",
+  富: "ふ",
+  士: "し",
+  氷: "こおり",
+  湯: "ゆ",
+  呂: "ろ",
+  風: "かぜ",
+};
+
+const EXAMPLE_WORD_READINGS: Array<{ word: string; kana: string }> = [
+  { word: "風呂", kana: "ふろ" },
+  { word: "彼女", kana: "かのじょ" },
+  { word: "富士山", kana: "ふじさん" },
+  { word: "留学生", kana: "りゅうがくせい" },
+  { word: "面白い", kana: "おもしろい" },
+  { word: "約束", kana: "やくそく" },
+  { word: "必要", kana: "ひつよう" },
+  { word: "意見", kana: "いけん" },
+  { word: "携帯", kana: "けいたい" },
+  { word: "失礼", kana: "しつれい" },
+  { word: "運転", kana: "うんてん" },
+  { word: "注意", kana: "ちゅうい" },
+  { word: "事故", kana: "じこ" },
+  { word: "韓国", kana: "かんこく" },
+  { word: "美人", kana: "びじん" },
+  { word: "両方", kana: "りょうほう" },
+  { word: "理由", kana: "りゆう" },
+  { word: "普通", kana: "ふつう" },
+  { word: "確認", kana: "かくにん" },
+  { word: "若者", kana: "わかもの" },
+  { word: "昨晩", kana: "さくばん" },
+  { word: "気分", kana: "きぶん" },
+  { word: "品物", kana: "しなもの" },
+  { word: "本当", kana: "ほんとう" },
+  { word: "何時", kana: "なんじ" },
+  { word: "何歳", kana: "なんさい" },
+  { word: "東京", kana: "とうきょう" },
+  { word: "手伝う", kana: "てつだう" },
+  { word: "頭痛", kana: "ずつう" },
+  { word: "氷", kana: "こおり" },
+  { word: "湯", kana: "ゆ" },
+];
+
+function readingForKanjiCharacter(character: string, kanjiRow: OpenJlptKanji | undefined): string {
+  if (kanjiRow?.kunyomi[0]) {
+    return kanjiRow.kunyomi[0].replace(/^-/, "").split(".")[0]?.replace(/-/g, "") ?? "";
+  }
+  if (kanjiRow?.onyomi[0]) {
+    return katakanaToHiragana(kanjiRow.onyomi[0]);
+  }
+  return KANJI_CHAR_FALLBACK[character]?.reading ?? KANJI_READING_FALLBACK[character] ?? "";
+}
+
+function sentenceToKana(
+  japanese: string,
+  vocabReadings: Array<{ word: string; kana: string }>,
+  kanjiByChar: Map<string, OpenJlptKanji>,
+): string {
   if (!hasKanji(japanese)) return japanese;
-  return wordKana;
+  const characters = [...japanese];
+  let index = 0;
+  let output = "";
+  while (index < characters.length) {
+    const remaining = characters.slice(index).join("");
+    const vocabMatch = vocabReadings.find((entry) => remaining.startsWith(entry.word));
+    if (vocabMatch) {
+      output += vocabMatch.kana;
+      index += [...vocabMatch.word].length;
+      continue;
+    }
+    const character = characters[index];
+    if (hasKanji(character)) {
+      output += readingForKanjiCharacter(character, kanjiByChar.get(character)) || character;
+      index += 1;
+      continue;
+    }
+    output += character;
+    index += 1;
+  }
+  return output;
+}
+
+const EXAMPLE_SENTENCE_FR: Record<string, string> = {
+  "would you like ice?": "Tu veux de la glace ?",
+  "run hot water into the bath.": "Je verse de l'eau chaude dans le bain.",
+  "i put on a hat.": "Je mets un chapeau.",
+  "look over there.": "Regarde là-bas.",
+  "the teacher is over there.": "Le professeur est là-bas.",
+  "the toilet is over there.": "Les toilettes sont là-bas.",
+  "what's that?": "C'est quoi ?",
+  "how old are you?": "Quel âge as-tu ?",
+  "how old is he?": "Quel âge a-t-il ?",
+  "how much is it?": "Combien ça coûte ?",
+  "when do we arrive?": "Quand est-ce qu'on arrive ?",
+  "when is your birthday?": "C'est quand ton anniversaire ?",
+  "do you have a fever?": "Tu as de la fièvre ?",
+  "i'll go in.": "J'entre.",
+  "who is this girl?": "Qui est cette fille ?",
+  "there were only girls.": "Il n'y avait que des filles.",
+};
+
+function translateExampleEnglish(
+  english: string,
+  exampleSentencesFr: Record<string, string>,
+): string {
+  const normalizedEnglish = english.trim().toLowerCase().replace(/\s+/g, " ");
+  const exactFrench =
+    exampleSentencesFr[normalizedEnglish] ?? EXAMPLE_SENTENCE_FR[normalizedEnglish];
+  return exactFrench?.trim() ?? "";
 }
 
 export function seedCatalog(database: Database.Database): void {
@@ -457,6 +644,10 @@ export function seedCatalog(database: Database.Database): void {
   const vocab = loadJsonFile<OpenJlptVocab[]>("openjlpt-n5-vocab.json");
   const kanjiList = loadJsonFile<OpenJlptKanji[]>("openjlpt-n5-kanji.json");
   const glosses = loadJsonFile<Record<string, string>>("french-glosses.json");
+  const exampleSentencesFr = loadOptionalJsonFile<Record<string, string>>(
+    "openjlpt-n5-example-fr.json",
+    {},
+  );
   const kanjiByChar = new Map(kanjiList.map((row) => [row.character, row]));
 
   const extras: OpenJlptVocab[] = [];
@@ -469,6 +660,14 @@ export function seedCatalog(database: Database.Database): void {
       examples: [{ ja: "帽子をかぶる。", en: "I put on a hat." }],
     });
   }
+
+  const vocabReadings = [...vocab, ...extras]
+    .map((entry) => ({
+      word: entry.word,
+      kana: firstReading(entry.reading, entry.word),
+    }))
+    .concat(EXAMPLE_WORD_READINGS)
+    .sort((left, right) => [...right.word].length - [...left.word].length);
 
   const insert = database.prepare(
     `INSERT INTO catalog_entries (
@@ -508,11 +707,8 @@ export function seedCatalog(database: Database.Database): void {
       );
       const examples: CatalogExample[] = (entry.examples ?? []).slice(0, 2).map((example) => ({
         jp: example.ja,
-        kana: exampleKanaHint(example.ja, kana),
-        fr:
-          translateGloss(example.en, glosses) === example.en
-            ? example.en
-            : translateGloss(example.en, glosses),
+        kana: sentenceToKana(example.ja, vocabReadings, kanjiByChar),
+        fr: translateExampleEnglish(example.en, exampleSentencesFr),
       }));
       if (entry.word === "かぶる" && examples.length === 0) {
         examples.push({
@@ -553,6 +749,15 @@ export function seedCatalog(database: Database.Database): void {
     }
   });
   transaction();
+  database
+    .prepare(
+      `UPDATE words
+       SET examples = (
+         SELECT examples FROM catalog_entries WHERE catalog_entries.id = words.catalog_entry_id
+       )
+       WHERE catalog_entry_id IS NOT NULL`,
+    )
+    .run();
 }
 
 function parseJsonArray<T>(value: string | null, fallback: T[]): T[] {

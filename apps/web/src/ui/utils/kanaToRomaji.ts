@@ -180,15 +180,12 @@ function particleReading(chunk: string): string | null {
   return match ? match[1] : null;
 }
 
-function kanaLength(text: string): number {
-  return [...text.replace(/[。、！？「」『』…\s]/g, "")].length;
-}
-
 function shouldGlueParticle(particle: string, nextPart: string | undefined): boolean {
   if (!nextPart) return false;
+  if (particleReading(nextPart)) return false;
   if (nextPart.startsWith("っ") || /^[ゃゅょぁぃぅぇぉ]/.test(nextPart)) return true;
   if (particle === "で" && /^(す|した|しょう)/.test(nextPart)) return true;
-  return kanaLength(nextPart) > 0 && kanaLength(nextPart) < 2;
+  return false;
 }
 
 function splitKanaChunks(kana: string): string[] {

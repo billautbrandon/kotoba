@@ -618,6 +618,9 @@ function CatalogueImmersiveCard({
           mnemonic={entry.mnemonic}
           breakdown={entry.kanji_breakdown}
           examples={entry.examples}
+          headwordKanji={entry.kanji}
+          headwordKana={entry.kana}
+          compact
         />
 
         <div className="catalogueImmersive__footer">

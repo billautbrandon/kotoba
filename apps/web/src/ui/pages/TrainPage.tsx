@@ -22,7 +22,7 @@ import { AudioButton } from "../components/AudioButton";
 import { BadgeNotification } from "../components/BadgeNotification";
 import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
 import { LevelUpOverlay } from "../components/LevelUpOverlay";
-import { PlayIcon } from "../components/NavIcons";
+import { ChevronLeftIcon, ChevronRightIcon, PlayIcon } from "../components/NavIcons";
 import { QuotaBar } from "../components/QuotaBar";
 import { WordExtras } from "../components/WordExtras";
 import { XpBar } from "../components/XpBar";
@@ -113,7 +113,6 @@ export function TrainPage(props: { mode: TrainMode }) {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showKanjiViewer, setShowKanjiViewer] = useState(false);
   const [selectedKanjiForViewer, setSelectedKanjiForViewer] = useState<string | null>(null);
-  const [showExamples, setShowExamples] = useState<boolean>(false);
 
   const [ratingsByWordId, setRatingsByWordId] = useState<Record<number, SessionRating | null>>({});
   const [isRatingsSubmitted, setIsRatingsSubmitted] = useState<boolean>(false);
@@ -242,17 +241,20 @@ export function TrainPage(props: { mode: TrainMode }) {
     return extractKanji(currentWord.kanji);
   }, [currentWord]);
 
-  const handleShowKanjiStroke = () => {
-    if (currentWordKanji.length > 0) {
-      setSelectedKanjiForViewer(currentWordKanji[0]);
-      setShowKanjiViewer(true);
-    }
-  };
+  const hasFlashExtras = useMemo(() => {
+    if (!currentWord) return false;
+    return (
+      (currentWord.examples?.length ?? 0) > 0 || (currentWord.kanji_breakdown?.length ?? 0) > 0
+    );
+  }, [currentWord]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset examples panel when navigating to another word
-  useEffect(() => {
-    setShowExamples(false);
-  }, [currentIndex]);
+  const handleShowKanjiStroke = (kanjiChar?: string) => {
+    const selectedKanji =
+      kanjiChar && currentWordKanji.includes(kanjiChar) ? kanjiChar : currentWordKanji[0];
+    if (!selectedKanji) return;
+    setSelectedKanjiForViewer(selectedKanji);
+    setShowKanjiViewer(true);
+  };
 
   const advanceToNextWord = useCallback(() => {
     setCurrentIndex((previousIndex) => {
@@ -468,19 +470,6 @@ export function TrainPage(props: { mode: TrainMode }) {
             ? currentWord.kana
             : currentWord.kanji;
     return value ?? currentWord.french;
-  }, [currentWord, actualPromptMode]);
-
-  const revealFields = useMemo(() => {
-    if (!currentWord) return [];
-    const allFields: Array<{ key: PromptMode; label: string; value: string | null }> = [
-      { key: "kanji", label: "KANJI", value: currentWord.kanji },
-      { key: "kana", label: "KANA", value: currentWord.kana },
-      { key: "romaji", label: "ROMAJI", value: currentWord.romaji },
-    ];
-    if (actualPromptMode !== "french") {
-      allFields.unshift({ key: "french", label: "FR", value: currentWord.french });
-    }
-    return allFields.filter((field) => field.key !== actualPromptMode);
   }, [currentWord, actualPromptMode]);
 
   function setRating(wordId: number, rating: SessionRating) {
@@ -990,7 +979,7 @@ export function TrainPage(props: { mode: TrainMode }) {
   // --- TRAINING PHASE (manual) ---
   if (phase === "training") {
     return (
-      <div className="trainSession">
+      <div className="trainSession trainSession--study">
         <div className="trainSession__progressBar">
           <div className="trainSession__progressFill" style={{ width: `${progressPercent}%` }} />
         </div>
@@ -1046,111 +1035,19 @@ export function TrainPage(props: { mode: TrainMode }) {
           </div>
         )}
 
-        {currentWord && (
-          <div className="trainSession__card">
+        {currentWord && !isRevealed ? (
+          <div className="studyPrompt">
             <div className="trainSession__prompt">
               {promptText}
               {actualPromptMode === "kana" && <AudioButton text={promptText} size="large" />}
             </div>
-
-            {!isRevealed ? (
-              <button
-                className="trainSession__revealBtn"
-                type="button"
-                onClick={() => setIsRevealed(true)}
-              >
-                Reveler la reponse
-              </button>
-            ) : (
-              <div className="trainSession__answer">
-                <div className="trainSession__answerGrid">
-                  {revealFields.map((field) => (
-                    <React.Fragment key={field.key}>
-                      <div className="trainSession__answerLabel">{field.label}</div>
-                      <div className="trainSession__answerValue">
-                        {field.value ?? "\u2014"}
-                        {field.key === "kana" && (
-                          <AudioButton text={field.value ?? ""} size="medium" />
-                        )}
-                      </div>
-                    </React.Fragment>
-                  ))}
-                </div>
-
-                {currentWord.note && <div className="trainSession__note">{currentWord.note}</div>}
-                <WordExtras
-                  jlptLevel={currentWord.jlpt_level}
-                  senseContext={currentWord.sense_context}
-                  mnemonic={currentWord.mnemonic}
-                  breakdown={currentWord.kanji_breakdown}
-                  examples={currentWord.examples}
-                />
-
-                <div className="trainSession__ratingRow">
-                  <button
-                    className={`trainSession__ratingBtn trainSession__ratingBtn--success ${ratingsByWordId[currentWordId ?? 0] === "success" ? "trainSession__ratingBtn--selected" : ""}`}
-                    type="button"
-                    onClick={() => handleRatingKey("success")}
-                    disabled={isSubmitting}
-                  >
-                    <span className="trainSession__ratingIcon">&#x2713;</span> Reussi (1)
-                  </button>
-                  <button
-                    className={`trainSession__ratingBtn trainSession__ratingBtn--warning ${ratingsByWordId[currentWordId ?? 0] === "partial" ? "trainSession__ratingBtn--selected" : ""}`}
-                    type="button"
-                    onClick={() => handleRatingKey("partial")}
-                    disabled={isSubmitting}
-                  >
-                    <span className="trainSession__ratingIcon">&#x26A0;</span> Partiel (2)
-                  </button>
-                  <button
-                    className={`trainSession__ratingBtn trainSession__ratingBtn--danger ${ratingsByWordId[currentWordId ?? 0] === "fail" ? "trainSession__ratingBtn--selected" : ""}`}
-                    type="button"
-                    onClick={() => handleRatingKey("fail")}
-                    disabled={isSubmitting}
-                  >
-                    <span className="trainSession__ratingIcon">&#x2717;</span> Rate (3)
-                  </button>
-                </div>
-
-                {(currentWordKanji.length > 0 || (currentWord.examples?.length ?? 0) > 0) && (
-                  <div className="trainSession__secondaryActions">
-                    {currentWordKanji.length > 0 && (
-                      <button
-                        className="trainSession__secondaryBtn"
-                        type="button"
-                        onClick={handleShowKanjiStroke}
-                      >
-                        <span className="trainSession__secondaryBtnIcon" aria-hidden="true">
-                          &#x270E;
-                        </span>
-                        Sens de trace
-                        <span className="trainSession__secondaryBtnCount">
-                          {currentWordKanji.length}
-                        </span>
-                      </button>
-                    )}
-
-                    {(currentWord.examples?.length ?? 0) > 0 && (
-                      <button
-                        className="trainSession__secondaryBtn"
-                        type="button"
-                        onClick={() => setShowExamples(true)}
-                      >
-                        <span className="trainSession__secondaryBtnIcon" aria-hidden="true">
-                          &#x1F4D6;
-                        </span>
-                        Exemples
-                        <span className="trainSession__secondaryBtnCount">
-                          {currentWord.examples.length}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
+            <button
+              className="trainSession__revealBtn"
+              type="button"
+              onClick={() => setIsRevealed(true)}
+            >
+              Reveler la reponse
+            </button>
             <div className="trainSession__navRow">
               <button
                 className="trainSession__navBtn"
@@ -1170,14 +1067,132 @@ export function TrainPage(props: { mode: TrainMode }) {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
-        <div className="trainSession__footer">
-          Mode <strong>{shuffleMode.current ? "manuel (aleatoire)" : "manuel"}</strong> &mdash;
-          Question: <strong>{promptLabel}</strong> &mdash; Clique ou <strong>1</strong> &#x2713;{" "}
-          <strong>2</strong> &#x26A0; <strong>3</strong> &#x2717; pour noter,{" "}
-          <strong>&rarr;</strong>/<strong>Entrée</strong> avancer, <strong>&larr;</strong> revenir
-        </div>
+        {currentWord && isRevealed ? (
+          <div className="studyStage">
+            <button
+              className="studyStage__arrow studyStage__arrow--prev"
+              type="button"
+              onClick={goToPreviousWord}
+              disabled={currentIndex === 0 || isSubmitting}
+              aria-label="Mot précédent"
+            >
+              <ChevronLeftIcon className="studyStage__arrowIcon" />
+            </button>
+            <article
+              className={`studyCard studyCard--open${hasFlashExtras ? "" : " studyCard--sparse"}`}
+            >
+              <div className="studyCard__body">
+                <div className="studyCard__main">
+                  <div className="studyCard__cell studyCard__cell--word">
+                    <p className="studyCard__word">
+                      {currentWord.kanji || currentWord.kana || promptText}
+                      {currentWordKanji.length > 0 &&
+                      !(currentWord.kanji_breakdown && currentWord.kanji_breakdown.length > 0) ? (
+                        <button
+                          type="button"
+                          className="studyCard__wordStroke"
+                          onClick={() => handleShowKanjiStroke()}
+                          aria-label="Sens de trace"
+                        >
+                          ✎
+                        </button>
+                      ) : null}
+                    </p>
+                  </div>
+                  <div className="studyCard__cell studyCard__cell--kana">
+                    {currentWord.kanji &&
+                    currentWord.kana &&
+                    currentWord.kana !== currentWord.kanji ? (
+                      <span className="studyCard__kana">{currentWord.kana}</span>
+                    ) : null}
+                    {currentWord.kana ? <AudioButton text={currentWord.kana} size="small" /> : null}
+                  </div>
+                  <div className="studyCard__cell studyCard__cell--romaji">
+                    {currentWord.romaji ? (
+                      <span className="studyCard__romaji">{currentWord.romaji}</span>
+                    ) : null}
+                  </div>
+                  <div className="studyCard__cell studyCard__cell--meaning">
+                    <p className="studyCard__french">{currentWord.french}</p>
+                    {!currentWord.kanji_breakdown?.length && currentWord.mnemonic ? (
+                      <p className="studyCard__etymology">{currentWord.mnemonic}</p>
+                    ) : null}
+                    {currentWord.note && currentWord.note !== currentWord.mnemonic ? (
+                      <p className="studyCard__note">{currentWord.note}</p>
+                    ) : null}
+                  </div>
+                </div>
+                <WordExtras
+                  key={currentWordId ?? currentIndex}
+                  breakdown={currentWord.kanji_breakdown}
+                  examples={currentWord.examples}
+                  headwordKanji={currentWord.kanji}
+                  headwordKana={currentWord.kana}
+                  flashcard
+                  onKanjiStroke={currentWordKanji.length > 0 ? handleShowKanjiStroke : undefined}
+                />
+              </div>
+              <div className="studyCard__ratings">
+                <button
+                  className={`studyCard__rating studyCard__rating--success ${ratingsByWordId[currentWordId ?? 0] === "success" ? "studyCard__rating--selected" : ""}`}
+                  type="button"
+                  onClick={() => handleRatingKey("success")}
+                  disabled={isSubmitting}
+                >
+                  <span className="studyCard__ratingIcon" aria-hidden="true">
+                    &#x2713;
+                  </span>
+                  <span className="studyCard__ratingLabel">Réussi</span>
+                  <span className="studyCard__ratingHint">1</span>
+                </button>
+                <button
+                  className={`studyCard__rating studyCard__rating--partial ${ratingsByWordId[currentWordId ?? 0] === "partial" ? "studyCard__rating--selected" : ""}`}
+                  type="button"
+                  onClick={() => handleRatingKey("partial")}
+                  disabled={isSubmitting}
+                >
+                  <span className="studyCard__ratingIcon" aria-hidden="true">
+                    &#x26A0;
+                  </span>
+                  <span className="studyCard__ratingLabel">Partiel</span>
+                  <span className="studyCard__ratingHint">2</span>
+                </button>
+                <button
+                  className={`studyCard__rating studyCard__rating--fail ${ratingsByWordId[currentWordId ?? 0] === "fail" ? "studyCard__rating--selected" : ""}`}
+                  type="button"
+                  onClick={() => handleRatingKey("fail")}
+                  disabled={isSubmitting}
+                >
+                  <span className="studyCard__ratingIcon" aria-hidden="true">
+                    &#x2717;
+                  </span>
+                  <span className="studyCard__ratingLabel">Raté</span>
+                  <span className="studyCard__ratingHint">3</span>
+                </button>
+              </div>
+            </article>
+            <button
+              className="studyStage__arrow studyStage__arrow--next"
+              type="button"
+              onClick={advanceToNextWord}
+              disabled={!words || currentIndex >= words.length - 1 || isSubmitting}
+              aria-label="Mot suivant"
+            >
+              <ChevronRightIcon className="studyStage__arrowIcon" />
+            </button>
+          </div>
+        ) : null}
+
+        {isRevealed ? null : (
+          <div className="trainSession__footer">
+            Mode <strong>{shuffleMode.current ? "manuel (aleatoire)" : "manuel"}</strong> &mdash;
+            Question: <strong>{promptLabel}</strong> &mdash; Clique ou <strong>1</strong> &#x2713;{" "}
+            <strong>2</strong> &#x26A0; <strong>3</strong> &#x2717; pour noter,{" "}
+            <strong>&rarr;</strong>/<strong>Entrée</strong> avancer, <strong>&larr;</strong> revenir
+          </div>
+        )}
 
         {showKanjiViewer && selectedKanjiForViewer && (
           <KanjiViewerModal
@@ -1189,10 +1204,6 @@ export function TrainPage(props: { mode: TrainMode }) {
               setSelectedKanjiForViewer(null);
             }}
           />
-        )}
-
-        {showExamples && currentWord && (currentWord.examples?.length ?? 0) > 0 && (
-          <ExamplesModal word={currentWord} onClose={() => setShowExamples(false)} />
         )}
       </div>
     );
@@ -1505,68 +1516,6 @@ function saveSettings(settings: PersistedSeriesSettings) {
   } catch {
     /* ignore */
   }
-}
-
-function ExamplesModal({
-  word,
-  onClose,
-}: {
-  word: WordWithStats;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div
-      className="modal__overlay"
-      onClick={onClose}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
-      }}
-      role="presentation"
-    >
-      <div
-        className="modal__content"
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => event.stopPropagation()}
-        role="presentation"
-      >
-        <div className="modal__header">
-          <h2 className="modal__title">Exemples — {word.french}</h2>
-          <button className="modal__close" type="button" onClick={onClose}>
-            &times;
-          </button>
-        </div>
-
-        <div className="examplesModal__list">
-          {word.examples.map((example) => (
-            <div
-              key={`${example.jp}|${example.kana}|${example.fr}`}
-              className="examplesModal__item"
-            >
-              {example.jp ? (
-                <div className="examplesModal__jp">
-                  <span>{example.jp}</span>
-                  <AudioButton text={example.jp} size="small" />
-                </div>
-              ) : null}
-              {example.kana ? <div className="examplesModal__kana">{example.kana}</div> : null}
-              {example.fr ? <div className="examplesModal__fr">{example.fr}</div> : null}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function KanjiViewerModal({

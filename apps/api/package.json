@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json && mkdir -p dist/catalog-seed && cp src/catalog-seed/*.json dist/catalog-seed/",
     "start": "node dist/index.js",
-    "download-kanji-svg": "tsx src/scripts/download-kanji-svg.ts"
+    "download-kanji-svg": "tsx src/scripts/download-kanji-svg.ts",
+    "build-example-sentences-fr": "tsx src/scripts/build-example-sentences-fr.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
