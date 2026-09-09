@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type Tag,
@@ -6,7 +6,6 @@ import {
   createTag,
   deleteTag,
   deleteWord,
-  exportBackup,
   fetchTags,
   fetchWordsWithTags,
   resetAllWordScores,
@@ -15,6 +14,7 @@ import { AudioButton } from "../components/AudioButton";
 import { ImportPanel } from "../components/ImportPanel";
 import { SearchBar } from "../components/SearchBar";
 import { WordFormModal } from "../components/WordFormModal";
+import { downloadCurrentBackup, importBackupWords, parseBackupFile } from "../utils/backup";
 
 export function WordsPage() {
   const [words, setWords] = useState<WordWithTags[] | null>(null);
@@ -30,8 +30,10 @@ export function WordsPage() {
   const autoSelectedTagFromSearch = useRef<number | null>(null);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState<boolean>(false);
   const [isResettingScores, setIsResettingScores] = useState<boolean>(false);
+  const [isImportingBackup, setIsImportingBackup] = useState<boolean>(false);
   const [toolsStatus, setToolsStatus] = useState<string | null>(null);
   const importSectionRef = useRef<HTMLDivElement>(null);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -170,20 +172,31 @@ export function WordsPage() {
   async function handleExportBackup() {
     setErrorMessage(null);
     try {
-      const backup = await exportBackup();
-      const backupJson = JSON.stringify(backup, null, 2);
-      const blob = new Blob([backupJson], { type: "application/json" });
-      const downloadUrl = URL.createObjectURL(blob);
-
-      const anchor = document.createElement("a");
-      anchor.href = downloadUrl;
-      anchor.download = `kotoba-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(downloadUrl);
+      await downloadCurrentBackup();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    }
+  }
+
+  async function handleImportBackupFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setErrorMessage(null);
+    setIsImportingBackup(true);
+    try {
+      const words = await parseBackupFile(file);
+      const result = await importBackupWords(words);
+      await refreshWordsAndTags();
+      setToolsStatus(
+        `Import OK : ${result.importedWordsCount} mot(s), ${result.importedTagsCount} nouveau(x) tag(s).`,
+      );
+      window.setTimeout(() => setToolsStatus(null), 4000);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur lors de l'import");
+    } finally {
+      setIsImportingBackup(false);
     }
   }
 
@@ -230,6 +243,21 @@ export function WordsPage() {
       <div className="wordsPage__tools">
         <button className="button" type="button" onClick={() => void handleExportBackup()}>
           Exporter le backup
+        </button>
+        <input
+          ref={backupFileInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="srOnly"
+          onChange={(event) => void handleImportBackupFile(event)}
+        />
+        <button
+          className="button"
+          type="button"
+          disabled={isImportingBackup}
+          onClick={() => backupFileInputRef.current?.click()}
+        >
+          {isImportingBackup ? "Import…" : "Importer le backup"}
         </button>
         <button
           className="button wordsPage__resetButton"

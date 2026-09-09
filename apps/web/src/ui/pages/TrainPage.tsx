@@ -241,12 +241,24 @@ export function TrainPage(props: { mode: TrainMode }) {
     return extractKanji(currentWord.kanji);
   }, [currentWord]);
 
+  const hasDistinctKana = Boolean(
+    currentWord?.kanji && currentWord.kana && currentWord.kana !== currentWord.kanji,
+  );
+
+  const wordMnemonic =
+    currentWord && !currentWord.kanji_breakdown?.length ? currentWord.mnemonic : null;
+  const wordNote =
+    currentWord?.note && currentWord.note !== currentWord.mnemonic ? currentWord.note : null;
+  const hasWordDescription = Boolean(wordMnemonic || wordNote);
+
   const hasFlashExtras = useMemo(() => {
     if (!currentWord) return false;
     return (
-      (currentWord.examples?.length ?? 0) > 0 || (currentWord.kanji_breakdown?.length ?? 0) > 0
+      (currentWord.examples?.length ?? 0) > 0 ||
+      (currentWord.kanji_breakdown?.length ?? 0) > 0 ||
+      hasWordDescription
     );
-  }, [currentWord]);
+  }, [currentWord, hasWordDescription]);
 
   const handleShowKanjiStroke = (kanjiChar?: string) => {
     const selectedKanji =
@@ -1084,7 +1096,9 @@ export function TrainPage(props: { mode: TrainMode }) {
               className={`studyCard studyCard--open${hasFlashExtras ? "" : " studyCard--sparse"}`}
             >
               <div className="studyCard__body">
-                <div className="studyCard__main">
+                <div
+                  className={`studyCard__main ${hasDistinctKana ? "studyCard__main--cols4" : "studyCard__main--cols3"}`}
+                >
                   <div className="studyCard__cell studyCard__cell--word">
                     <p className="studyCard__word">
                       {currentWord.kanji || currentWord.kana || promptText}
@@ -1100,15 +1114,18 @@ export function TrainPage(props: { mode: TrainMode }) {
                         </button>
                       ) : null}
                     </p>
-                  </div>
-                  <div className="studyCard__cell studyCard__cell--kana">
-                    {currentWord.kanji &&
-                    currentWord.kana &&
-                    currentWord.kana !== currentWord.kanji ? (
-                      <span className="studyCard__kana">{currentWord.kana}</span>
+                    {!hasDistinctKana && currentWord.kana ? (
+                      <AudioButton text={currentWord.kana} size="small" />
                     ) : null}
-                    {currentWord.kana ? <AudioButton text={currentWord.kana} size="small" /> : null}
                   </div>
+                  {hasDistinctKana ? (
+                    <div className="studyCard__cell studyCard__cell--kana">
+                      <span className="studyCard__kana">{currentWord.kana}</span>
+                      {currentWord.kana ? (
+                        <AudioButton text={currentWord.kana} size="small" />
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="studyCard__cell studyCard__cell--romaji">
                     {currentWord.romaji ? (
                       <span className="studyCard__romaji">{currentWord.romaji}</span>
@@ -1116,14 +1133,14 @@ export function TrainPage(props: { mode: TrainMode }) {
                   </div>
                   <div className="studyCard__cell studyCard__cell--meaning">
                     <p className="studyCard__french">{currentWord.french}</p>
-                    {!currentWord.kanji_breakdown?.length && currentWord.mnemonic ? (
-                      <p className="studyCard__etymology">{currentWord.mnemonic}</p>
-                    ) : null}
-                    {currentWord.note && currentWord.note !== currentWord.mnemonic ? (
-                      <p className="studyCard__note">{currentWord.note}</p>
-                    ) : null}
                   </div>
                 </div>
+                {hasWordDescription ? (
+                  <div className="studyCard__description">
+                    {wordMnemonic ? <p className="studyCard__etymology">{wordMnemonic}</p> : null}
+                    {wordNote ? <p className="studyCard__note">{wordNote}</p> : null}
+                  </div>
+                ) : null}
                 <WordExtras
                   key={currentWordId ?? currentIndex}
                   breakdown={currentWord.kanji_breakdown}

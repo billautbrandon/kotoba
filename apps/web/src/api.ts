@@ -17,6 +17,7 @@ export type User = {
 export type WordExample = {
   jp: string;
   kana: string;
+  romaji?: string;
   fr: string;
 };
 
@@ -54,6 +55,7 @@ export type Tag = {
   id: number;
   name: string;
   created_at: string;
+  srsEnabled?: boolean;
 };
 
 export type WordWithStats = Word & {
@@ -130,6 +132,23 @@ async function apiPost<T = void>(url: string, body?: unknown, errorFallback?: st
 async function apiPut<T = void>(url: string, body: unknown, errorFallback?: string): Promise<T> {
   const response = await fetch(url, {
     method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const message = await extractErrorMessage(
+      response,
+      errorFallback ?? `Erreur serveur (${response.status})`,
+    );
+    throw new Error(message);
+  }
+  return safeJson<T>(response);
+}
+
+async function apiPatch<T = void>(url: string, body: unknown, errorFallback?: string): Promise<T> {
+  const response = await fetch(url, {
+    method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -283,6 +302,10 @@ export async function updateDailyGoal(dailyGoal: number): Promise<void> {
   await apiPut("/api/settings/daily-goal", { dailyGoal });
 }
 
+export async function updateSrsUntagged(includeUntagged: boolean): Promise<void> {
+  await apiPut("/api/settings/srs-untagged", { includeUntagged });
+}
+
 export type StatsOverview = {
   totalWords: number;
   masteredCount: number;
@@ -301,25 +324,28 @@ export async function fetchActivityData(): Promise<{ activity: ActivityDay[] }> 
   return apiGet<{ activity: ActivityDay[] }>("/api/stats/activity");
 }
 
-export async function fetchSeries(): Promise<
-  Array<{
-    tagId: number;
-    tagName: string;
-    wordsCount: number;
-    totalScore: number;
-    lastReviewedAt: string | null;
-  }>
-> {
-  const payload = await apiGet<{
-    series: Array<{
-      tagId: number;
-      tagName: string;
-      wordsCount: number;
-      totalScore: number;
-      lastReviewedAt: string | null;
-    }>;
-  }>("/api/series");
+export type SeriesItem = {
+  tagId: number;
+  tagName: string;
+  wordsCount: number;
+  totalScore: number;
+  lastReviewedAt: string | null;
+  srsEnabled: boolean;
+};
+
+export type SeriesListResponse = {
+  series: SeriesItem[];
+  includeUntagged: boolean;
+  untaggedWordsCount: number;
+};
+
+export async function fetchSeries(): Promise<SeriesItem[]> {
+  const payload = await fetchSeriesSrsSettings();
   return payload.series;
+}
+
+export async function fetchSeriesSrsSettings(): Promise<SeriesListResponse> {
+  return apiGet<SeriesListResponse>("/api/series");
 }
 
 export async function fetchSeriesWords(tagId: number): Promise<WordWithStats[]> {
@@ -355,6 +381,11 @@ export async function deleteTag(tagId: number): Promise<void> {
 
 export async function resetTagWordScores(tagId: number): Promise<{ resetCount: number }> {
   return await apiPost<{ success: boolean; resetCount: number }>(`/api/tags/${tagId}/reset-scores`);
+}
+
+export async function updateTagSrsEnabled(tagId: number, srsEnabled: boolean): Promise<Tag> {
+  const payload = await apiPatch<{ tag: Tag }>(`/api/tags/${tagId}`, { srsEnabled });
+  return payload.tag;
 }
 
 export async function createWord(word: {

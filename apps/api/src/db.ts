@@ -272,6 +272,8 @@ function ensureSchema(database: Database.Database) {
   seedBadgeDefinitions(database);
   ensureRootUser(database);
   rebuildTagsAndWordTagsIfNeeded(database);
+  ensureColumnExists(database, "tags", "srs_enabled", "INTEGER DEFAULT 1");
+  ensureColumnExists(database, "users", "srs_include_untagged", "INTEGER DEFAULT 1");
 }
 
 function ensureRootUser(database: Database.Database) {

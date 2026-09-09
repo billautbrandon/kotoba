@@ -498,9 +498,18 @@ export function registerApiRoutes(app: import("express").Express, database: Data
   app.get("/api/tags", (_req, res) => {
     const userId = getRequiredUserId(_req);
     const rows = database
-      .prepare("SELECT id, name, created_at FROM tags WHERE user_id = ? ORDER BY name ASC")
-      .all(userId);
-    res.json({ tags: rows });
+      .prepare(
+        "SELECT id, name, created_at, COALESCE(srs_enabled, 1) AS srs_enabled FROM tags WHERE user_id = ? ORDER BY name ASC",
+      )
+      .all(userId) as Array<{ id: number; name: string; created_at: string; srs_enabled: number }>;
+    res.json({
+      tags: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        created_at: row.created_at,
+        srsEnabled: row.srs_enabled !== 0,
+      })),
+    });
   });
 
   app.post("/api/tags", (req, res) => {
@@ -520,10 +529,23 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       .prepare("INSERT OR IGNORE INTO tags (user_id, name) VALUES (?, ?)")
       .run(userId, trimmedName);
     const createdOrExistingTag = database
-      .prepare("SELECT id, name, created_at FROM tags WHERE user_id = ? AND name = ?")
-      .get(userId, trimmedName);
+      .prepare(
+        "SELECT id, name, created_at, COALESCE(srs_enabled, 1) AS srs_enabled FROM tags WHERE user_id = ? AND name = ?",
+      )
+      .get(userId, trimmedName) as
+      | { id: number; name: string; created_at: string; srs_enabled: number }
+      | undefined;
 
-    res.status(201).json({ tag: createdOrExistingTag });
+    res.status(201).json({
+      tag: createdOrExistingTag
+        ? {
+            id: createdOrExistingTag.id,
+            name: createdOrExistingTag.name,
+            created_at: createdOrExistingTag.created_at,
+            srsEnabled: createdOrExistingTag.srs_enabled !== 0,
+          }
+        : createdOrExistingTag,
+    });
   });
 
   app.delete("/api/tags/:id", (req, res) => {
@@ -578,6 +600,41 @@ export function registerApiRoutes(app: import("express").Express, database: Data
       .run(userId, tagId);
 
     res.status(200).json({ success: true, resetCount: resetResult.changes });
+  });
+
+  app.patch("/api/tags/:id", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const tagId = Number(req.params.id);
+    if (!Number.isFinite(tagId) || tagId <= 0) {
+      res.status(400).json({ error: "Invalid tag id" });
+      return;
+    }
+    const body = z.object({ srsEnabled: z.boolean() }).parse(req.body);
+    const updateResult = database
+      .prepare("UPDATE tags SET srs_enabled = ? WHERE id = ? AND user_id = ?")
+      .run(body.srsEnabled ? 1 : 0, tagId, userId);
+    if (updateResult.changes === 0) {
+      res.status(404).json({ error: "Tag not found" });
+      return;
+    }
+    const tag = database
+      .prepare(
+        "SELECT id, name, created_at, COALESCE(srs_enabled, 1) AS srs_enabled FROM tags WHERE id = ? AND user_id = ?",
+      )
+      .get(tagId, userId) as {
+      id: number;
+      name: string;
+      created_at: string;
+      srs_enabled: number;
+    };
+    res.json({
+      tag: {
+        id: tag.id,
+        name: tag.name,
+        created_at: tag.created_at,
+        srsEnabled: tag.srs_enabled !== 0,
+      },
+    });
   });
 
   app.get("/api/words", (req, res) => {
@@ -733,6 +790,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           z.object({
             jp: z.string().optional(),
             kana: z.string().optional(),
+            romaji: z.string().optional(),
             fr: z.string().optional(),
           }),
         )
@@ -810,6 +868,7 @@ export function registerApiRoutes(app: import("express").Express, database: Data
           z.object({
             jp: z.string().optional(),
             kana: z.string().optional(),
+            romaji: z.string().optional(),
             fr: z.string().optional(),
           }),
         )
@@ -1341,6 +1400,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       words_count: number;
       total_score: number;
       last_reviewed_at: string | null;
+      srs_enabled: number;
     };
 
     const seriesRows = database
@@ -1351,7 +1411,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
           t.name AS tag_name,
           COUNT(DISTINCT w.id) AS words_count,
           COALESCE(SUM(s.score), 0) AS total_score,
-          MAX(s.last_reviewed_at) AS last_reviewed_at
+          MAX(s.last_reviewed_at) AS last_reviewed_at,
+          COALESCE(t.srs_enabled, 1) AS srs_enabled
         FROM tags t
         LEFT JOIN word_tags wt ON wt.tag_id = t.id
         LEFT JOIN words w ON w.id = wt.word_id AND w.user_id = ?
@@ -1364,6 +1425,20 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       )
       .all(userId, userId) as SeriesRow[];
 
+    const includeUntaggedRow = database
+      .prepare(
+        "SELECT COALESCE(srs_include_untagged, 1) AS srs_include_untagged FROM users WHERE id = ?",
+      )
+      .get(userId) as { srs_include_untagged: number };
+    const untaggedRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM words w
+         WHERE w.user_id = ?
+           AND NOT EXISTS (SELECT 1 FROM word_tags wt WHERE wt.word_id = w.id)`,
+      )
+      .get(userId) as { count: number };
+
     res.json({
       series: seriesRows.map((row) => ({
         tagId: row.tag_id,
@@ -1371,7 +1446,10 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
         wordsCount: row.words_count,
         totalScore: row.total_score,
         lastReviewedAt: row.last_reviewed_at,
+        srsEnabled: row.srs_enabled !== 0,
       })),
+      includeUntagged: includeUntaggedRow.srs_include_untagged !== 0,
+      untaggedWordsCount: untaggedRow.count,
     });
   });
 
@@ -1568,6 +1646,24 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
     LEFT JOIN catalog_entries c ON c.id = w.catalog_entry_id
   `;
 
+  const srsEnabledWordFilter = `
+    AND (
+      EXISTS (
+        SELECT 1
+        FROM word_tags enabled_word_tag
+        INNER JOIN tags enabled_series ON enabled_series.id = enabled_word_tag.tag_id
+        WHERE enabled_word_tag.word_id = w.id
+          AND COALESCE(enabled_series.srs_enabled, 1) = 1
+      )
+      OR (
+        NOT EXISTS (
+          SELECT 1 FROM word_tags untagged_check WHERE untagged_check.word_id = w.id
+        )
+        AND (SELECT COALESCE(srs_include_untagged, 1) FROM users WHERE id = w.user_id) = 1
+      )
+    )
+  `;
+
   function mapDueWord(userId: number, row: unknown) {
     const wordRow = row as Record<string, unknown> & {
       examples: string | null;
@@ -1611,6 +1707,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
         `
         ${srsWordSelect}
         WHERE w.user_id = ?
+        ${srsEnabledWordFilter}
         AND COALESCE(s.consecutive_success_count, 0) >= 10
         ORDER BY COALESCE(s.score, 0) DESC, w.id DESC
       `,
@@ -1630,6 +1727,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
         `
         ${srsWordSelect}
         WHERE w.user_id = ?
+        ${srsEnabledWordFilter}
         AND (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) > 0
         AND (
           CAST(COALESCE(s.success_count, 0) AS REAL)
@@ -1646,6 +1744,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
         `
         ${srsWordSelect}
         WHERE w.user_id = ?
+        ${srsEnabledWordFilter}
         AND (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) > 0
         AND (
           CAST(COALESCE(s.success_count, 0) AS REAL)
@@ -1662,6 +1761,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
         `
         ${srsWordSelect}
         WHERE w.user_id = ?
+        ${srsEnabledWordFilter}
         AND (COALESCE(s.success_count, 0) + COALESCE(s.partial_count, 0) + COALESCE(s.fail_count, 0)) > 0
         AND (
           CAST(COALESCE(s.success_count, 0) AS REAL)
@@ -1710,6 +1810,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       AND EXISTS (
         SELECT 1
         FROM word_tags word_tag
+        INNER JOIN tags series_tag ON series_tag.id = word_tag.tag_id
+          AND COALESCE(series_tag.srs_enabled, 1) = 1
         INNER JOIN word_tags peer_tag ON peer_tag.tag_id = word_tag.tag_id
         INNER JOIN words peer_word ON peer_word.id = peer_tag.word_id AND peer_word.user_id = w.user_id
         INNER JOIN word_stats peer_stats ON peer_stats.word_id = peer_word.id
@@ -1725,6 +1827,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
              AND s.queued_at IS NOT NULL
              AND COALESCE(s.intro_stage, 0) = 0
              AND s.srs_next_review_at IS NULL
+             ${srsEnabledWordFilter}
            ORDER BY s.queued_at ASC
            LIMIT ?`,
       )
@@ -1741,6 +1844,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
            WHERE w.user_id = ?
              AND s.srs_next_review_at IS NOT NULL
              AND s.srs_next_review_at <= ?
+             ${srsEnabledWordFilter}
            ORDER BY s.srs_next_review_at ASC
            LIMIT ?`,
             )
@@ -1751,7 +1855,13 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
 
     let remainingSlots = Math.max(0, dueLimit - selectedIds.size);
     const curriculumRows: unknown[] = [];
-    if (remainingSlots > 0 && userHasCatalogProgress(database, userId)) {
+    const jlptN5Tag = database
+      .prepare(
+        "SELECT COALESCE(srs_enabled, 1) AS srs_enabled FROM tags WHERE user_id = ? AND name = ?",
+      )
+      .get(userId, "JLPT N5") as { srs_enabled: number } | undefined;
+    const jlptN5SrsEnabled = !jlptN5Tag || jlptN5Tag.srs_enabled !== 0;
+    if (remainingSlots > 0 && jlptN5SrsEnabled && userHasCatalogProgress(database, userId)) {
       const dailyGoalRow = database
         .prepare("SELECT COALESCE(daily_goal, 20) AS daily_goal FROM users WHERE id = ?")
         .get(userId) as { daily_goal: number };
@@ -1763,6 +1873,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
            WHERE w.user_id = ?
              AND w.catalog_entry_id IS NOT NULL
              AND (s.word_id IS NULL OR (COALESCE(s.intro_stage, 0) = 0 AND s.srs_next_review_at IS NULL AND s.queued_at IS NULL))
+             ${srsEnabledWordFilter}
            ORDER BY c.sort_order ASC
            LIMIT ?`,
         )
@@ -1787,6 +1898,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
              AND (s.queued_at IS NULL)
              AND w.catalog_entry_id IS NULL
              ${startedSeriesFilter}
+             ${srsEnabledWordFilter}
            ORDER BY w.id ASC
            LIMIT ?`,
             )
@@ -1809,7 +1921,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
            LEFT JOIN word_stats s ON s.word_id = w.id
            WHERE w.user_id = ?
              AND s.srs_next_review_at IS NOT NULL
-             AND s.srs_next_review_at <= ?`,
+             AND s.srs_next_review_at <= ?
+             ${srsEnabledWordFilter}`,
       )
       .get(userId, nowIso) as { count: number };
 
@@ -1822,12 +1935,15 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
              AND EXISTS (
                SELECT 1
                FROM word_tags word_tag
+               INNER JOIN tags series_tag ON series_tag.id = word_tag.tag_id
+                 AND COALESCE(series_tag.srs_enabled, 1) = 1
                INNER JOIN word_tags peer_tag ON peer_tag.tag_id = word_tag.tag_id
                INNER JOIN words peer_word ON peer_word.id = peer_tag.word_id AND peer_word.user_id = w.user_id
                INNER JOIN word_stats peer_stats ON peer_stats.word_id = peer_word.id
                WHERE word_tag.word_id = w.id
                  AND peer_stats.srs_next_review_at IS NOT NULL
-             )`,
+             )
+             ${srsEnabledWordFilter}`,
       )
       .get(userId) as { count: number };
 
@@ -1835,7 +1951,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       .prepare(
         `SELECT COUNT(*) AS count FROM words w
            INNER JOIN word_stats s ON s.word_id = w.id
-           WHERE w.user_id = ? AND s.srs_step >= 1 AND s.srs_step < 3 AND COALESCE(s.consecutive_success_count, 0) < 10`,
+           WHERE w.user_id = ? AND s.srs_step >= 1 AND s.srs_step < 3 AND COALESCE(s.consecutive_success_count, 0) < 10
+             ${srsEnabledWordFilter}`,
       )
       .get(userId) as { count: number };
 
@@ -1843,7 +1960,8 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       .prepare(
         `SELECT COUNT(*) AS count FROM words w
            INNER JOIN word_stats s ON s.word_id = w.id
-           WHERE w.user_id = ? AND s.srs_step >= 3 AND COALESCE(s.consecutive_success_count, 0) < 10`,
+           WHERE w.user_id = ? AND s.srs_step >= 3 AND COALESCE(s.consecutive_success_count, 0) < 10
+             ${srsEnabledWordFilter}`,
       )
       .get(userId) as { count: number };
 
@@ -1851,11 +1969,24 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
       .prepare(
         `SELECT COUNT(*) AS count FROM words w
            INNER JOIN word_stats s ON s.word_id = w.id
-           WHERE w.user_id = ? AND COALESCE(s.consecutive_success_count, 0) >= 10`,
+           WHERE w.user_id = ? AND COALESCE(s.consecutive_success_count, 0) >= 10
+             ${srsEnabledWordFilter}`,
       )
       .get(userId) as { count: number };
 
-    const queuedCount = getQueuedCount(database, userId);
+    const queuedRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM words w
+         INNER JOIN word_stats s ON s.word_id = w.id
+         WHERE w.user_id = ?
+           AND s.queued_at IS NOT NULL
+           AND COALESCE(s.intro_stage, 0) = 0
+           AND s.srs_next_review_at IS NULL
+           ${srsEnabledWordFilter}`,
+      )
+      .get(userId) as { count: number };
+    const queuedCount = queuedRow.count;
 
     res.json({
       dueCount: dueRow.count + newRow.count + queuedCount,
@@ -1930,6 +2061,15 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
     const body = bodySchema.parse(req.body);
     database.prepare("UPDATE users SET daily_goal = ? WHERE id = ?").run(body.dailyGoal, userId);
     res.json({ dailyGoal: body.dailyGoal });
+  });
+
+  app.put("/api/settings/srs-untagged", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const body = z.object({ includeUntagged: z.boolean() }).parse(req.body);
+    database
+      .prepare("UPDATE users SET srs_include_untagged = ? WHERE id = ?")
+      .run(body.includeUntagged ? 1 : 0, userId);
+    res.json({ includeUntagged: body.includeUntagged });
   });
 
   app.get("/api/stats/overview", (req, res) => {
@@ -2059,6 +2199,7 @@ Réponds UNIQUEMENT par un tableau JSON, un objet par entrée, dans le même ord
               z.object({
                 jp: z.string().optional(),
                 kana: z.string().optional(),
+                romaji: z.string().optional(),
                 fr: z.string().optional(),
               }),
             )
@@ -4697,7 +4838,7 @@ Réponds au format JSON : {"isCorrect": true/false, "feedback": "commentaire bre
   );
 }
 
-type WordExample = { jp: string; kana: string; fr: string };
+type WordExample = { jp: string; kana: string; romaji: string; fr: string };
 
 function parseExamples(value: unknown): WordExample[] {
   if (typeof value !== "string" || value.trim() === "") return [];
@@ -4710,9 +4851,10 @@ function parseExamples(value: unknown): WordExample[] {
         const record = item as Record<string, unknown>;
         const jp = typeof record.jp === "string" ? record.jp : "";
         const kana = typeof record.kana === "string" ? record.kana : "";
+        const romaji = typeof record.romaji === "string" ? record.romaji : "";
         const fr = typeof record.fr === "string" ? record.fr : "";
-        if (!jp && !kana && !fr) return null;
-        return { jp, kana, fr };
+        if (!jp && !kana && !romaji && !fr) return null;
+        return { jp, kana, romaji, fr };
       })
       .filter((example): example is WordExample => example !== null)
       .slice(0, 3);
@@ -4729,9 +4871,10 @@ function serializeExamples(value: unknown): string | null {
       const record = item as Record<string, unknown>;
       const jp = typeof record.jp === "string" ? record.jp.trim() : "";
       const kana = typeof record.kana === "string" ? record.kana.trim() : "";
+      const romaji = typeof record.romaji === "string" ? record.romaji.trim() : "";
       const fr = typeof record.fr === "string" ? record.fr.trim() : "";
-      if (!jp && !kana && !fr) return null;
-      return { jp, kana, fr };
+      if (!jp && !kana && !romaji && !fr) return null;
+      return { jp, kana, romaji, fr };
     })
     .filter((example): example is WordExample => example !== null)
     .slice(0, 3);

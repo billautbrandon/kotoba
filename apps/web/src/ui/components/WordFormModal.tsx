@@ -2,6 +2,7 @@ import type React from "react";
 import { useEffect, useId, useState } from "react";
 
 import { type Tag, type WordExample, type WordWithTags, createWord, updateWord } from "../../api";
+import { hasJapaneseScript, kanaToRomaji } from "../utils/kanaToRomaji";
 
 const MAX_EXAMPLES = 3;
 
@@ -44,6 +45,15 @@ type WordFormModalProps = {
   onDeleteTag: (tag: Tag) => Promise<void>;
 };
 
+function exampleRomajiPrefill(example: WordExample): string {
+  const storedRomaji = example.romaji?.trim() ?? "";
+  if (storedRomaji) return storedRomaji;
+  const kana = example.kana?.trim() ?? "";
+  if (!kana) return "";
+  if (!hasJapaneseScript(kana)) return kana;
+  return kanaToRomaji(kana);
+}
+
 function buildInitialState(
   editingWord: WordWithTags | null,
   defaultTagIds: number[] = [],
@@ -61,7 +71,15 @@ function buildInitialState(
     kanji: editingWord.kanji ?? "",
     note: editingWord.note ?? "",
     examples: (editingWord.examples ?? []).map((example) => ({
-      ...example,
+      jp: example.jp ?? "",
+      kana: example.kana ?? "",
+      romaji: exampleRomajiPrefill({
+        jp: example.jp ?? "",
+        kana: example.kana ?? "",
+        romaji: example.romaji ?? "",
+        fr: example.fr ?? "",
+      }),
+      fr: example.fr ?? "",
       id: createExampleId(),
     })),
     selectedTagIds: editingWord.tags.map((tag) => tag.id),
@@ -159,7 +177,10 @@ export function WordFormModal({
       if (previousState.examples.length >= MAX_EXAMPLES) return previousState;
       return {
         ...previousState,
-        examples: [...previousState.examples, { id: createExampleId(), jp: "", kana: "", fr: "" }],
+        examples: [
+          ...previousState.examples,
+          { id: createExampleId(), jp: "", kana: "", romaji: "", fr: "" },
+        ],
       };
     });
   }
@@ -178,9 +199,10 @@ export function WordFormModal({
       .map((example) => ({
         jp: example.jp.trim(),
         kana: example.kana.trim(),
+        romaji: (example.romaji ?? "").trim(),
         fr: example.fr.trim(),
       }))
-      .filter((example) => example.jp || example.kana || example.fr);
+      .filter((example) => example.jp || example.kana || example.romaji || example.fr);
 
     const payload = {
       french: formState.french.trim(),
@@ -306,8 +328,8 @@ export function WordFormModal({
 
             {formState.examples.length === 0 ? (
               <p className="muted wordFormModal__examplesHint">
-                Ajoute jusqu'à {MAX_EXAMPLES} phrases d'exemple (phrase japonaise, lecture kana,
-                traduction française).
+                Ajoute jusqu'à {MAX_EXAMPLES} phrases d'exemple (kanji, rōmaji, traduction
+                française).
               </p>
             ) : null}
 
@@ -325,7 +347,7 @@ export function WordFormModal({
                   </button>
                 </div>
                 <div className="field">
-                  <label htmlFor={`${example.id}-jp`}>Phrase (japonais)</label>
+                  <label htmlFor={`${example.id}-jp`}>Kanji</label>
                   <input
                     id={`${example.id}-jp`}
                     className="input"
@@ -336,13 +358,13 @@ export function WordFormModal({
                 </div>
                 <div className="row" style={{ gap: "var(--space-3)" }}>
                   <div className="field" style={{ flex: "1 1 180px" }}>
-                    <label htmlFor={`${example.id}-kana`}>Lecture (kana)</label>
+                    <label htmlFor={`${example.id}-romaji`}>Rōmaji</label>
                     <input
-                      id={`${example.id}-kana`}
+                      id={`${example.id}-romaji`}
                       className="input"
-                      value={example.kana}
-                      onChange={(event) => updateExample(example.id, "kana", event.target.value)}
-                      placeholder="きょうはいいてんきですね。"
+                      value={example.romaji ?? ""}
+                      onChange={(event) => updateExample(example.id, "romaji", event.target.value)}
+                      placeholder="kyou wa ii tenki desu ne."
                     />
                   </div>
                   <div className="field" style={{ flex: "1 1 180px" }}>

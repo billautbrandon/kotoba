@@ -9,6 +9,7 @@ import {
   updateProfile,
   uploadAvatar,
 } from "../../api";
+import { BackupPanel } from "../components/BackupPanel";
 import { PillNav } from "../components/PillNav";
 import { WordsPage } from "./WordsPage";
 
@@ -401,6 +402,7 @@ function ToolsSection() {
 
   return (
     <div className="settingsStack">
+      <BackupPanel />
       <div className="settingsPanel">
         <div className="settingsPanel__header">
           <div>

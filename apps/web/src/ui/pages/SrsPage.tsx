@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import type { SrsSummary, SrsWords, WordWithStats } from "../../api";
-import { fetchSrsSummary, fetchSrsWords } from "../../api";
+import type { SeriesListResponse, SrsSummary, SrsWords, WordWithStats } from "../../api";
+import {
+  fetchSeriesSrsSettings,
+  fetchSrsSummary,
+  fetchSrsWords,
+  updateSrsUntagged,
+  updateTagSrsEnabled,
+} from "../../api";
 import { AudioButton } from "../components/AudioButton";
 import {
   type SrsBatchSize,
@@ -39,41 +45,69 @@ export function SrsPage() {
   const navigate = useNavigate();
   const [srsWords, setSrsWords] = useState<SrsWords | null>(null);
   const [srsSummary, setSrsSummary] = useState<SrsSummary | null>(null);
+  const [seriesSettings, setSeriesSettings] = useState<SeriesListResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [batchSize, setBatchSize] = useState<SrsBatchSize>(() => loadSrsBatchSize());
+  const [savingSeriesKey, setSavingSeriesKey] = useState<string | null>(null);
 
   useEffect(() => {
     saveSrsBatchSize(batchSize);
   }, [batchSize]);
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function load() {
-      setIsLoading(true);
-      setErrorMessage(null);
-      try {
-        const [loaded, summary] = await Promise.all([fetchSrsWords(), fetchSrsSummary()]);
-        if (!isCancelled) {
-          setSrsWords(loaded);
-          setSrsSummary(summary);
-        }
-      } catch (error) {
-        if (!isCancelled) {
-          setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
-          setSrsWords(null);
-        }
-      } finally {
-        if (!isCancelled) setIsLoading(false);
+  const loadSrsData = useCallback(async (showSpinner: boolean) => {
+    if (showSpinner) setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const [loaded, summary, settings] = await Promise.all([
+        fetchSrsWords(),
+        fetchSrsSummary(),
+        fetchSeriesSrsSettings(),
+      ]);
+      setSrsWords(loaded);
+      setSrsSummary(summary);
+      setSeriesSettings(settings);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+      if (showSpinner) {
+        setSrsWords(null);
+        setSrsSummary(null);
+        setSeriesSettings(null);
       }
+    } finally {
+      if (showSpinner) setIsLoading(false);
     }
-
-    load();
-    return () => {
-      isCancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    void loadSrsData(true);
+  }, [loadSrsData]);
+
+  async function handleToggleSeries(tagId: number, srsEnabled: boolean) {
+    setSavingSeriesKey(`tag-${tagId}`);
+    setErrorMessage(null);
+    try {
+      await updateTagSrsEnabled(tagId, srsEnabled);
+      await loadSrsData(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    } finally {
+      setSavingSeriesKey(null);
+    }
+  }
+
+  async function handleToggleUntagged(includeUntagged: boolean) {
+    setSavingSeriesKey("untagged");
+    setErrorMessage(null);
+    try {
+      await updateSrsUntagged(includeUntagged);
+      await loadSrsData(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
+    } finally {
+      setSavingSeriesKey(null);
+    }
+  }
 
   function startTraining(category: SrsCategory) {
     const query = batchSize > 0 ? `?limit=${batchSize}` : "";
@@ -82,6 +116,13 @@ export function SrsPage() {
 
   const dueCount = srsSummary?.dueCount ?? 0;
   const reviewCount = Math.max(0, dueCount - (srsSummary?.newCount ?? 0));
+  const seriesToggleCount = seriesSettings
+    ? seriesSettings.series.length + (seriesSettings.untaggedWordsCount > 0 ? 1 : 0)
+    : 0;
+  const seriesEnabledCount = seriesSettings
+    ? seriesSettings.series.filter((seriesItem) => seriesItem.srsEnabled).length +
+      (seriesSettings.untaggedWordsCount > 0 && seriesSettings.includeUntagged ? 1 : 0)
+    : 0;
 
   return (
     <div className="srsPage">
@@ -154,6 +195,76 @@ export function SrsPage() {
             <span className="srsSummaryBar__label">Maîtrisés</span>
           </div>
         </div>
+      ) : null}
+
+      {!isLoading && seriesSettings && seriesToggleCount > 0 ? (
+        <details className="srsSeries">
+          <summary className="srsSeries__summary">
+            Séries
+            <span className="srsSeries__summaryCount">
+              {seriesEnabledCount}/{seriesToggleCount} actives
+            </span>
+          </summary>
+          <div className="srsSeries__panel">
+            <p className="srsSeries__hint">Les stats sont conservées si tu désactives une série.</p>
+            <ul className="srsSeries__list">
+            {seriesSettings.series.map((seriesItem) => {
+              const seriesKey = `tag-${seriesItem.tagId}`;
+              return (
+                <li key={seriesItem.tagId} className="srsSeries__row">
+                  <div className="srsSeries__info">
+                    <span className="srsSeries__name">{seriesItem.tagName}</span>
+                    <span className="srsSeries__count">
+                      {seriesItem.wordsCount} mot{seriesItem.wordsCount > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`srsSeries__switch ${seriesItem.srsEnabled ? "srsSeries__switch--on" : ""}`}
+                    role="switch"
+                    aria-checked={seriesItem.srsEnabled}
+                    aria-label={`${seriesItem.tagName} ${seriesItem.srsEnabled ? "activée" : "désactivée"}`}
+                    disabled={savingSeriesKey !== null}
+                    onClick={() => handleToggleSeries(seriesItem.tagId, !seriesItem.srsEnabled)}
+                  >
+                    {savingSeriesKey === seriesKey
+                      ? "…"
+                      : seriesItem.srsEnabled
+                        ? "Activée"
+                        : "Désactivée"}
+                  </button>
+                </li>
+              );
+            })}
+            {seriesSettings.untaggedWordsCount > 0 ? (
+              <li className="srsSeries__row">
+                <div className="srsSeries__info">
+                  <span className="srsSeries__name">Sans série</span>
+                  <span className="srsSeries__count">
+                    {seriesSettings.untaggedWordsCount} mot
+                    {seriesSettings.untaggedWordsCount > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={`srsSeries__switch ${seriesSettings.includeUntagged ? "srsSeries__switch--on" : ""}`}
+                  role="switch"
+                  aria-checked={seriesSettings.includeUntagged}
+                  aria-label={`Sans série ${seriesSettings.includeUntagged ? "activée" : "désactivée"}`}
+                  disabled={savingSeriesKey !== null}
+                  onClick={() => handleToggleUntagged(!seriesSettings.includeUntagged)}
+                >
+                  {savingSeriesKey === "untagged"
+                    ? "…"
+                    : seriesSettings.includeUntagged
+                      ? "Activée"
+                      : "Désactivée"}
+                </button>
+              </li>
+            ) : null}
+            </ul>
+          </div>
+        </details>
       ) : null}
 
       {!isLoading && srsWords ? (

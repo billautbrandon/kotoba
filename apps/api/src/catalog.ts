@@ -33,6 +33,7 @@ export type CatalogKanjiPart = {
 export type CatalogExample = {
   jp: string;
   kana: string;
+  romaji?: string;
   fr: string;
 };
 

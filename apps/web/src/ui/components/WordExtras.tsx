@@ -51,10 +51,13 @@ function romajiFromKana(kana: string): string | null {
 }
 
 function exampleRomajiLine(
+  example: WordExample,
   exampleJapanese: string,
   storedKana: string,
   kanaLine: string,
 ): string | null {
+  const storedRomaji = example.romaji?.trim();
+  if (storedRomaji) return storedRomaji;
   return romajiFromKana(kanaLine) ?? romajiFromKana(storedKana) ?? romajiFromKana(exampleJapanese);
 }
 
@@ -86,7 +89,10 @@ function ExampleJapanese({
     if (remainingJapanese) highlightedPieces.push(remainingJapanese);
     return highlightedPieces;
   }
-  if (kanaLine) return <FuriganaText kanji={exampleJapanese} kana={kanaLine} />;
+  const kanaIsReadable = Boolean(
+    kanaLine && hasJapaneseScript(kanaLine) && !hasKanjiCharacter(kanaLine),
+  );
+  if (kanaIsReadable) return <FuriganaText kanji={exampleJapanese} kana={kanaLine} />;
   return exampleJapanese;
 }
 
@@ -102,9 +108,11 @@ function ExampleCard({
   compact?: boolean;
 }) {
   const kanaLine = expandExampleKana(example.jp, example.kana ?? "", headwordKanji, headwordKana);
-  const kanaIsReadable = Boolean(kanaLine && !hasKanjiCharacter(kanaLine));
+  const kanaIsReadable = Boolean(
+    kanaLine && hasJapaneseScript(kanaLine) && !hasKanjiCharacter(kanaLine),
+  );
   const showKana = Boolean(kanaIsReadable && kanaLine !== example.jp);
-  const romajiLine = exampleRomajiLine(example.jp, example.kana ?? "", kanaLine);
+  const romajiLine = exampleRomajiLine(example, example.jp, example.kana ?? "", kanaLine);
 
   return (
     <article className="wordExtras__example">
@@ -198,7 +206,12 @@ export function WordExtras({
                 headwordKanji,
                 headwordKana,
               );
-              const romajiLine = exampleRomajiLine(example.jp, example.kana ?? "", kanaLine);
+              const romajiLine = exampleRomajiLine(
+                example,
+                example.jp,
+                example.kana ?? "",
+                kanaLine,
+              );
               return (
                 <article key={example.jp} className="flashExample">
                   <div className="flashExample__top">
