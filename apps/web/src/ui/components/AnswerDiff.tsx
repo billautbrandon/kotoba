@@ -128,7 +128,7 @@ export function AnswerDiff({
   const romajiReading = useMemo(() => {
     const source = kanaReading || (hasJapaneseScript(expectedAnswer) ? expectedAnswer : "");
     if (!source || !hasJapaneseScript(source)) return null;
-    const converted = kanaToRomaji(source);
+    const converted = kanaToRomaji(source, expectedAnswer);
     return converted && converted !== source ? converted : null;
   }, [expectedAnswer, kanaReading]);
 

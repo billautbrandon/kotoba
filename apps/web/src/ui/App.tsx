@@ -254,7 +254,6 @@ export function App() {
     location.pathname.startsWith("/train/tag/") ||
     location.pathname.startsWith("/train/tags");
   const isSrsActive = location.pathname === "/srs" || location.pathname.startsWith("/train/srs/");
-  const isTrainSession = location.pathname.startsWith("/train/");
 
   const primaryLinks = (
     <>
@@ -296,9 +295,7 @@ export function App() {
   }
 
   return (
-    <div
-      className={`app${isAuthenticated ? " app--withNav" : ""}${isTrainSession ? " app--session" : ""}`}
-    >
+    <div className={`app${isAuthenticated ? " app--withNav" : ""}`}>
       {isAuthenticated && currentUser ? (
         <header className="topNav">
           <Link className={`topNav__brand${isHomeActive ? " topNav__brand--active" : ""}`} to="/">
@@ -392,7 +389,7 @@ export function App() {
           </Routes>
         </main>
       </div>
-      {isAuthenticated && currentUser && !isTrainSession ? (
+      {isAuthenticated && currentUser ? (
         <nav className="mobileBar" aria-label="Navigation mobile">
           <TopNavLink
             variant="mobile"

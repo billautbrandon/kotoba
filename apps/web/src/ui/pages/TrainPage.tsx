@@ -337,6 +337,16 @@ export function TrainPage(props: { mode: TrainMode }) {
   }, [phase]);
 
   useEffect(() => {
+    const inLockedSession = phase === "training" || phase === "correcting";
+    document.body.classList.toggle("kotoba-session", inLockedSession);
+    document.body.classList.toggle("kotoba-session-lock", inLockedSession);
+    return () => {
+      document.body.classList.remove("kotoba-session");
+      document.body.classList.remove("kotoba-session-lock");
+    };
+  }, [phase]);
+
+  useEffect(() => {
     if (phase !== "training") return;
     const intervalId = window.setInterval(() => setClockNowMs(Date.now()), 1000);
     return () => window.clearInterval(intervalId);

@@ -41,7 +41,7 @@ function romajiFromKana(kana: string): string | null {
   const kanaOnly = kana.replace(/[\u4e00-\u9fff]/g, "");
   const source = hasJapaneseScript(kanaOnly) ? kanaOnly : kana;
   if (!hasJapaneseScript(source)) return null;
-  const converted = kanaToRomaji(source);
+  const converted = kanaToRomaji(source, kana);
   const cleaned = converted
     .replace(/[\u4e00-\u9fff\u3040-\u30ff]/g, "")
     .replace(/\s+/g, " ")

@@ -105,6 +105,17 @@ function practiceFeedbackFields(
   };
 }
 
+const LENIENT_JP_TRANSLATION_RULES = `Tolérance pédagogique (prioritaire sur la réponse attendue) :
+- Tu évalues le SENS et la grammaticalité, pas la conformité mot à mot avec la réponse attendue.
+- Si la phrase de l'élève est correcte ou pleinement acceptable, mets isCorrect=true même si elle diffère de la réponse attendue (synonymes, ordre naturel, politesse équivalente, kana ou romaji au lieu de kanji).
+- 私は / watashi wa : l'ajouter ou l'omettre n'est JAMAIS une erreur. Les deux sont naturels. Tu peux le mentionner comme nuance dans summary, sans pénaliser.
+- に et へ pour une destination ou une direction sont tous deux acceptables. Ne marque jamais l'un comme faux au profit de l'autre.
+- は et が : si les deux sont possibles dans le contexte, accepte. Ne pénalise que si le choix change vraiment le sens.
+- Vocabulaire : un mot juste et compréhensible (mot natif ou emprunt, ex. 机 / テーブル) doit être accepté. Si un mot plus naturel ou plus scolaire existe, signale-le dans summary SANS mettre isCorrect=false.
+- Petites variations de romaji (suupaa/supa, koohii/kohi, wo/o, espaces) : accepte si c'est reconnaissable.
+- "almost" uniquement pour une vraie petite erreur qui rend la phrase incorrecte (mauvaise particule qui change le rôle, mauvaise conjugaison, mot faux). Jamais pour une préférence stylistique.
+- Si tu hésites entre correct et faux, choisis correct et explique éventuellement la forme plus naturelle dans summary.`;
+
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
   const wrapAsync =
     (
@@ -2457,6 +2468,8 @@ Contraintes strictes :
 - Style de politesse : ${politenessLabels[body.politeness] ?? body.politeness}
 ${lengthInstruction}
 - Utilise un japonais naturel, pas de phrases de manuels scolaires rigides.
+- 私は est facultatif : tu peux l'inclure ou l'omettre. Les deux sont naturels, n'en fais pas une contrainte.
+- Pour une destination, に et へ sont tous deux corrects ; choisis-en un sans laisser entendre que l'autre serait faux.
 - Chaque phrase doit utiliser au moins un mot du vocabulaire fourni.
 - Chaque phrase doit utiliser au moins une des particules autorisées.
 - L'élève apprend les kanji, donc écrire en kana est acceptable.${storyInstruction}${kanjiInstruction}${directionInstruction}
@@ -2585,13 +2598,15 @@ Le champ used_words_fr doit contenir les mots français du vocabulaire fourni qu
         : "";
 
       const pedagogicalRules = `Règles de classification (très important) :
-- "correct" : la réponse est juste ou pleinement acceptable (synonymes, romaji phonétiquement exact, kana au lieu de kanji). isCorrect=true, retryable=false, hint=null. summary = une phrase qui valide (et éventuellement la lecture). rule et example restent null.
-- "almost" : le SENS est bon, mais il y a une petite erreur (particule, conjugaison, un mot proche, politesse, ordre). Donne une seconde chance. isCorrect=false, retryable=true. hint = un indice court qui N'EN DONNE PAS la phrase complète. summary, rule et example restent null.
+- "correct" : la réponse est juste ou pleinement acceptable (synonymes, formulations différentes, romaji phonétiquement reconnaissable, kana au lieu de kanji, 私は optionnel, に/へ interchangeables pour une destination). isCorrect=true, retryable=false, hint=null. summary = une phrase qui valide ; tu peux y glisser une forme plus naturelle, sans en faire une erreur. rule et example restent null.
+- "almost" : le SENS est bon, mais il y a une vraie petite erreur qui rend la phrase incorrecte (conjugaison fausse, mot faux, particule qui change le rôle). Donne une seconde chance. isCorrect=false, retryable=true. hint = un indice court qui N'EN DONNE PAS la phrase complète. summary, rule et example restent null.
 - "wrong" : le sens est faux, ou trop d'erreurs. isCorrect=false, retryable=false, hint=null.
   summary = une phrase qui identifie l'erreur.
   rule = une phrase qui explique la règle.
   example = une phrase facultative avec un exemple court, sinon null.
-- Style : professeur clair, posé. Aucun emoji, pas de "Bravo". Maximum une phrase par champ.`;
+- Style : professeur bienveillant, clair, posé. Aucun emoji, pas de "Bravo". Maximum une phrase par champ.
+
+${LENIENT_JP_TRANSLATION_RULES}`;
 
       const prompt = isJpToFr
         ? `Tu es un professeur de japonais expérimenté qui corrige le devoir d'un élève. Un élève devait traduire cette phrase japonaise en français :
@@ -2621,8 +2636,8 @@ Analyse la réponse de l'élève et réponds UNIQUEMENT au format JSON avec cett
 Règles de classification :
 - Si la réponse est correcte ou acceptable (même formulée différemment), mets isCorrect à true et errorType à null.
 - L'élève apprend les kanji. Si la réponse est écrite en kana au lieu des kanji mais est autrement correcte, considère-la comme correcte.
-- L'élève peut aussi écrire en romaji (lettres latines) plutôt qu'en kana/kanji. Si la transcription romaji correspond phonétiquement à la réponse attendue, considère-la comme correcte. Ne signale jamais l'usage du romaji comme une erreur.
-- errorType doit être "particle" si l'erreur porte sur une particule, "conjugation" si c'est une erreur de conjugaison/temps, "kanji" si c'est uniquement un problème de kanji, "other" sinon.${romajiNote}
+- L'élève peut aussi écrire en romaji (lettres latines) plutôt qu'en kana/kanji. Si la transcription romaji correspond phonétiquement à une phrase japonaise correcte pour cet énoncé, considère-la comme correcte. Ne signale jamais l'usage du romaji comme une erreur.
+- errorType doit être "particle" si l'erreur porte sur une particule vraiment fautive, "conjugation" si c'est une erreur de conjugaison/temps, "kanji" si c'est uniquement un problème de kanji, "other" sinon.${romajiNote}
 
 ${pedagogicalRules}`;
 
@@ -3003,9 +3018,10 @@ ${historyBlock}
 Question de l'élève : "${body.question}"
 
 Règles de réponse :
-- Adresse-toi à l'élève comme un professeur en classe : ton clair, direct, posé, professionnel.
+- Adresse-toi à l'élève comme un professeur en classe : ton clair, direct, posé, professionnel et bienveillant.
 - N'écris pas de salutation ni de formule d'introduction. Va à l'essentiel.
 - Réponds en français à la question posée. Explique précisément la règle, la nuance ou le sens demandé, puis donne un ou deux exemples concrets si c'est pertinent.
+- Si plusieurs formulations sont correctes (私は optionnel, に/へ pour une destination, synonymes), dis-le clairement : n'impose pas une seule "bonne" phrase.
 - Si la question est ambiguë, demande une précision en une phrase.
 - Ne dévoile pas la réponse complète à l'élève sauf si la question le demande explicitement (par exemple "comment dit-on cette phrase ?"). Préfère guider l'élève vers la solution.
 - Interdictions strictes : aucun emoji, aucun smiley, aucun symbole décoratif (pas de 💚, 🎯, 📝, ✓, ✗, ✅, ❌, etc.). Pas de "Bravo !", "Super !", "Excellente question !".
@@ -3482,10 +3498,12 @@ ${isFrToJp ? 'Le champ answer_alt doit contenir la version tout en kana (si le a
         : "";
 
       const jlptPedagogicalRules = `Règles de feedback :
-- Si la réponse est correcte ou acceptable, mets isCorrect à true, errorType à null, summary à une phrase qui valide la réponse, rule et example à null.
+- Si la réponse est correcte ou acceptable, mets isCorrect à true, errorType à null, summary à une phrase qui valide la réponse (tu peux y glisser une forme plus naturelle), rule et example à null.
 - Si la réponse est incorrecte : summary identifie l'erreur, rule explique la règle, example est un exemple court ou null.
-- Style attendu : ton de professeur en classe — clair, direct, posé. Pas d'emoji, pas de "Bravo".
-- Maximum une phrase par champ. Le texte est en français.`;
+- Style attendu : ton de professeur bienveillant en classe — clair, direct, posé. Pas d'emoji, pas de "Bravo".
+- Maximum une phrase par champ. Le texte est en français.
+
+${LENIENT_JP_TRANSLATION_RULES}`;
 
       const evalPrompt = isJpToFr
         ? `Tu es un professeur de japonais expérimenté (niveau JLPT N5) qui corrige le devoir d'un élève. Un élève devait traduire du japonais vers le français :
@@ -3510,7 +3528,7 @@ Réponds UNIQUEMENT au format JSON :
 {"isCorrect": false, "errorType": "particle|conjugation|kanji|other", "summary": "Erreur identifiée", "rule": "Règle", "example": null}
 
 Si la réponse est en kana au lieu de kanji mais correcte, accepte-la.
-L'élève peut aussi écrire en romaji ; si la transcription phonétique correspond à la réponse attendue, considère-la comme correcte.${jlptRomajiNote}
+L'élève peut aussi écrire en romaji ; si la transcription phonétique correspond à une phrase japonaise correcte pour cet énoncé, considère-la comme correcte. Ne te limite pas à la formulation exacte de la réponse attendue.${jlptRomajiNote}
 
 ${jlptPedagogicalRules}`;
 

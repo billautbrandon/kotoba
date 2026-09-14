@@ -51,7 +51,7 @@ function exampleRomajiPrefill(example: WordExample): string {
   const kana = example.kana?.trim() ?? "";
   if (!kana) return "";
   if (!hasJapaneseScript(kana)) return kana;
-  return kanaToRomaji(kana);
+  return kanaToRomaji(kana, example.jp);
 }
 
 function buildInitialState(

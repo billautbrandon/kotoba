@@ -373,6 +373,12 @@ function kanaToRomaji(kana: string): string {
   );
   let romaji = "";
   while (remaining.length > 0) {
+    if (remaining[0] === "ー") {
+      const lastVowel = romaji.match(/[aeiou]$/i)?.[0];
+      if (lastVowel) romaji += lastVowel;
+      remaining = remaining.slice(1);
+      continue;
+    }
     if (remaining[0] === "っ" && remaining.length > 1) {
       const nextChunk = HIRAGANA_ROMAJI.find((pair) => remaining.startsWith(pair[0], 1));
       const nextSound = nextChunk?.[1] ?? "";
