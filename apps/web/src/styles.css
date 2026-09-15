@@ -24,7 +24,9 @@ body {
   overflow-y: auto;
 }
 
+html:has(body.kotoba-session-lock),
 body.kotoba-session-lock {
+  height: 100%;
   height: 100dvh;
   overflow: hidden;
 }
@@ -51,6 +53,7 @@ a {
 .app__content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -2029,6 +2032,8 @@ body.kotoba-session-lock .app {
 
 .app--session .main,
 body.kotoba-session-lock .main {
+  display: flex;
+  flex-direction: column;
   padding-top: 12px;
   padding-bottom: 12px;
   min-height: 0;
@@ -2036,6 +2041,7 @@ body.kotoba-session-lock .main {
 }
 
 .trainSession--study {
+  flex: 1 1 0%;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -2176,14 +2182,16 @@ body.kotoba-session-lock .main {
 }
 
 .studyStage {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
   display: grid;
   grid-template-columns: 56px minmax(0, 760px) 56px;
-  align-items: center;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
   justify-content: center;
   gap: 12px;
   width: 100%;
+  overflow: hidden;
 }
 
 .studyStage__arrow {
@@ -2236,8 +2244,9 @@ body.kotoba-session-lock .main {
 }
 
 .studyCard--open {
-  height: min(680px, calc(100dvh - 120px));
-  max-height: min(680px, calc(100dvh - 120px));
+  height: 100%;
+  max-height: 100%;
+  min-width: 0;
   min-height: 0;
   padding: 0;
   overflow: hidden;
@@ -2245,7 +2254,7 @@ body.kotoba-session-lock .main {
 
 .studyCard--open.studyCard--sparse {
   height: auto;
-  max-height: none;
+  max-height: 100%;
 }
 
 .studyCard--open.studyCard--sparse .studyCard__body {
@@ -2253,14 +2262,16 @@ body.kotoba-session-lock .main {
 }
 
 .studyCard__body {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   padding: 24px 32px 20px;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .studyCard__main {
@@ -2427,7 +2438,7 @@ body.kotoba-session-lock .main {
 }
 
 .studyCard--open .flashExtras {
-  flex: 1;
+  flex: none;
   margin-top: 14px;
   display: flex;
   flex-direction: column;
@@ -2451,6 +2462,7 @@ body.kotoba-session-lock .main {
   margin: 0;
   flex-shrink: 0;
   width: 100%;
+  background: var(--color-panel);
 }
 
 .studyCard__rating:first-child {
@@ -8219,8 +8231,11 @@ body.kotoba-session-lock .main {
   margin-bottom: var(--space-5);
   padding: var(--space-6);
   border-radius: var(--radius-2xl);
-  background:
-    linear-gradient(135deg, var(--color-primary-soft) 0%, var(--color-secondary-light) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-primary-soft) 0%,
+    var(--color-secondary-light) 100%
+  );
   border: 1px solid var(--color-primary-muted);
   box-shadow: var(--shadow-card);
 }
@@ -9054,10 +9069,50 @@ body.kotoba-session-lock .main {
     height: 18px;
   }
 
+  html:has(body.kotoba-session-lock),
+  body.kotoba-session-lock {
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.kotoba-session-lock .app,
+  body.kotoba-session-lock .app__content,
+  body.kotoba-session-lock .main {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  body.kotoba-session-lock .main {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .trainSession--study {
+    overflow: visible;
+    height: auto;
+    min-height: 0;
+    flex: 1 0 auto;
+  }
+
+  .studyStage {
+    overflow: visible;
+    flex: 0 1 auto;
+    grid-template-rows: auto;
+    align-items: start;
+  }
+
+  .studyStage__arrow {
+    position: sticky;
+    top: 42%;
+  }
+
   .studyCard--open {
     border-radius: 22px;
-    height: min(600px, calc(100dvh - 104px));
-    max-height: min(600px, calc(100dvh - 104px));
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .studyCard--open.studyCard--sparse {
@@ -9067,6 +9122,15 @@ body.kotoba-session-lock .main {
 
   .studyCard__body {
     padding: 18px 16px 14px;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .studyCard__ratings {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    box-shadow: 0 -16px 18px var(--color-panel);
   }
 
   .studyCard__main {
