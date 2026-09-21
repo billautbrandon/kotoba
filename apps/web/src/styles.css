@@ -2187,7 +2187,7 @@ body.kotoba-session-lock .main {
   display: grid;
   grid-template-columns: 56px minmax(0, 760px) 56px;
   grid-template-rows: minmax(0, 1fr);
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
   gap: 12px;
   width: 100%;
@@ -2244,21 +2244,13 @@ body.kotoba-session-lock .main {
 }
 
 .studyCard--open {
-  height: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: min(600px, 72%);
+  min-height: min(600px, 72%);
+  max-height: min(600px, 72%);
   min-width: 0;
-  min-height: 0;
   padding: 0;
   overflow: hidden;
-}
-
-.studyCard--open.studyCard--sparse {
-  height: auto;
-  max-height: 100%;
-}
-
-.studyCard--open.studyCard--sparse .studyCard__body {
-  flex: 0 1 auto;
 }
 
 .studyCard__body {
@@ -2267,74 +2259,44 @@ body.kotoba-session-lock .main {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 24px 32px 20px;
+  padding: 28px 32px 24px;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-y;
 }
 
-.studyCard__main {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
-  align-items: stretch;
-  width: 100%;
-}
-
-.studyCard__main--cols3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.studyCard__main--cols3 .studyCard__cell--word {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.studyCard__cell {
+.studyCard__head {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 0;
-  min-height: 92px;
-  padding: 8px 18px;
-  border-left: 1px solid var(--color-border);
+  gap: 0;
+  width: 100%;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.studyCard__cell--word {
-  border-left: 0;
-  padding-left: 4px;
-}
-
-.studyCard__cell--kana {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.studyCard__cell--meaning {
+.studyCard__wordRow {
+  display: flex;
   align-items: center;
-  padding-right: 4px;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-width: 0;
 }
 
 .studyCard__word {
-  position: relative;
   margin: 0;
   text-align: center;
-  font-size: 42px;
+  font-size: 44px;
   font-weight: 800;
-  line-height: 1.1;
-  letter-spacing: 0.02em;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
   color: var(--color-text);
+  word-break: keep-all;
 }
 
 .studyCard__wordStroke {
-  position: absolute;
-  top: 8px;
-  margin-left: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2355,25 +2317,42 @@ body.kotoba-session-lock .main {
   background: var(--color-primary-softer);
 }
 
-.studyCard__kana,
-.studyCard__romaji {
-  font-size: 16px;
-  font-weight: 500;
+.studyCard__reading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px 16px;
+  margin: 8px 0 0;
   line-height: 1.3;
-  color: var(--color-muted);
-  text-align: center;
+}
+
+.studyCard__kana {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-text);
 }
 
 .studyCard__romaji {
+  font-size: 22px;
+  font-weight: 600;
   font-style: normal;
+  color: var(--color-text);
+}
+
+.studyCard__readingSep {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--color-muted);
 }
 
 .studyCard__french {
-  margin: 0;
+  margin: 10px 0 0;
   width: 100%;
   text-align: center;
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 600;
+  font-style: normal;
   line-height: 1.3;
   color: var(--color-text);
 }
@@ -2432,17 +2411,17 @@ body.kotoba-session-lock .main {
 
 .studyCard__description .studyCard__etymology,
 .studyCard__description .studyCard__note {
-  justify-content: flex-start;
-  text-align: left;
+  justify-content: center;
+  text-align: center;
   line-height: 1.55;
 }
 
 .studyCard--open .flashExtras {
   flex: none;
-  margin-top: 14px;
+  margin-top: 22px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 22px;
   width: 100%;
 }
 
@@ -2459,7 +2438,7 @@ body.kotoba-session-lock .main {
 .studyCard__ratings {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  margin: 0;
+  margin-top: auto;
   flex-shrink: 0;
   width: 100%;
   background: var(--color-panel);
@@ -2649,64 +2628,59 @@ body.kotoba-session-lock .main {
 .flashExampleList {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 26px;
   min-height: 0;
 }
 
-.flashExample {
+.lyricExample {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  padding: 14px 16px 14px 18px;
-  border: 1px solid var(--color-border);
-  border-left: 4px solid var(--color-primary);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--color-primary-softer) 70%, var(--color-panel) 30%);
-}
-
-.flashExample__top {
-  display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 2px;
+  text-align: left;
 }
 
-.flashExample__jp,
-.flashExample__romaji,
-.flashExample__fr {
+.lyricExample__jpRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lyricExample__reading,
+.lyricExample__jp,
+.lyricExample__fr {
   margin: 0;
 }
 
-.flashExample__jp {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.5;
+.lyricExample__reading {
+  font-size: 15px;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.4;
+  color: var(--color-text-soft);
+}
+
+.lyricExample__jp {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.4;
   color: var(--color-text);
+  word-break: keep-all;
 }
 
-.flashExample__hit {
+.lyricExample__hit {
   color: var(--color-primary-dark);
-  text-decoration: underline;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 3px;
 }
 
-.flashExample__romaji {
-  margin-top: 10px;
-  font-size: 14px;
+.lyricExample__fr {
+  margin-top: 1px;
+  font-size: 16px;
+  font-weight: 400;
   font-style: italic;
-  font-weight: 500;
   line-height: 1.45;
   color: var(--color-muted);
-}
-
-.flashExample__fr {
-  margin-top: 8px;
-  font-size: 15px;
-  font-weight: 500;
-  line-height: 1.45;
-  color: var(--color-text);
 }
 
 .trainSession__prompt {
@@ -5039,10 +5013,6 @@ body.kotoba-session-lock .main {
 [data-theme="dark"] .studyCard,
 [data-theme="dark"] .studyStage__arrow {
   background: var(--color-panel);
-}
-
-[data-theme="dark"] .flashExample {
-  background: color-mix(in srgb, var(--color-primary-softer) 55%, var(--color-panel) 45%);
 }
 
 [data-theme="dark"] .flashKanji__tile {
@@ -7410,8 +7380,12 @@ body.kotoba-session-lock .main {
   gap: var(--space-3);
 }
 
+.vocabPage--selecting {
+  padding-bottom: 96px;
+}
+
 .vocabPage--selecting .vocabSeriesGrid {
-  padding-bottom: 24px;
+  padding-bottom: 8px;
 }
 
 .vocabSeriesCard {
@@ -7547,15 +7521,18 @@ body.kotoba-session-lock .main {
 }
 
 .vocabSelectBar {
-  position: sticky;
-  bottom: var(--space-4);
-  z-index: 20;
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
-  margin-top: var(--space-5);
+  width: min(calc(100% - 2 * var(--space-6)), 1320px);
+  margin: 0;
   padding: 14px 18px;
   border-radius: var(--radius-2xl);
   background: var(--color-panel);
@@ -7658,7 +7635,8 @@ body.kotoba-session-lock .main {
   }
 
   .vocabSelectBar {
-    bottom: var(--space-3);
+    bottom: calc(88px + env(safe-area-inset-bottom));
+    width: calc(100% - 24px);
   }
 }
 
@@ -8769,74 +8747,7 @@ body.kotoba-session-lock .main {
 .wordExtras__exampleList {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-}
-
-.wordExtras__example {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  background: var(--color-panel-subtle);
-  border-radius: var(--radius-md);
-}
-
-.wordExtras__example + .wordExtras__example {
-  margin-top: 0;
-}
-
-.wordExtras__exampleJp {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.45;
-  color: var(--color-text);
-}
-
-.wordExtras__exampleJp ruby rt {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-muted);
-}
-
-.wordExtras__scriptRow {
-  display: grid;
-  grid-template-columns: 78px 1fr;
-  gap: 8px 12px;
-  align-items: baseline;
-  padding-top: 10px;
-  border-top: 1px dashed var(--color-border);
-}
-
-.wordExtras__scriptLabel {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--color-muted);
-  padding-top: 2px;
-}
-
-.wordExtras__scriptValue {
-  font-size: 16px;
-  line-height: 1.5;
-  color: var(--color-text);
-  word-break: break-word;
-}
-
-.wordExtras__scriptValue--kana {
-  color: var(--color-text-soft);
-}
-
-.wordExtras__scriptValue--romaji {
-  font-style: italic;
-  color: var(--color-muted);
-}
-
-.wordExtras__scriptValue--fr {
-  color: var(--color-text);
+  gap: 20px;
 }
 
 .wordExtras--compact {
@@ -8891,51 +8802,19 @@ body.kotoba-session-lock .main {
 }
 
 .wordExtras--compact .wordExtras__exampleList {
-  gap: 8px;
+  gap: 16px;
 }
 
-.wordExtras--compact .wordExtras__example {
-  padding: 10px 12px;
-  gap: 4px;
-}
-
-.wordExtras--compact .wordExtras__exampleJp {
-  font-size: 16px;
-  line-height: 1.35;
-}
-
-.wordExtras--compact .wordExtras__exampleJp ruby rt {
-  font-size: 9px;
-}
-
-.wordExtras__exampleMeta,
-.wordExtras__exampleRomaji,
-.wordExtras__exampleFr {
-  margin: 0;
+.wordExtras--compact .lyricExample__reading {
   font-size: 13px;
-  line-height: 1.4;
 }
 
-.wordExtras__exampleMeta {
-  color: var(--color-text-soft);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
+.wordExtras--compact .lyricExample__jp {
+  font-size: 18px;
 }
 
-.wordExtras__exampleDot {
-  color: var(--color-muted);
-}
-
-.wordExtras__exampleRomaji {
-  font-style: italic;
-  font-weight: 500;
-  color: var(--color-muted);
-}
-
-.wordExtras__exampleFr {
-  color: var(--color-text);
+.wordExtras--compact .lyricExample__fr {
+  font-size: 14px;
 }
 
 .placementCard {
@@ -9099,8 +8978,9 @@ body.kotoba-session-lock .main {
   .studyStage {
     overflow: visible;
     flex: 0 1 auto;
-    grid-template-rows: auto;
-    align-items: start;
+    min-height: min(600px, calc(100dvh - 160px));
+    grid-template-rows: minmax(0, 1fr);
+    align-items: center;
   }
 
   .studyStage__arrow {
@@ -9110,20 +8990,17 @@ body.kotoba-session-lock .main {
 
   .studyCard--open {
     border-radius: 22px;
-    height: auto;
-    max-height: none;
-    overflow: visible;
-  }
-
-  .studyCard--open.studyCard--sparse {
-    height: auto;
-    max-height: none;
+    height: min(600px, calc(100dvh - 160px));
+    min-height: min(600px, calc(100dvh - 160px));
+    max-height: min(600px, calc(100dvh - 160px));
+    overflow: hidden;
   }
 
   .studyCard__body {
-    padding: 18px 16px 14px;
-    flex: 0 0 auto;
-    overflow: visible;
+    padding: 20px 18px 16px;
+    flex: 1 1 0%;
+    min-height: 0;
+    overflow: auto;
   }
 
   .studyCard__ratings {
@@ -9133,78 +9010,22 @@ body.kotoba-session-lock .main {
     box-shadow: 0 -16px 18px var(--color-panel);
   }
 
-  .studyCard__main {
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto;
-  }
-
-  .studyCard__cell {
-    min-height: 72px;
-    padding: 10px 12px;
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .studyCard__cell--word,
-  .studyCard__cell--meaning {
-    border-top: 0;
-  }
-
-  .studyCard__cell--word {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .studyCard__cell--meaning {
-    grid-column: 2;
-    grid-row: 1;
-    border-left: 1px solid var(--color-border);
-    align-items: center;
-  }
-
-  .studyCard__cell--kana {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .studyCard__cell--romaji {
-    grid-column: 2;
-    grid-row: 2;
-    border-left: 1px solid var(--color-border);
-  }
-
-  .studyCard__main--cols3 .studyCard__cell--romaji {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    border-left: 0;
-  }
-
   .studyCard__word {
-    font-size: 40px;
+    font-size: 36px;
   }
 
   .studyCard__kana,
   .studyCard__romaji {
-    font-size: 15px;
+    font-size: 18px;
   }
 
   .studyCard__french {
-    font-size: 20px;
-    text-align: center;
-  }
-
-  .studyCard__etymology {
-    justify-content: center;
-    text-align: center;
-  }
-
-  .studyCard__note {
-    text-align: center;
+    font-size: 18px;
   }
 
   .studyCard--open .flashExtras {
-    margin-top: 14px;
-    gap: 16px;
+    margin-top: 18px;
+    gap: 20px;
   }
 
   .studyCard--open .flashKanjiWrap {
@@ -9225,9 +9046,8 @@ body.kotoba-session-lock .main {
     font-size: 24px;
   }
 
-  .flashExample {
-    padding: 14px 14px 14px 16px;
-    border-radius: 16px;
+  .lyricExample__jp {
+    font-size: 20px;
   }
 
   .studyCard__rating {
@@ -9243,15 +9063,6 @@ body.kotoba-session-lock .main {
   }
 
   .trainSession__readingValue {
-    font-size: 18px;
-  }
-
-  .wordExtras__scriptRow {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-
-  .wordExtras__exampleJp {
     font-size: 18px;
   }
 }

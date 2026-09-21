@@ -245,20 +245,8 @@ export function TrainPage(props: { mode: TrainMode }) {
     currentWord?.kanji && currentWord.kana && currentWord.kana !== currentWord.kanji,
   );
 
-  const wordMnemonic =
-    currentWord && !currentWord.kanji_breakdown?.length ? currentWord.mnemonic : null;
   const wordNote =
     currentWord?.note && currentWord.note !== currentWord.mnemonic ? currentWord.note : null;
-  const hasWordDescription = Boolean(wordMnemonic || wordNote);
-
-  const hasFlashExtras = useMemo(() => {
-    if (!currentWord) return false;
-    return (
-      (currentWord.examples?.length ?? 0) > 0 ||
-      (currentWord.kanji_breakdown?.length ?? 0) > 0 ||
-      hasWordDescription
-    );
-  }, [currentWord, hasWordDescription]);
 
   const handleShowKanjiStroke = (kanjiChar?: string) => {
     const selectedKanji =
@@ -1102,53 +1090,51 @@ export function TrainPage(props: { mode: TrainMode }) {
             >
               <ChevronLeftIcon className="studyStage__arrowIcon" />
             </button>
-            <article
-              className={`studyCard studyCard--open${hasFlashExtras ? "" : " studyCard--sparse"}`}
-            >
+            <article className="studyCard studyCard--open">
               <div className="studyCard__body">
-                <div
-                  className={`studyCard__main ${hasDistinctKana ? "studyCard__main--cols4" : "studyCard__main--cols3"}`}
-                >
-                  <div className="studyCard__cell studyCard__cell--word">
+                <div className="studyCard__head">
+                  <div className="studyCard__wordRow">
                     <p className="studyCard__word">
                       {currentWord.kanji || currentWord.kana || promptText}
-                      {currentWordKanji.length > 0 &&
-                      !(currentWord.kanji_breakdown && currentWord.kanji_breakdown.length > 0) ? (
-                        <button
-                          type="button"
-                          className="studyCard__wordStroke"
-                          onClick={() => handleShowKanjiStroke()}
-                          aria-label="Sens de trace"
-                        >
-                          ✎
-                        </button>
+                    </p>
+                    {currentWordKanji.length > 0 &&
+                    !(currentWord.kanji_breakdown && currentWord.kanji_breakdown.length > 0) ? (
+                      <button
+                        type="button"
+                        className="studyCard__wordStroke"
+                        onClick={() => handleShowKanjiStroke()}
+                        aria-label="Sens de trace"
+                      >
+                        ✎
+                      </button>
+                    ) : null}
+                    {currentWord.kana || currentWord.kanji ? (
+                      <AudioButton
+                        text={currentWord.kana || currentWord.kanji || ""}
+                        size="small"
+                      />
+                    ) : null}
+                  </div>
+                  {hasDistinctKana || currentWord.romaji ? (
+                    <p className="studyCard__reading">
+                      {hasDistinctKana ? (
+                        <span className="studyCard__kana">{currentWord.kana}</span>
+                      ) : null}
+                      {hasDistinctKana && currentWord.romaji ? (
+                        <span className="studyCard__readingSep" aria-hidden="true">
+                          ·
+                        </span>
+                      ) : null}
+                      {currentWord.romaji ? (
+                        <span className="studyCard__romaji">{currentWord.romaji}</span>
                       ) : null}
                     </p>
-                    {!hasDistinctKana && currentWord.kana ? (
-                      <AudioButton text={currentWord.kana} size="small" />
-                    ) : null}
-                  </div>
-                  {hasDistinctKana ? (
-                    <div className="studyCard__cell studyCard__cell--kana">
-                      <span className="studyCard__kana">{currentWord.kana}</span>
-                      {currentWord.kana ? (
-                        <AudioButton text={currentWord.kana} size="small" />
-                      ) : null}
-                    </div>
                   ) : null}
-                  <div className="studyCard__cell studyCard__cell--romaji">
-                    {currentWord.romaji ? (
-                      <span className="studyCard__romaji">{currentWord.romaji}</span>
-                    ) : null}
-                  </div>
-                  <div className="studyCard__cell studyCard__cell--meaning">
-                    <p className="studyCard__french">{currentWord.french}</p>
-                  </div>
+                  <p className="studyCard__french">{currentWord.french}</p>
                 </div>
-                {hasWordDescription ? (
+                {wordNote ? (
                   <div className="studyCard__description">
-                    {wordMnemonic ? <p className="studyCard__etymology">{wordMnemonic}</p> : null}
-                    {wordNote ? <p className="studyCard__note">{wordNote}</p> : null}
+                    <p className="studyCard__note">{wordNote}</p>
                   </div>
                 ) : null}
                 <WordExtras
