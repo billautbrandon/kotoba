@@ -1,7 +1,6 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 
-import { type GeminiQuota, fetchGeminiQuota, generateWordsFromList } from "../../api";
-import { QuotaBar } from "./QuotaBar";
+import { generateWordsFromList } from "../../api";
 
 const MAX_IMPORT_WORDS = 40;
 
@@ -33,21 +32,6 @@ export function ImportPanel({ onImported, onError }: ImportPanelProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [warningMessages, setWarningMessages] = useState<string[]>([]);
-  const [quota, setQuota] = useState<GeminiQuota | null>(null);
-
-  useEffect(() => {
-    let isCancelled = false;
-    fetchGeminiQuota()
-      .then((loadedQuota) => {
-        if (!isCancelled) setQuota(loadedQuota);
-      })
-      .catch(() => {
-        if (!isCancelled) setQuota(null);
-      });
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
 
   const parsedWords = useMemo(() => parseWordList(wordListText), [wordListText]);
   const trimmedTagName = tagName.trim();
@@ -80,12 +64,6 @@ export function ImportPanel({ onImported, onError }: ImportPanelProps) {
     try {
       const result = await generateWordsFromList(trimmedTagName, parsedWords);
       await onImported();
-      if (result.quota) {
-        setQuota(result.quota);
-      } else {
-        const refreshedQuota = await fetchGeminiQuota().catch(() => null);
-        if (refreshedQuota) setQuota(refreshedQuota);
-      }
 
       const tagLabel = result.tag?.name ?? trimmedTagName;
       setStatusMessage(`${result.createdCount} mot(s) créé(s) dans « ${tagLabel} ».`);
@@ -107,8 +85,6 @@ export function ImportPanel({ onImported, onError }: ImportPanelProps) {
           (français, rōmaji, kana, kanji).
         </p>
       </div>
-
-      {quota ? <QuotaBar quota={quota} /> : null}
 
       <label className="field">
         <span className="field__label">Titre du tag / de la série</span>

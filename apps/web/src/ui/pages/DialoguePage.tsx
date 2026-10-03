@@ -4,17 +4,14 @@ import {
   type DialogueDifficulty,
   type DialogueScenario,
   type DialogueTurn,
-  type GeminiQuota,
   type PhraseEvaluation,
   type Tag,
   evaluateDialogue,
-  fetchGeminiQuota,
   fetchTags,
   generateDialogue,
   submitBulkReviews,
 } from "../../api";
 import { AnswerDiff } from "../components/AnswerDiff";
-import { QuotaBar } from "../components/QuotaBar";
 import { VoiceButton } from "../components/VoiceButton";
 
 type DialoguePhase = "setup" | "training" | "recap";
@@ -72,7 +69,6 @@ export function DialoguePage() {
 
   const [phase, setPhase] = useState<DialoguePhase>("setup");
   const [tags, setTags] = useState<Tag[]>([]);
-  const [quota, setQuota] = useState<GeminiQuota | null>(null);
 
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(persisted?.selectedTagIds ?? []);
   const [scenario, setScenario] = useState<DialogueScenario>(persisted?.scenario ?? "restaurant");
@@ -99,10 +95,9 @@ export function DialoguePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    Promise.all([fetchTags(), fetchGeminiQuota()])
-      .then(([loadedTags, loadedQuota]) => {
+    fetchTags()
+      .then((loadedTags) => {
         setTags(loadedTags);
-        setQuota(loadedQuota);
       })
       .catch(() => {});
   }, []);
@@ -116,12 +111,6 @@ export function DialoguePage() {
       customContext,
     });
   }, [selectedTagIds, scenario, difficulty, exchangeCount, customContext]);
-
-  function refreshQuota() {
-    fetchGeminiQuota()
-      .then(setQuota)
-      .catch(() => {});
-  }
 
   function toggleTag(tagId: number) {
     setSelectedTagIds((previous) =>
@@ -151,7 +140,6 @@ export function DialoguePage() {
       setResults([]);
       setReviewsSubmitted(false);
       setPhase("training");
-      refreshQuota();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
     } finally {
@@ -174,7 +162,6 @@ export function DialoguePage() {
       );
       setCurrentEvaluation(evaluation);
       setHasCheckedCurrent(true);
-      refreshQuota();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur lors de la vérification");
     } finally {
@@ -334,8 +321,6 @@ export function DialoguePage() {
           </p>
         </div>
 
-        {quota && <QuotaBar quota={quota} />}
-
         <div className="pratique__setup">
           <div className="pratique__field">
             <div className="pratique__label">Tags (vocabulaire cible)</div>
@@ -463,8 +448,6 @@ export function DialoguePage() {
             }}
           />
         </div>
-
-        {quota && <QuotaBar quota={quota} />}
 
         <div className="phrasesTraining__topBar">
           <span className="phrasesTraining__counter">

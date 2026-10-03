@@ -570,10 +570,6 @@ export type GeminiQuota = {
   resetsAt: string;
 };
 
-export async function fetchGeminiQuota(): Promise<GeminiQuota> {
-  return apiGet<GeminiQuota>("/api/phrases/quota");
-}
-
 export type PhraseConstraints = {
   tagIds: number[];
   particles: string[];

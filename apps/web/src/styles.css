@@ -4295,70 +4295,6 @@ body.kotoba-session-lock .main {
   border-top: 1px solid var(--color-border);
 }
 
-/* Quota Bar */
-
-.quotaBar {
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-panel-subtle);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-5);
-  border: 1px solid var(--color-border);
-}
-
-.quotaBar--low {
-  border-color: var(--color-warning);
-  background: rgba(201, 169, 97, 0.08);
-}
-
-.quotaBar--depleted {
-  border-color: var(--color-danger);
-  background: var(--color-primary-softer);
-}
-
-.quotaBar__info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.quotaBar__label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-soft);
-}
-
-.quotaBar--depleted .quotaBar__label {
-  color: var(--color-danger);
-}
-
-.quotaBar__reset {
-  font-size: 12px;
-  color: var(--color-muted);
-}
-
-.quotaBar__track {
-  height: 6px;
-  background: var(--color-border);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.quotaBar__fill {
-  height: 100%;
-  background: var(--color-success);
-  border-radius: 3px;
-  transition: width 0.3s ease;
-}
-
-.quotaBar--low .quotaBar__fill {
-  background: var(--color-warning);
-}
-
-.quotaBar--depleted .quotaBar__fill {
-  background: var(--color-danger);
-}
-
 /* ========================================
    Voice Button
    ======================================== */
@@ -5130,10 +5066,6 @@ body.kotoba-session-lock .main {
 [data-theme="dark"] .dictionarySearch__input {
   background: transparent;
   color: var(--color-text);
-}
-
-[data-theme="dark"] .quotaBar__bar {
-  background: var(--color-panel-subtle);
 }
 
 [data-theme="dark"] .formError {
@@ -6854,10 +6786,6 @@ body.kotoba-session-lock .main {
   font-size: 14px;
   color: var(--color-muted);
   line-height: 1.55;
-}
-
-.importPanel .quotaBar {
-  margin-bottom: 0;
 }
 
 .importPanel__textarea {

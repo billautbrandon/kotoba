@@ -5,7 +5,6 @@ import {
   type ConjugationEvaluation,
   type ConjugationExercise,
   type ConstructionBlock,
-  type GeminiQuota,
   type GeneratedPhrase,
   type GrammarNote,
   type JlptConstraints,
@@ -21,7 +20,6 @@ import {
   evaluateJlptAnswer,
   evaluateListening,
   evaluatePhrase,
-  fetchGeminiQuota,
   fetchGrammarNote,
   fetchSeriesWords,
   fetchTags,
@@ -38,7 +36,6 @@ import {
 import { AnswerDiff } from "../components/AnswerDiff";
 import { AudioButton } from "../components/AudioButton";
 import { PillNav } from "../components/PillNav";
-import { QuotaBar } from "../components/QuotaBar";
 import { SearchBar } from "../components/SearchBar";
 import { SentenceBuilder, joinBlocks } from "../components/SentenceBuilder";
 import { TeacherChat } from "../components/TeacherChat";
@@ -228,7 +225,6 @@ export function PratiquePage() {
 
   // Shared state
   const [tags, setTags] = useState<Tag[]>([]);
-  const [quota, setQuota] = useState<GeminiQuota | null>(null);
   const [exercises, setExercises] = useState<UnifiedExercise[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
@@ -348,12 +344,6 @@ export function PratiquePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  function refreshQuota() {
-    fetchGeminiQuota()
-      .then(setQuota)
-      .catch(() => {});
-  }
-
   useEffect(() => {
     const inSession = phase === "training";
     document.body.classList.toggle("kotoba-session", inSession);
@@ -382,10 +372,9 @@ export function PratiquePage() {
   }
 
   useEffect(() => {
-    Promise.all([fetchTags(), fetchGeminiQuota()])
-      .then(([loadedTags, loadedQuota]) => {
+    fetchTags()
+      .then((loadedTags) => {
         setTags(loadedTags);
-        setQuota(loadedQuota);
       })
       .catch(() => {});
   }, []);
@@ -567,7 +556,6 @@ export function PratiquePage() {
       setIsRetryingPhrase(false);
       setPhraseRetryUsed(false);
       setPhase("training");
-      refreshQuota();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
     } finally {
@@ -604,7 +592,6 @@ export function PratiquePage() {
       setIsRetryingPhrase(false);
       setPhraseRetryUsed(false);
       setPhase("training");
-      refreshQuota();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
     } finally {
@@ -637,7 +624,6 @@ export function PratiquePage() {
         answer: exercise.answer,
       }));
       setExercises(unified);
-      setQuota(result.quota);
       setCurrentIndex(0);
       setUserAnswer("");
       setResults([]);
@@ -702,7 +688,6 @@ export function PratiquePage() {
       setIsRetryingPhrase(false);
       setPhraseRetryUsed(false);
       setPhase("training");
-      refreshQuota();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
     } finally {
@@ -721,7 +706,6 @@ export function PratiquePage() {
         count: listeningCount,
       });
       setListeningExercises(result.exercises);
-      setQuota(result.quota);
       setListeningIndex(0);
       setListeningTranscript("");
       setListeningRevealed(false);
@@ -782,7 +766,6 @@ export function PratiquePage() {
         currentListeningExercise.japanese,
         currentListeningExercise.french,
       );
-      refreshQuota();
       setListeningIsCorrect(evaluation.isCorrect ?? false);
       setListeningReview(practiceReviewFromEvaluation(evaluation));
       setListeningErrorType(evaluation.errorType ?? null);
@@ -869,7 +852,6 @@ export function PratiquePage() {
           setCurrentReview(null);
           setCurrentErrorType(evaluation.errorType ?? null);
           setHasCheckedCurrent(false);
-          refreshQuota();
           return;
         }
         setIsRetryingPhrase(false);
@@ -900,10 +882,8 @@ export function PratiquePage() {
         setConjEvaluationCache((previous) =>
           new Map(previous).set(currentIndex, result.evaluation),
         );
-        setQuota(result.quota);
       }
       setHasCheckedCurrent(true);
-      refreshQuota();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur lors de la vérification");
     } finally {
@@ -1315,8 +1295,6 @@ export function PratiquePage() {
           value={pratiquePill}
           onChange={handleTabChange}
         />
-        {quota ? <QuotaBar quota={quota} /> : null}
-
         <div className="pratiqueSetup">
           {activeTab === "phrases" || activeTab === "construction" ? (
             <>
@@ -1923,8 +1901,6 @@ export function PratiquePage() {
             }}
           />
         </div>
-
-        {quota && <QuotaBar quota={quota} />}
 
         <div className="phrasesTraining__topBar">
           <span className="phrasesTraining__counter">

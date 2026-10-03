@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   type BadgeDefinition,
-  type GeminiQuota,
   type KeyboardAnswer,
   type KeyboardCorrection,
   type WordWithStats,
@@ -10,7 +9,6 @@ import {
   correctKeyboardAnswers,
   fetchDifficultWords,
   fetchDueWords,
-  fetchGeminiQuota,
   fetchSeriesWordsByTagIds,
   fetchSrsWords,
   submitBulkReviews,
@@ -23,7 +21,6 @@ import { BadgeNotification } from "../components/BadgeNotification";
 import { KanjiStrokeViewer } from "../components/KanjiStrokeViewer";
 import { LevelUpOverlay } from "../components/LevelUpOverlay";
 import { ChevronLeftIcon, ChevronRightIcon, PlayIcon } from "../components/NavIcons";
-import { QuotaBar } from "../components/QuotaBar";
 import { WordExtras } from "../components/WordExtras";
 import { XpBar } from "../components/XpBar";
 
@@ -123,7 +120,6 @@ export function TrainPage(props: { mode: TrainMode }) {
     Record<number, KeyboardCorrection>
   >({});
   const [correctingError, setCorrectingError] = useState<string | null>(null);
-  const [geminiQuota, setGeminiQuota] = useState<GeminiQuota | null>(null);
   const [sessionStartedAtMs, setSessionStartedAtMs] = useState<number | null>(null);
   const [clockNowMs, setClockNowMs] = useState<number>(() => Date.now());
   const [randomPromptModes, setRandomPromptModes] = useState<PromptMode[]>([]);
@@ -143,14 +139,6 @@ export function TrainPage(props: { mode: TrainMode }) {
       noHitMode: configNoHitMode,
     });
   }, [configSessionMode, configPromptMode, configNoHitMode]);
-
-  useEffect(() => {
-    if (configSessionMode === "keyboard") {
-      fetchGeminiQuota()
-        .then((quota) => setGeminiQuota(quota))
-        .catch(() => setGeminiQuota(null));
-    }
-  }, [configSessionMode]);
 
   const modeLabel = useMemo(() => {
     if (props.mode === "difficult") return "Mots difficiles";
@@ -816,8 +804,6 @@ export function TrainPage(props: { mode: TrainMode }) {
             </div>
           </section>
         </div>
-
-        {configSessionMode === "keyboard" && geminiQuota ? <QuotaBar quota={geminiQuota} /> : null}
 
         <div className="pratiqueSetup__launch">
           <p className="pratiqueSetup__summary">{setupSummary}</p>

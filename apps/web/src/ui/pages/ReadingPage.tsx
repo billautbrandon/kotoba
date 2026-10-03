@@ -1,18 +1,15 @@
 import { useEffect, useState } from "react";
 import {
   type CatalogUserState,
-  type GeminiQuota,
   type ReadingParagraph,
   type ReadingQuestion,
   type Tag,
   checkReadingAnswer,
-  fetchGeminiQuota,
   fetchTags,
   generateReading,
   queueCatalogEntry,
 } from "../../api";
 import { AudioButton } from "../components/AudioButton";
-import { QuotaBar } from "../components/QuotaBar";
 
 type ReadingPhase = "setup" | "reading" | "questions" | "done";
 
@@ -26,7 +23,6 @@ type QuestionResult = {
 export function ReadingPage() {
   const [phase, setPhase] = useState<ReadingPhase>("setup");
   const [tags, setTags] = useState<Tag[]>([]);
-  const [quota, setQuota] = useState<GeminiQuota | null>(null);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [difficulty, setDifficulty] = useState<"debutant" | "intermediaire">("debutant");
   const [textLength, setTextLength] = useState<"short" | "medium" | "long">("medium");
@@ -51,10 +47,9 @@ export function ReadingPage() {
   const [questionResults, setQuestionResults] = useState<QuestionResult[]>([]);
 
   useEffect(() => {
-    Promise.all([fetchTags(), fetchGeminiQuota()])
-      .then(([loadedTags, loadedQuota]) => {
+    fetchTags()
+      .then((loadedTags) => {
         setTags(loadedTags);
-        setQuota(loadedQuota);
       })
       .catch(() => {});
   }, []);
@@ -77,7 +72,6 @@ export function ReadingPage() {
       });
       setParagraphs(result.paragraphs);
       setQuestions(result.questions);
-      setQuota(result.quota);
       setPhase("reading");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
@@ -141,8 +135,6 @@ export function ReadingPage() {
             <p className="pageSubtitle">Lis un texte adapté à ton vocabulaire</p>
           </div>
         </div>
-
-        {quota && <QuotaBar quota={quota} />}
 
         <div className="pratique__setup">
           <div className="pratique__field">
