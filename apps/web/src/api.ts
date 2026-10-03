@@ -1021,6 +1021,52 @@ export async function deleteGrammarNote(noteId: number): Promise<void> {
   await apiDelete(`/api/grammar/notes/${noteId}`);
 }
 
+// --- Journal ---
+
+export const JOURNAL_BODY_MAX_LENGTH = 8000;
+
+export type JournalReviewPayload = {
+  translation: string;
+  correctedText: string;
+  vocabulary: string;
+  formulation: string;
+  summary: string;
+};
+
+export type JournalReview = {
+  id: number;
+  entry_id: number;
+  created_at: string;
+  payload: JournalReviewPayload;
+};
+
+export type JournalEntry = {
+  id: number;
+  body: string;
+  created_at: string;
+  reviews: JournalReview[];
+};
+
+export async function fetchJournalEntries(): Promise<JournalEntry[]> {
+  const payload = await apiGet<{ entries: JournalEntry[] }>("/api/journal");
+  return payload.entries;
+}
+
+export async function createJournalEntry(body: string): Promise<JournalEntry> {
+  const payload = await apiPost<{ entry: JournalEntry }>("/api/journal", { body });
+  return payload.entry;
+}
+
+export async function deleteJournalEntry(entryId: number): Promise<void> {
+  await apiDelete(`/api/journal/${entryId}`);
+}
+
+export async function reviewJournalEntry(
+  entryId: number,
+): Promise<{ review: JournalReview; quota: GeminiQuota }> {
+  return apiPost<{ review: JournalReview; quota: GeminiQuota }>(`/api/journal/${entryId}/review`);
+}
+
 // --- Daily challenge ---
 
 export type DailyChallenge = {

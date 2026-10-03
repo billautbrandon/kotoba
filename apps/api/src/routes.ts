@@ -116,6 +116,100 @@ const LENIENT_JP_TRANSLATION_RULES = `Tolérance pédagogique (prioritaire sur l
 - "almost" uniquement pour une vraie petite erreur qui rend la phrase incorrecte (mauvaise particule qui change le rôle, mauvaise conjugaison, mot faux). Jamais pour une préférence stylistique.
 - Si tu hésites entre correct et faux, choisis correct et explique éventuellement la forme plus naturelle dans summary.`;
 
+const JOURNAL_BODY_MAX_LENGTH = 8000;
+
+const journalReviewPayloadSchema = z.object({
+  translation: z.string().trim().min(1),
+  correctedText: z.string().trim().min(1),
+  vocabulary: z.string().trim().min(1),
+  formulation: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
+});
+
+type JournalReviewPayload = z.infer<typeof journalReviewPayloadSchema>;
+
+type JournalEntryRow = {
+  id: number;
+  body: string;
+  created_at: string;
+};
+
+type JournalReviewRow = {
+  id: number;
+  entry_id: number;
+  payload: string;
+  created_at: string;
+};
+
+function parseJournalReviewPayload(payload: string): JournalReviewPayload | null {
+  try {
+    const parsed = journalReviewPayloadSchema.safeParse(JSON.parse(payload));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function listJournalEntries(database: Database.Database, userId: number) {
+  const entryRows = database
+    .prepare(
+      `SELECT id, body, created_at
+       FROM journal_entries
+       WHERE user_id = ?
+       ORDER BY created_at DESC, id DESC`,
+    )
+    .all(userId) as JournalEntryRow[];
+
+  const reviewRows = database
+    .prepare(
+      `SELECT id, entry_id, payload, created_at
+       FROM journal_reviews
+       WHERE user_id = ?
+       ORDER BY created_at DESC, id DESC`,
+    )
+    .all(userId) as JournalReviewRow[];
+
+  const reviewsByEntryId = new Map<
+    number,
+    Array<{
+      id: number;
+      entry_id: number;
+      created_at: string;
+      payload: JournalReviewPayload;
+    }>
+  >();
+  for (const reviewRow of reviewRows) {
+    const payload = parseJournalReviewPayload(reviewRow.payload);
+    if (!payload) continue;
+    const entryReviews = reviewsByEntryId.get(reviewRow.entry_id) ?? [];
+    entryReviews.push({
+      id: reviewRow.id,
+      entry_id: reviewRow.entry_id,
+      created_at: reviewRow.created_at,
+      payload,
+    });
+    reviewsByEntryId.set(reviewRow.entry_id, entryReviews);
+  }
+
+  return entryRows.map((entryRow) => ({
+    id: entryRow.id,
+    body: entryRow.body,
+    created_at: entryRow.created_at,
+    reviews: (reviewsByEntryId.get(entryRow.id) ?? []).map((review) => ({
+      id: review.id,
+      entry_id: review.entry_id,
+      created_at: review.created_at,
+      payload: review.payload,
+    })),
+  }));
+}
+
+function readJournalEntryId(rawId: string): number | null {
+  const entryId = Number(rawId);
+  if (!Number.isInteger(entryId) || entryId <= 0) return null;
+  return entryId;
+}
+
 export function registerApiRoutes(app: import("express").Express, database: Database.Database) {
   const wrapAsync =
     (
@@ -4142,6 +4236,192 @@ Réponds UNIQUEMENT au format JSON : {"content": "ton explication ici"}`;
     database.prepare("DELETE FROM grammar_notes WHERE id = ? AND user_id = ?").run(noteId, userId);
     res.json({ deleted: true });
   });
+
+  // --- Journal ---
+
+  const deleteJournalEntry = database.transaction((entryId: number, userId: number) => {
+    const ownedEntry = database
+      .prepare("SELECT id FROM journal_entries WHERE id = ? AND user_id = ?")
+      .get(entryId, userId) as { id: number } | undefined;
+    if (!ownedEntry) return false;
+    database
+      .prepare("DELETE FROM journal_reviews WHERE entry_id = ? AND user_id = ?")
+      .run(entryId, userId);
+    database
+      .prepare("DELETE FROM journal_entries WHERE id = ? AND user_id = ?")
+      .run(entryId, userId);
+    return true;
+  });
+
+  app.get("/api/journal", (req, res) => {
+    const userId = getRequiredUserId(req);
+    res.json({ entries: listJournalEntries(database, userId) });
+  });
+
+  app.post("/api/journal", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const parsed = z
+      .object({
+        body: z
+          .string()
+          .trim()
+          .min(1, "Écris quelque chose avant d'enregistrer.")
+          .max(JOURNAL_BODY_MAX_LENGTH, "Le texte dépasse 8 000 caractères."),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      const issueMessage = parsed.error.issues[0]?.message ?? "Requête invalide";
+      res.status(400).json({ error: issueMessage });
+      return;
+    }
+
+    const insertResult = database
+      .prepare("INSERT INTO journal_entries (user_id, body) VALUES (?, ?)")
+      .run(userId, parsed.data.body);
+    const entryId = Number(insertResult.lastInsertRowid);
+    const createdRow = database
+      .prepare("SELECT id, body, created_at FROM journal_entries WHERE id = ? AND user_id = ?")
+      .get(entryId, userId) as JournalEntryRow | undefined;
+    if (!createdRow) {
+      res.status(500).json({ error: "La carte n'a pas pu être enregistrée." });
+      return;
+    }
+    res.status(201).json({
+      entry: {
+        id: createdRow.id,
+        body: createdRow.body,
+        created_at: createdRow.created_at,
+        reviews: [],
+      },
+    });
+  });
+
+  app.delete("/api/journal/:id", (req, res) => {
+    const userId = getRequiredUserId(req);
+    const entryId = readJournalEntryId(req.params.id);
+    if (!entryId) {
+      res.status(400).json({ error: "Identifiant invalide." });
+      return;
+    }
+    const deleted = deleteJournalEntry(entryId, userId);
+    if (!deleted) {
+      res.status(404).json({ error: "Carte introuvable." });
+      return;
+    }
+    res.json({ deleted: true });
+  });
+
+  app.post(
+    "/api/journal/:id/review",
+    wrapAsync(async (req, res) => {
+      const userId = getRequiredUserId(req);
+      const entryId = readJournalEntryId(req.params.id);
+      if (!entryId) {
+        res.status(400).json({ error: "Identifiant invalide." });
+        return;
+      }
+
+      const entry = database
+        .prepare("SELECT id, body, created_at FROM journal_entries WHERE id = ? AND user_id = ?")
+        .get(entryId, userId) as JournalEntryRow | undefined;
+      if (!entry) {
+        res.status(404).json({ error: "Carte introuvable." });
+        return;
+      }
+
+      if (!isGeminiConfigured()) {
+        res
+          .status(503)
+          .json({ error: "Le service IA n'est pas configuré (clé API Gemini manquante)." });
+        return;
+      }
+
+      const quota = getGeminiQuota(database);
+      if (quota.remaining <= 0) {
+        res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard.", quota });
+        return;
+      }
+
+      const prompt = `Tu es un professeur de japonais. Un élève a écrit un texte libre dans son journal. Relis-le.
+
+${LENIENT_JP_TRANSLATION_RULES}
+
+Ce n'est pas un exercice à réponse unique : il n'y a pas de phrase attendue et tu ne dois pas produire de champ isCorrect. Applique seulement l'esprit de ces règles (sens, naturel, variantes acceptables).
+
+Le texte peut être en japonais (kanji, kana), en romaji, ou un mélange. Le romaji est une saisie valide, pas une faute. Lis-le comme du japonais (Hepburn, avec ou sans macrons, espaces, ou collé : kyou, kyo, kyō, konnichiwa). Évalue le sens et la grammaire de ce japonais, pas le fait d'avoir utilisé le romaji. Les particules écrites wa, ga, wo, o, ni, he, de, to, mo correspondent à は, が, を, に, へ, で, と, も.
+
+Dans correctedText, écris toujours une version en japonais (kana et kanji naturels), même si l'élève a dicté ou tapé du romaji. Ne reproche pas le romaji dans summary. Signale une graphie seulement si elle est ambiguë au point de changer le sens.
+
+Texte de l'élève :
+<<<TEXTE
+${entry.body}
+TEXTE>>>
+
+Réponds UNIQUEMENT en JSON avec exactement ces champs :
+- translation : traduction française fidèle du texte
+- correctedText : version japonaise corrigée et naturelle. Si le texte est déjà correct, reprends-le tel quel ou avec une amélioration vraiment mineure
+- vocabulary : commentaire en français sur les mots employés, ceux qui sont justes et ceux qui sont mal choisis, avec une alternative plus naturelle quand c'est utile
+- formulation : commentaire en français sur les tournures, les particules et la grammaire des phrases
+- summary : bilan court en français de ce qui est bien et de ce qui ne va pas
+
+Pas d'emoji. Sois direct, précis, sans flatterie vide.`;
+
+      const reviewOptions: GeminiJsonOptions<JournalReviewPayload> = {
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            translation: { type: SchemaType.STRING },
+            correctedText: { type: SchemaType.STRING },
+            vocabulary: { type: SchemaType.STRING },
+            formulation: { type: SchemaType.STRING },
+            summary: { type: SchemaType.STRING },
+          },
+          required: ["translation", "correctedText", "vocabulary", "formulation", "summary"],
+        },
+        zodSchema: journalReviewPayloadSchema,
+      };
+
+      let reviewPayload: JournalReviewPayload;
+      try {
+        reviewPayload = await callGeminiJson<JournalReviewPayload>(prompt, reviewOptions);
+        incrementGeminiUsage(database);
+      } catch (error) {
+        if (error instanceof GeminiQuotaError) {
+          res.status(503).json({ error: "Quota API Gemini atteint. Réessayez plus tard." });
+          return;
+        }
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        console.error("[kotoba/api] Journal review failed:", message);
+        res.status(502).json({ error: `Erreur de relecture IA : ${message}` });
+        return;
+      }
+
+      const insertResult = database
+        .prepare("INSERT INTO journal_reviews (entry_id, user_id, payload) VALUES (?, ?, ?)")
+        .run(entryId, userId, JSON.stringify(reviewPayload));
+      const reviewId = Number(insertResult.lastInsertRowid);
+      const storedReview = database
+        .prepare(
+          "SELECT id, entry_id, payload, created_at FROM journal_reviews WHERE id = ? AND user_id = ?",
+        )
+        .get(reviewId, userId) as JournalReviewRow | undefined;
+      const storedPayload = storedReview ? parseJournalReviewPayload(storedReview.payload) : null;
+      if (!storedReview || !storedPayload) {
+        res.status(500).json({ error: "La relecture n'a pas pu être enregistrée." });
+        return;
+      }
+
+      res.json({
+        review: {
+          id: storedReview.id,
+          entry_id: storedReview.entry_id,
+          created_at: storedReview.created_at,
+          payload: storedPayload,
+        },
+        quota: getGeminiQuota(database),
+      });
+    }),
+  );
 
   // --- Daily challenge ---
 

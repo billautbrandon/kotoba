@@ -112,6 +112,10 @@ export function HomePage({ currentUser }: HomePageProps) {
               <span className="dashShortcuts__label">Pratique</span>
               <span className="dashShortcuts__hint">Phrases, JLPT, conjugaison</span>
             </Link>
+            <Link className="dashShortcuts__item" to="/journal">
+              <span className="dashShortcuts__label">Journal</span>
+              <span className="dashShortcuts__hint">Écrire, puis faire relire</span>
+            </Link>
             <Link className="dashShortcuts__item" to="/stats">
               <span className="dashShortcuts__label">Statistiques</span>
               <span className="dashShortcuts__hint">

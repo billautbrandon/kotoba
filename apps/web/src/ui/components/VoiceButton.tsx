@@ -4,6 +4,7 @@ type VoiceButtonProps = {
   onTranscript: (text: string) => void;
   lang?: string;
   disabled?: boolean;
+  continuous?: boolean;
 };
 
 type SpeechRecognitionInstance = {
@@ -38,17 +39,24 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
     null) as SpeechRecognitionConstructor | null;
 }
 
-export function VoiceButton({ onTranscript, lang = "ja-JP", disabled = false }: VoiceButtonProps) {
+export function VoiceButton({
+  onTranscript,
+  lang = "ja-JP",
+  disabled = false,
+  continuous = false,
+}: VoiceButtonProps) {
   const [isListening, setIsListening] = useState(false);
   const [isSupported] = useState(() => getSpeechRecognition() !== null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const onTranscriptRef = useRef(onTranscript);
+  const keepListeningRef = useRef(false);
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
   }, [onTranscript]);
 
   const stopListening = useCallback(() => {
+    keepListeningRef.current = false;
     if (recognitionRef.current) {
       recognitionRef.current.onresult = null;
       recognitionRef.current.onerror = null;
@@ -68,7 +76,8 @@ export function VoiceButton({ onTranscript, lang = "ja-JP", disabled = false }: 
     const recognition = new SpeechRecognitionClass();
     recognition.lang = lang;
     recognition.interimResults = false;
-    recognition.continuous = false;
+    recognition.continuous = continuous;
+    keepListeningRef.current = continuous;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let finalTranscript = "";
@@ -82,23 +91,40 @@ export function VoiceButton({ onTranscript, lang = "ja-JP", disabled = false }: 
       }
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
+      const canContinue = continuous && keepListeningRef.current && event.error === "no-speech";
+      if (canContinue) return;
+      keepListeningRef.current = false;
       setIsListening(false);
       recognitionRef.current = null;
     };
 
     recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
+      if (!keepListeningRef.current) {
+        setIsListening(false);
+        recognitionRef.current = null;
+        return;
+      }
+      window.setTimeout(() => {
+        if (!keepListeningRef.current) return;
+        try {
+          recognition.start();
+        } catch {
+          keepListeningRef.current = false;
+          setIsListening(false);
+          recognitionRef.current = null;
+        }
+      }, 200);
     };
 
     recognitionRef.current = recognition;
     setIsListening(true);
     recognition.start();
-  }, [lang, stopListening]);
+  }, [continuous, lang, stopListening]);
 
   useEffect(() => {
     return () => {
+      keepListeningRef.current = false;
       if (recognitionRef.current) {
         recognitionRef.current.abort();
         recognitionRef.current = null;

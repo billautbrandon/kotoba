@@ -124,6 +124,27 @@ export function EyeIcon({ className }: NavIconProps) {
   );
 }
 
+export function JournalNavIcon({ className }: NavIconProps) {
+  return (
+    <svg
+      className={className ?? "sidebar__icon"}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <title>Journal</title>
+      <path d="M7 4.5h10.5A1.5 1.5 0 0 1 19 6v13.5a1.5 1.5 0 0 1-1.5 1.5H7" />
+      <path d="M7 4.5h-.5A1.5 1.5 0 0 0 5 6v13.5A1.5 1.5 0 0 0 6.5 21H7" />
+      <path d="M7 4.5v16.5" />
+      <path d="M10.5 9H16M10.5 12.5H16" />
+    </svg>
+  );
+}
+
 export function WordsNavIcon({ className }: NavIconProps) {
   return (
     <svg

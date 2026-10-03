@@ -7,6 +7,7 @@ import { fetchMe, fetchSrsSummary, logoutUser } from "../api";
 import { scrollAppToTop } from "../utils/scroll";
 import {
   CatalogNavIcon,
+  JournalNavIcon,
   PracticeNavIcon,
   SrsNavIcon,
   VocabNavIcon,
@@ -20,6 +21,7 @@ import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
 import { GrammarPage } from "./pages/GrammarPage";
 import { HomePage } from "./pages/HomePage";
+import { JournalPage } from "./pages/JournalPage";
 import { KanjiLearningPage } from "./pages/KanjiLearningPage";
 import { KanjiQuizPage } from "./pages/KanjiQuizPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -285,6 +287,11 @@ export function App() {
         icon={<PracticeNavIcon className="topNav__icon" />}
       />
       <TopNavLink to="/words" label="Mots" icon={<WordsNavIcon className="topNav__icon" />} />
+      <TopNavLink
+        to="/journal"
+        label="Journal"
+        icon={<JournalNavIcon className="topNav__icon" />}
+      />
     </>
   );
 
@@ -377,6 +384,7 @@ export function App() {
               element={<Navigate to="/pratique?tab=conjugaison" replace />}
             />
             <Route path="/words" element={requireAuth(<WordsPage />)} />
+            <Route path="/journal" element={requireAuth(<JournalPage />)} />
             <Route path="/stats" element={requireAuth(<StatsPage />)} />
             <Route path="/kanji-quiz" element={requireAuth(<KanjiQuizPage />)} />
             <Route path="/phrases-bank" element={requireAuth(<PhraseBankPage />)} />
@@ -427,6 +435,12 @@ export function App() {
             to="/words"
             label="Mots"
             icon={<WordsNavIcon className="topNav__icon" />}
+          />
+          <TopNavLink
+            variant="mobile"
+            to="/journal"
+            label="Journal"
+            icon={<JournalNavIcon className="topNav__icon" />}
           />
         </nav>
       ) : null}
