@@ -2622,7 +2622,7 @@ function SeriesPicker({
   if (tags.length === 0) {
     return (
       <p className="pratiqueStep__empty">
-        Ajoute des mots dans Vocabulaire : tes séries apparaîtront ici.
+        Ajoute des mots dans Séries : tes séries apparaîtront ici.
       </p>
     );
   }

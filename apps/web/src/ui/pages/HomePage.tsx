@@ -91,7 +91,7 @@ export function HomePage({ currentUser }: HomePageProps) {
           />
           <nav className="dashShortcuts" aria-label="Raccourcis">
             <Link className="dashShortcuts__item" to="/dictionary">
-              <span className="dashShortcuts__label">Vocabulaire</span>
+              <span className="dashShortcuts__label">Séries</span>
               <span className="dashShortcuts__hint">
                 {`${totalWords} mot${totalWords > 1 ? "s" : ""} · ${seriesCount} série${seriesCount > 1 ? "s" : ""}`}
               </span>

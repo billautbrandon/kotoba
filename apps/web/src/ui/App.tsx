@@ -259,7 +259,7 @@ export function App() {
     <>
       <TopNavLink
         to="/dictionary"
-        label="Vocabulaire"
+        label="Séries"
         icon={<VocabNavIcon className="topNav__icon" />}
         isActive={isVocabActive}
       />
@@ -395,7 +395,7 @@ export function App() {
           <TopNavLink
             variant="mobile"
             to="/dictionary"
-            label="Vocabulaire"
+            label="Séries"
             icon={<VocabNavIcon className="topNav__icon" />}
             isActive={isVocabActive}
           />

@@ -32,7 +32,7 @@ export function VocabNavIcon({ className }: NavIconProps) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <title>Vocabulaire</title>
+      <title>Séries</title>
       <path d="M5 5h6a3 3 0 0 1 3 3v12l-3-1.5L8 20V8a3 3 0 0 1 3-3" />
       <path d="M19 5h-6a3 3 0 0 0-3 3v12l3-1.5 3 1.5V8a3 3 0 0 0-3-3" />
     </svg>

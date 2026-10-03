@@ -454,7 +454,7 @@ export function DictionaryPage() {
               ← Toutes les séries
             </button>
           ) : null}
-          <h1 className="pageTitle">{openSeries ? openSeries.tagName : "Vocabulaire"}</h1>
+          <h1 className="pageTitle">{openSeries ? openSeries.tagName : "Séries"}</h1>
           <p className="pageSubtitle">
             {openSeries
               ? `${pluralize(openSeries.wordsCount, "mot", "mots")}${
