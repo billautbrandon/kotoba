@@ -6,7 +6,6 @@ import type { SrsSummary, User } from "../api";
 import { fetchMe, fetchSrsSummary, logoutUser } from "../api";
 import { scrollAppToTop } from "../utils/scroll";
 import {
-  CatalogNavIcon,
   JournalNavIcon,
   PracticeNavIcon,
   SrsNavIcon,
@@ -15,7 +14,6 @@ import {
 } from "./components/NavIcons";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { AdminPage } from "./pages/AdminPage";
-import { CataloguePage } from "./pages/CataloguePage";
 import { DialoguePage } from "./pages/DialoguePage";
 import { DictionaryPage } from "./pages/DictionaryPage";
 import { DifficultWordsPage } from "./pages/DifficultWordsPage";
@@ -266,11 +264,6 @@ export function App() {
         isActive={isVocabActive}
       />
       <TopNavLink
-        to="/catalogue"
-        label="Catalogue"
-        icon={<CatalogNavIcon className="topNav__icon" />}
-      />
-      <TopNavLink
         to="/srs"
         label="SRS"
         icon={<SrsNavIcon className="topNav__icon" />}
@@ -365,7 +358,7 @@ export function App() {
               path="/placement"
               element={requireAuth(<PlacementPage onCompleted={(user) => setCurrentUser(user)} />)}
             />
-            <Route path="/catalogue" element={requireAuth(<CataloguePage />)} />
+            <Route path="/catalogue" element={<Navigate to="/words?vue=catalogue" replace />} />
             <Route path="/train" element={<Navigate to="/" replace />} />
             <Route path="/train/difficult" element={requireAuth(<TrainPage mode="difficult" />)} />
             <Route path="/train/tag/:tagId" element={requireAuth(<TrainPage mode="tag" />)} />
@@ -405,12 +398,6 @@ export function App() {
             label="Vocabulaire"
             icon={<VocabNavIcon className="topNav__icon" />}
             isActive={isVocabActive}
-          />
-          <TopNavLink
-            variant="mobile"
-            to="/catalogue"
-            label="Catalogue"
-            icon={<CatalogNavIcon className="topNav__icon" />}
           />
           <TopNavLink
             variant="mobile"

@@ -106,7 +106,7 @@ function stateLabel(state: CatalogUserState): string {
   return "";
 }
 
-export function CataloguePage() {
+export function CataloguePage({ embedded = false }: { embedded?: boolean }) {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [entries, setEntries] = useState<CatalogEntry[]>([]);
@@ -257,12 +257,18 @@ export function CataloguePage() {
   return (
     <div className="cataloguePage">
       <div className="pageHeader">
-        <div>
-          <h1 className="pageTitle">Catalogue N5</h1>
+        {embedded ? (
           <p className="pageSubtitle">
             Range par ordre japonais, coche tes mots, puis lance une série.
           </p>
-        </div>
+        ) : (
+          <div>
+            <h1 className="pageTitle">Catalogue N5</h1>
+            <p className="pageSubtitle">
+              Range par ordre japonais, coche tes mots, puis lance une série.
+            </p>
+          </div>
+        )}
         <div className="cataloguePage__viewToggle">
           <button
             type="button"

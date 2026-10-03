@@ -66,7 +66,7 @@ export function SettingsPage() {
           <p className="settingsVocab__lead">
             Ajoute, organise et importe tes mots depuis cette liste.
           </p>
-          <WordsPage />
+          <WordsPage embedded />
         </div>
       )}
       {activeTab === "tools" && <ToolsSection />}

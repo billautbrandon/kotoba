@@ -113,7 +113,7 @@ export function PlacementPage({
           <button
             type="button"
             className="button button--primary"
-            onClick={() => navigate("/catalogue", { replace: true })}
+            onClick={() => navigate("/words?vue=catalogue", { replace: true })}
           >
             Voir le catalogue
           </button>

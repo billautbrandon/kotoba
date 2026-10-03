@@ -1,4 +1,5 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   type Tag,
@@ -12,11 +13,23 @@ import {
 } from "../../api";
 import { AudioButton } from "../components/AudioButton";
 import { ImportPanel } from "../components/ImportPanel";
+import { PillNav } from "../components/PillNav";
 import { SearchBar } from "../components/SearchBar";
 import { WordFormModal } from "../components/WordFormModal";
 import { downloadCurrentBackup, importBackupWords, parseBackupFile } from "../utils/backup";
+import { CataloguePage } from "./CataloguePage";
 
-export function WordsPage() {
+type WordsView = "mots" | "catalogue";
+
+const WORDS_VIEWS: Array<{ id: WordsView; label: string; hint: string }> = [
+  { id: "mots", label: "Mes mots", hint: "Fiches, tags, import" },
+  { id: "catalogue", label: "Catalogue N5", hint: "Choisir et mettre en file" },
+];
+
+export function WordsPage({ embedded = false }: { embedded?: boolean }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const wordsView: WordsView =
+    !embedded && searchParams.get("vue") === "catalogue" ? "catalogue" : "mots";
   const [words, setWords] = useState<WordWithTags[] | null>(null);
   const [tags, setTags] = useState<Tag[] | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -202,6 +215,14 @@ export function WordsPage() {
 
   const hasWords = (words?.length ?? 0) > 0;
 
+  function handleWordsViewChange(nextView: WordsView) {
+    if (nextView === "catalogue") {
+      setSearchParams({ vue: "catalogue" });
+      return;
+    }
+    setSearchParams({});
+  }
+
   function openImport() {
     importSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -224,172 +245,202 @@ export function WordsPage() {
 
   return (
     <div className="wordsPage">
-      <div className="pageHeader wordsPage__header">
-        <div>
-          <h1 className="pageTitle">Mots</h1>
-          <p className="pageSubtitle">
-            {wordsCount} mot(s) dans ton vocabulaire. Ajoute, organise et illustre tes mots avec des
-            exemples.
-          </p>
-        </div>
-        <button className="button button--primary" type="button" onClick={openAddModal}>
-          + Ajouter un mot
-        </button>
-      </div>
-
-      {errorMessage ? <div className="formError wordsPage__banner">{errorMessage}</div> : null}
-      {toolsStatus ? <div className="formSuccess wordsPage__banner">{toolsStatus}</div> : null}
-
-      <div className="wordsPage__tools">
-        <button className="button" type="button" onClick={() => void handleExportBackup()}>
-          Exporter le backup
-        </button>
-        <input
-          ref={backupFileInputRef}
-          type="file"
-          accept=".json,application/json"
-          className="srOnly"
-          onChange={(event) => void handleImportBackupFile(event)}
-        />
-        <button
-          className="button"
-          type="button"
-          disabled={isImportingBackup}
-          onClick={() => backupFileInputRef.current?.click()}
-        >
-          {isImportingBackup ? "Import…" : "Importer le backup"}
-        </button>
-        <button
-          className="button wordsPage__resetButton"
-          type="button"
-          onClick={() => setIsResetConfirmOpen(true)}
-        >
-          Réinitialiser les scores
-        </button>
-      </div>
-
-      {isResetConfirmOpen ? (
-        <div className="wordsPage__confirm" role="alertdialog" aria-labelledby="words-reset-title">
-          <div>
-            <p className="wordsPage__confirmTitle" id="words-reset-title">
-              Réinitialiser tous les scores ?
-            </p>
-            <p className="wordsPage__confirmText">
-              Tous les compteurs de réussite, d’échec et les scores SRS seront remis à zéro. Cette
-              action est irréversible.
-            </p>
+      {embedded ? null : (
+        <>
+          <div className="pageHeader">
+            <div>
+              <h1 className="pageTitle">Mots</h1>
+              <p className="pageSubtitle">
+                Tes fiches, ou le catalogue N5 pour choisir quoi apprendre.
+              </p>
+            </div>
           </div>
-          <div className="wordsPage__confirmActions">
-            <button
-              className="button"
-              type="button"
-              disabled={isResettingScores}
-              onClick={() => setIsResetConfirmOpen(false)}
-            >
-              Annuler
-            </button>
-            <button
-              className="button button--danger"
-              type="button"
-              disabled={isResettingScores}
-              onClick={() => void handleConfirmResetScores()}
-            >
-              {isResettingScores ? "Réinitialisation…" : "Confirmer"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {hasWords ? (
-        <div className="wordsPage__toolbar">
-          <SearchBar
-            className="wordsPage__searchBar"
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Rechercher un mot (français, kana, kanji, rōmaji…)"
-            countLabel={
-              searchQuery.trim()
-                ? `${filteredWords.length} mot${filteredWords.length > 1 ? "s" : ""}`
-                : undefined
-            }
+          <PillNav
+            ariaLabel="Mots"
+            items={WORDS_VIEWS}
+            value={wordsView}
+            onChange={handleWordsViewChange}
           />
-          <div className="wordsPage__tagFilters">
-            <button
-              type="button"
-              className={`wordsPage__filterChip ${activeTagFilterId === null ? "wordsPage__filterChip--active" : ""}`}
-              onClick={() => setActiveTagFilterId(null)}
-            >
-              Tous
-            </button>
-            {(tags ?? []).map((tag) => (
-              <button
-                key={tag.id}
-                type="button"
-                className={`wordsPage__filterChip ${activeTagFilterId === tag.id ? "wordsPage__filterChip--active" : ""}`}
-                onClick={() => setActiveTagFilterId(tag.id)}
-              >
-                {tag.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
+        </>
+      )}
 
-      {isLoading ? (
-        <div style={{ marginTop: "var(--space-6)" }} className="muted">
-          Chargement…
-        </div>
-      ) : null}
-
-      {!isLoading && !hasWords ? (
-        <div className="wordsPage__empty emptyState emptyState--center">
-          <p className="emptyState__title">Aucun mot pour l'instant</p>
-          <p className="emptyState__text">
-            Ajoute tes premiers mots à la main, ou colle une liste pour que l’IA crée les fiches.
-          </p>
-          <div className="emptyState__actions">
+      {wordsView === "catalogue" ? (
+        <CataloguePage embedded />
+      ) : (
+        <>
+          <div className="pageHeader wordsPage__header">
+            <div>
+              {embedded ? <h1 className="pageTitle">Mots</h1> : null}
+              <p className="pageSubtitle">
+                {wordsCount} mot(s) dans ton vocabulaire. Ajoute, organise et illustre tes mots avec
+                des exemples.
+              </p>
+            </div>
             <button className="button button--primary" type="button" onClick={openAddModal}>
               + Ajouter un mot
             </button>
-            <button className="button" type="button" onClick={openImport}>
-              Importer une liste
+          </div>
+
+          {errorMessage ? <div className="formError wordsPage__banner">{errorMessage}</div> : null}
+          {toolsStatus ? <div className="formSuccess wordsPage__banner">{toolsStatus}</div> : null}
+
+          <div className="wordsPage__tools">
+            <button className="button" type="button" onClick={() => void handleExportBackup()}>
+              Exporter le backup
+            </button>
+            <input
+              ref={backupFileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="srOnly"
+              onChange={(event) => void handleImportBackupFile(event)}
+            />
+            <button
+              className="button"
+              type="button"
+              disabled={isImportingBackup}
+              onClick={() => backupFileInputRef.current?.click()}
+            >
+              {isImportingBackup ? "Import…" : "Importer le backup"}
+            </button>
+            <button
+              className="button wordsPage__resetButton"
+              type="button"
+              onClick={() => setIsResetConfirmOpen(true)}
+            >
+              Réinitialiser les scores
             </button>
           </div>
-        </div>
-      ) : null}
 
-      {hasWords && filteredWords.length === 0 ? (
-        <div style={{ marginTop: "var(--space-8)" }} className="muted">
-          Aucun mot ne correspond à ta recherche.
-        </div>
-      ) : null}
+          {isResetConfirmOpen ? (
+            <div
+              className="wordsPage__confirm"
+              role="alertdialog"
+              aria-labelledby="words-reset-title"
+            >
+              <div>
+                <p className="wordsPage__confirmTitle" id="words-reset-title">
+                  Réinitialiser tous les scores ?
+                </p>
+                <p className="wordsPage__confirmText">
+                  Tous les compteurs de réussite, d’échec et les scores SRS seront remis à zéro.
+                  Cette action est irréversible.
+                </p>
+              </div>
+              <div className="wordsPage__confirmActions">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={isResettingScores}
+                  onClick={() => setIsResetConfirmOpen(false)}
+                >
+                  Annuler
+                </button>
+                <button
+                  className="button button--danger"
+                  type="button"
+                  disabled={isResettingScores}
+                  onClick={() => void handleConfirmResetScores()}
+                >
+                  {isResettingScores ? "Réinitialisation…" : "Confirmer"}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
-      {hasWords && filteredWords.length > 0 ? (
-        <WordsGroupedByTag
-          words={filteredWords}
-          expandGroups={searchQuery.trim().length > 0}
-          startEdit={openEditModal}
-          handleDelete={handleDelete}
-        />
-      ) : null}
+          {hasWords ? (
+            <div className="wordsPage__toolbar">
+              <SearchBar
+                className="wordsPage__searchBar"
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Rechercher un mot (français, kana, kanji, rōmaji…)"
+                countLabel={
+                  searchQuery.trim()
+                    ? `${filteredWords.length} mot${filteredWords.length > 1 ? "s" : ""}`
+                    : undefined
+                }
+              />
+              <div className="wordsPage__tagFilters">
+                <button
+                  type="button"
+                  className={`wordsPage__filterChip ${activeTagFilterId === null ? "wordsPage__filterChip--active" : ""}`}
+                  onClick={() => setActiveTagFilterId(null)}
+                >
+                  Tous
+                </button>
+                {(tags ?? []).map((tag) => (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    className={`wordsPage__filterChip ${activeTagFilterId === tag.id ? "wordsPage__filterChip--active" : ""}`}
+                    onClick={() => setActiveTagFilterId(tag.id)}
+                  >
+                    {tag.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
-      <div className="wordsPage__import" ref={importSectionRef}>
-        <ImportPanel
-          onImported={refreshWordsAndTags}
-          onError={(message) => setErrorMessage(message)}
-        />
-      </div>
+          {isLoading ? (
+            <div style={{ marginTop: "var(--space-6)" }} className="muted">
+              Chargement…
+            </div>
+          ) : null}
 
-      {isModalOpen ? (
-        <WordFormModal
-          editingWord={editingWord}
-          tags={tags ?? []}
-          onClose={closeModal}
-          onSaved={refreshWordsAndTags}
-          onCreateTag={handleCreateTag}
-          onDeleteTag={handleDeleteTag}
-        />
-      ) : null}
+          {!isLoading && !hasWords ? (
+            <div className="wordsPage__empty emptyState emptyState--center">
+              <p className="emptyState__title">Aucun mot pour l'instant</p>
+              <p className="emptyState__text">
+                Ajoute tes premiers mots à la main, ou colle une liste pour que l’IA crée les
+                fiches.
+              </p>
+              <div className="emptyState__actions">
+                <button className="button button--primary" type="button" onClick={openAddModal}>
+                  + Ajouter un mot
+                </button>
+                <button className="button" type="button" onClick={openImport}>
+                  Importer une liste
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {hasWords && filteredWords.length === 0 ? (
+            <div style={{ marginTop: "var(--space-8)" }} className="muted">
+              Aucun mot ne correspond à ta recherche.
+            </div>
+          ) : null}
+
+          {hasWords && filteredWords.length > 0 ? (
+            <WordsGroupedByTag
+              words={filteredWords}
+              expandGroups={searchQuery.trim().length > 0}
+              startEdit={openEditModal}
+              handleDelete={handleDelete}
+            />
+          ) : null}
+
+          <div className="wordsPage__import" ref={importSectionRef}>
+            <ImportPanel
+              onImported={refreshWordsAndTags}
+              onError={(message) => setErrorMessage(message)}
+            />
+          </div>
+
+          {isModalOpen ? (
+            <WordFormModal
+              editingWord={editingWord}
+              tags={tags ?? []}
+              onClose={closeModal}
+              onSaved={refreshWordsAndTags}
+              onCreateTag={handleCreateTag}
+              onDeleteTag={handleDeleteTag}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
