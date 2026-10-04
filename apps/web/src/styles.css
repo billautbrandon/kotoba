@@ -9271,3 +9271,9 @@ body.kotoba-session-lock .main {
 .recallDrill__expected p {
   margin: 0;
 }
+
+.recallDrill__romaji {
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  color: var(--color-text-soft);
+}

@@ -260,6 +260,10 @@ function normalizeRomaji(value: string): string {
     .replace(/oo/g, "o");
 }
 
+export function readingRomaji(reading: string): string {
+  return kanaToRomaji(reading, null, { particles: false }).replace(/\s+/g, "");
+}
+
 export function matchesJapaneseAnswer(answer: string, kanji: string, readings: string[]): boolean {
   const compact = stripAnswerDecorations(answer.trim());
   if (!compact) return false;

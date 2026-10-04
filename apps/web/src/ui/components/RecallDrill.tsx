@@ -5,6 +5,7 @@ import {
   type NumberLevel,
   drawJapaneseNumber,
   matchesJapaneseAnswer,
+  readingRomaji,
 } from "../utils/japaneseNumbers";
 import { VoiceButton } from "./VoiceButton";
 
@@ -31,6 +32,7 @@ type CheckedAnswer = {
   correct: boolean;
   kana: string;
   kanji: string;
+  romaji: string;
 };
 
 function drawCard(mode: RecallDrillProps["mode"], level: NumberLevel): JapanesePrompt {
@@ -87,10 +89,12 @@ export function RecallDrill({ mode }: RecallDrillProps) {
   function checkAnswer() {
     if (!card || checked || !draft.trim()) return;
     const correct = matchesJapaneseAnswer(draft, card.kanji, card.readings);
+    const kana = card.readings[0] ?? "";
     setChecked({
       correct,
-      kana: card.readings[0] ?? "",
+      kana,
       kanji: card.kanji,
+      romaji: readingRomaji(kana),
     });
     if (correct) setScore((value) => value + 1);
   }
@@ -231,6 +235,7 @@ export function RecallDrill({ mode }: RecallDrillProps) {
             {checked.correct ? null : (
               <div className="recallDrill__expected">
                 <p>{checked.kana}</p>
+                <p className="recallDrill__romaji">{checked.romaji}</p>
                 <p>{checked.kanji}</p>
               </div>
             )}
