@@ -36,14 +36,22 @@ import {
 import { AnswerDiff } from "../components/AnswerDiff";
 import { AudioButton } from "../components/AudioButton";
 import { PillNav } from "../components/PillNav";
+import { RecallDrill } from "../components/RecallDrill";
 import { SearchBar } from "../components/SearchBar";
 import { SentenceBuilder, joinBlocks } from "../components/SentenceBuilder";
 import { TeacherChat } from "../components/TeacherChat";
 import { VoiceButton } from "../components/VoiceButton";
 import { hasJapaneseScript } from "../utils/kanaToRomaji";
 
-type PratiqueTab = "phrases" | "jlpt" | "conjugaison" | "construction" | "ecoute";
-type HubMode = "phrases" | "jlpt" | "conjugaison";
+type PratiqueTab =
+  | "phrases"
+  | "jlpt"
+  | "conjugaison"
+  | "construction"
+  | "ecoute"
+  | "nombres"
+  | "dates";
+type HubMode = "phrases" | "jlpt" | "conjugaison" | "nombres" | "dates";
 type PhraseStyle = "write" | "blocks" | "story";
 type PratiquePhase = "hub" | "setup" | "training" | "recap";
 type SentenceLength = "short" | "medium" | "long";
@@ -63,6 +71,8 @@ const PRATIQUE_PILLS: Array<{ id: HubMode; label: string; hint: string }> = [
   { id: "phrases", label: "Phrases", hint: "Avec tes mots" },
   { id: "jlpt", label: "JLPT", hint: "N5 à N1" },
   { id: "conjugaison", label: "Conjugaison", hint: "Tes verbes" },
+  { id: "nombres", label: "Compter", hint: "Les nombres" },
+  { id: "dates", label: "Dates", hint: "Jour et mois" },
 ];
 
 function loadJlptLevel(): JlptLevel {
@@ -101,7 +111,9 @@ function isPratiqueTab(value: string | null): value is PratiqueTab {
     value === "jlpt" ||
     value === "conjugaison" ||
     value === "construction" ||
-    value === "ecoute"
+    value === "ecoute" ||
+    value === "nombres" ||
+    value === "dates"
   );
 }
 
@@ -1086,7 +1098,15 @@ export function PratiquePage() {
   const phraseStyleLabel =
     phraseStyle === "blocks" ? "assembler" : phraseStyle === "story" ? "histoire" : "écrire";
   const pratiquePill: HubMode =
-    activeTab === "jlpt" ? "jlpt" : activeTab === "conjugaison" ? "conjugaison" : "phrases";
+    activeTab === "jlpt"
+      ? "jlpt"
+      : activeTab === "conjugaison"
+        ? "conjugaison"
+        : activeTab === "nombres"
+          ? "nombres"
+          : activeTab === "dates"
+            ? "dates"
+            : "phrases";
 
   const setupHeading = (() => {
     if (activeTab === "phrases" || activeTab === "construction") {
@@ -1114,6 +1134,30 @@ export function PratiquePage() {
   })();
 
   // ===================== SETUP =====================
+  if (phase === "setup" && (activeTab === "nombres" || activeTab === "dates")) {
+    return (
+      <div className="pratique pratique--setup">
+        <div className="pageHeader">
+          <div>
+            <h1 className="pageTitle">Pratique</h1>
+            <p className="pageSubtitle">
+              {activeTab === "nombres"
+                ? "Le nombre s’affiche en chiffres. Réponds en japonais, au micro ou à l’écrit."
+                : "La date s’affiche en français. Réponds en japonais, au micro ou à l’écrit."}
+            </p>
+          </div>
+        </div>
+        <PillNav
+          ariaLabel="Modes de pratique"
+          items={PRATIQUE_PILLS}
+          value={pratiquePill}
+          onChange={handleTabChange}
+        />
+        <RecallDrill key={activeTab} mode={activeTab} />
+      </div>
+    );
+  }
+
   if (phase === "setup") {
     const selectedSeriesNames = tags
       .filter((tag) => selectedTagIds.includes(tag.id))
@@ -2060,7 +2104,7 @@ export function PratiquePage() {
             expectedAnswer={currentExercise.answer}
             userAnswer={userAnswer}
             direction={currentExercise.direction ?? direction}
-            mode={activeTab}
+            mode={activeTab === "nombres" || activeTab === "dates" ? undefined : activeTab}
             resetKey={`${activeTab}-${currentIndex}`}
             defaultOpen={hasCheckedCurrent}
             variant={hasCheckedCurrent ? "afterReview" : "inline"}

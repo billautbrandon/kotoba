@@ -562,26 +562,31 @@ function convertKanaRun(kana: string): string {
   return romaji;
 }
 
-function tokenToRomaji(token: ReadingToken): string {
+function tokenToRomaji(token: ReadingToken, useParticles: boolean): string {
   const punctuation = token.punct
     ? [...token.punct].map((character) => PUNCTUATION_ROMAJI[character] ?? character).join("")
     : "";
   if (!token.kana) return punctuation;
-  const particle = PARTICLE_READINGS[token.kana];
+  const particle = useParticles ? PARTICLE_READINGS[token.kana] : undefined;
   const core = particle ?? convertKanaRun(token.kana);
   return `${core}${punctuation}`;
 }
 
-export function kanaToRomaji(kana: string, kanjiHint?: string | null): string {
+export function kanaToRomaji(
+  kana: string,
+  kanjiHint?: string | null,
+  options?: { particles?: boolean },
+): string {
   const source = replaceKanjiWithReadings(kana.trim());
   if (!source) return "";
 
   const hint = kanjiHint?.trim() || "";
   const aligned = hasKanjiCharacter(hint) ? tokenizeFromAlignment(hint, source) : null;
   const tokens = aligned ?? tokenizeKanaOnly(source);
+  const useParticles = options?.particles !== false;
 
   return tokens
-    .map(tokenToRomaji)
+    .map((token) => tokenToRomaji(token, useParticles))
     .filter(Boolean)
     .join(" ")
     .replace(/\s+([.,!?])/g, "$1")
