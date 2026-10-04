@@ -2,12 +2,26 @@ import { useState } from "react";
 import { drawJapaneseDate } from "../utils/japaneseDates";
 import {
   type JapanesePrompt,
+  type NumberLevel,
   drawJapaneseNumber,
   matchesJapaneseAnswer,
 } from "../utils/japaneseNumbers";
 import { VoiceButton } from "./VoiceButton";
 
 const CARD_COUNT = 10;
+const NUMBER_LEVEL_KEY = "kotoba.numberLevel";
+
+const NUMBER_LEVEL_OPTIONS: Array<{ value: NumberLevel; title: string; text: string }> = [
+  { value: "debutant", title: "Débutant", text: "De 0 à 99." },
+  { value: "intermediaire", title: "Intermédiaire", text: "De 100 à 9 999." },
+  { value: "avance", title: "Avancé", text: "De 10 000 à 99 999 999." },
+];
+
+function loadNumberLevel(): NumberLevel {
+  const stored = window.localStorage.getItem(NUMBER_LEVEL_KEY);
+  if (stored === "debutant" || stored === "intermediaire" || stored === "avance") return stored;
+  return "debutant";
+}
 
 type RecallDrillProps = {
   mode: "nombres" | "dates";
@@ -19,16 +33,17 @@ type CheckedAnswer = {
   kanji: string;
 };
 
-function drawCard(mode: RecallDrillProps["mode"]): JapanesePrompt {
-  return mode === "nombres" ? drawJapaneseNumber() : drawJapaneseDate();
+function drawCard(mode: RecallDrillProps["mode"], level: NumberLevel): JapanesePrompt {
+  return mode === "nombres" ? drawJapaneseNumber(level) : drawJapaneseDate();
 }
 
-function drawDeck(mode: RecallDrillProps["mode"]): JapanesePrompt[] {
-  return Array.from({ length: CARD_COUNT }, () => drawCard(mode));
+function drawDeck(mode: RecallDrillProps["mode"], level: NumberLevel): JapanesePrompt[] {
+  return Array.from({ length: CARD_COUNT }, () => drawCard(mode, level));
 }
 
 export function RecallDrill({ mode }: RecallDrillProps) {
-  const [cards, setCards] = useState(() => drawDeck(mode));
+  const [level, setLevel] = useState<NumberLevel>(loadNumberLevel);
+  const [cards, setCards] = useState(() => drawDeck(mode, loadNumberLevel()));
   const [index, setIndex] = useState(0);
   const [draft, setDraft] = useState("");
   const [score, setScore] = useState(0);
@@ -36,13 +51,24 @@ export function RecallDrill({ mode }: RecallDrillProps) {
   const [checked, setChecked] = useState<CheckedAnswer | null>(null);
   const card = cards[index];
 
-  function restart() {
-    setCards(drawDeck(mode));
+  function resetSession(nextLevel: NumberLevel) {
+    setCards(drawDeck(mode, nextLevel));
     setIndex(0);
     setDraft("");
     setScore(0);
     setFinished(false);
     setChecked(null);
+  }
+
+  function restart() {
+    resetSession(level);
+  }
+
+  function selectLevel(nextLevel: NumberLevel) {
+    if (nextLevel === level) return;
+    window.localStorage.setItem(NUMBER_LEVEL_KEY, nextLevel);
+    setLevel(nextLevel);
+    resetSession(nextLevel);
   }
 
   function checkAnswer() {
@@ -66,9 +92,30 @@ export function RecallDrill({ mode }: RecallDrillProps) {
     setChecked(null);
   }
 
+  const levelPicker =
+    mode === "nombres" ? (
+      <fieldset className="recallDrill__levels">
+        <legend className="recallDrill__legend">Niveau</legend>
+        <div className="pratiqueChoiceGrid pratiqueChoiceGrid--three">
+          {NUMBER_LEVEL_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`pratiqueChoice${level === option.value ? " pratiqueChoice--active" : ""}`}
+              onClick={() => selectLevel(option.value)}
+            >
+              <span className="pratiqueChoice__title">{option.title}</span>
+              <span className="pratiqueChoice__text">{option.text}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+    ) : null;
+
   if (finished) {
     return (
       <section className="recallDrill">
+        {levelPicker}
         <div className="recallDrill__card">
           <p className="recallDrill__kicker">Résultat</p>
           <p className="recallDrill__score">
@@ -91,6 +138,7 @@ export function RecallDrill({ mode }: RecallDrillProps) {
 
   return (
     <section className="recallDrill">
+      {levelPicker}
       <div className="recallDrill__card">
         <p className="recallDrill__kicker">
           {index + 1} / {cards.length}

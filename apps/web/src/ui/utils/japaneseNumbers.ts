@@ -187,6 +187,14 @@ export function spellJapaneseNumber(value: number): SpelledNumber {
   return { kanji, readings };
 }
 
+export type NumberLevel = "debutant" | "intermediaire" | "avance";
+
+export const NUMBER_LEVELS: Record<NumberLevel, { min: number; max: number }> = {
+  debutant: { min: 0, max: 99 },
+  intermediaire: { min: 100, max: 9_999 },
+  avance: { min: 10_000, max: JAPANESE_NUMBER_MAX },
+};
+
 export type JapanesePrompt = {
   prompt: string;
   hint: string;
@@ -194,8 +202,10 @@ export type JapanesePrompt = {
   readings: string[];
 };
 
-export function drawJapaneseNumber(): JapanesePrompt {
-  const value = Math.floor(Math.random() * (JAPANESE_NUMBER_MAX + 1));
+export function drawJapaneseNumber(level: NumberLevel = "debutant"): JapanesePrompt {
+  const range = NUMBER_LEVELS[level];
+  const span = range.max - range.min + 1;
+  const value = range.min + Math.floor(Math.random() * span);
   const spelled = spellJapaneseNumber(value);
   return {
     prompt: value.toLocaleString("fr-FR"),
