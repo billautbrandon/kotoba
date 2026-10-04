@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { drawJapaneseDate } from "../utils/japaneseDates";
 import {
   type JapanesePrompt,
@@ -49,7 +49,19 @@ export function RecallDrill({ mode }: RecallDrillProps) {
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
   const [checked, setChecked] = useState<CheckedAnswer | null>(null);
+  const answerRef = useRef<HTMLTextAreaElement>(null);
   const card = cards[index];
+  const checkedRef = useRef(checked);
+  const finishedRef = useRef(finished);
+  const checkAnswerRef = useRef<() => void>(() => {});
+  const goNextRef = useRef<() => void>(() => {});
+  const restartRef = useRef<() => void>(() => {});
+  checkedRef.current = checked;
+  finishedRef.current = finished;
+
+  function focusAnswer() {
+    window.setTimeout(() => answerRef.current?.focus(), 0);
+  }
 
   function resetSession(nextLevel: NumberLevel) {
     setCards(drawDeck(mode, nextLevel));
@@ -58,6 +70,7 @@ export function RecallDrill({ mode }: RecallDrillProps) {
     setScore(0);
     setFinished(false);
     setChecked(null);
+    focusAnswer();
   }
 
   function restart() {
@@ -90,7 +103,46 @@ export function RecallDrill({ mode }: RecallDrillProps) {
     setIndex((value) => value + 1);
     setDraft("");
     setChecked(null);
+    focusAnswer();
   }
+
+  checkAnswerRef.current = checkAnswer;
+  goNextRef.current = goNext;
+  restartRef.current = restart;
+
+  useEffect(() => {
+    answerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.isComposing) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const isEnter = event.key === "Enter";
+      const isRight = event.key === "ArrowRight";
+      if (!isEnter && !isRight) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest(".recallDrill__levels")) return;
+
+      if (finishedRef.current) {
+        if (!isEnter) return;
+        event.preventDefault();
+        restartRef.current();
+        return;
+      }
+      if (checkedRef.current) {
+        event.preventDefault();
+        goNextRef.current();
+        return;
+      }
+      if (!isEnter) return;
+      event.preventDefault();
+      checkAnswerRef.current();
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, []);
 
   const levelPicker =
     mode === "nombres" ? (
@@ -127,6 +179,7 @@ export function RecallDrill({ mode }: RecallDrillProps) {
           <div className="recallDrill__actions">
             <button className="button button--primary" type="button" onClick={restart}>
               Recommencer
+              <kbd className="kbdHint">Entrée</kbd>
             </button>
           </div>
         </div>
@@ -148,6 +201,7 @@ export function RecallDrill({ mode }: RecallDrillProps) {
 
         <div className="phrasesTraining__inputRow">
           <textarea
+            ref={answerRef}
             className="phrasesTraining__textarea recallDrill__input"
             placeholder="Kana, kanji ou romaji"
             value={draft}
@@ -159,12 +213,6 @@ export function RecallDrill({ mode }: RecallDrillProps) {
             autoCapitalize="none"
             lang="ja"
             rows={2}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && checked === null) {
-                event.preventDefault();
-                checkAnswer();
-              }
-            }}
           />
           <VoiceButton
             onTranscript={(transcript) => setDraft(transcript.trim())}
@@ -189,6 +237,7 @@ export function RecallDrill({ mode }: RecallDrillProps) {
             <div className="recallDrill__actions">
               <button className="button button--primary" type="button" onClick={goNext}>
                 Suivant
+                <kbd className="kbdHint">Entrée</kbd>
               </button>
             </div>
           </div>
