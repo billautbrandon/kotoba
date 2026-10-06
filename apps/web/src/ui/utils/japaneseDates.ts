@@ -30,6 +30,16 @@ const MONTH_READINGS = [
   ["じゅうにがつ"],
 ] as const;
 
+const WEEKDAYS = [
+  { french: "dimanche", kanji: "日曜日", reading: "にちようび" },
+  { french: "lundi", kanji: "月曜日", reading: "げつようび" },
+  { french: "mardi", kanji: "火曜日", reading: "かようび" },
+  { french: "mercredi", kanji: "水曜日", reading: "すいようび" },
+  { french: "jeudi", kanji: "木曜日", reading: "もくようび" },
+  { french: "vendredi", kanji: "金曜日", reading: "きんようび" },
+  { french: "samedi", kanji: "土曜日", reading: "どようび" },
+] as const;
+
 const IRREGULAR_DAYS: Record<number, string[]> = {
   1: ["ついたち"],
   2: ["ふつか"],
@@ -77,6 +87,10 @@ function dayReadings(day: number): string[] {
   return spellJapaneseNumber(day).readings.map((reading) => `${reading}にち`);
 }
 
+function weekdayFor(year: number, month: number, day: number): (typeof WEEKDAYS)[number] {
+  return WEEKDAYS[new Date(year, month - 1, day).getDay()];
+}
+
 function randomYear(): number {
   const currentYear = new Date().getFullYear();
   const start = currentYear - 40;
@@ -91,28 +105,30 @@ export function buildJapaneseDate(
 ): JapanesePrompt {
   const monthKanji = `${spellJapaneseNumber(month).kanji}月`;
   const dayKanji = `${spellJapaneseNumber(day).kanji}日`;
+  const weekday = weekdayFor(year, month, day);
   const monthReadings = [...MONTH_READINGS[month - 1]];
   const readingsForDay = dayReadings(day);
-  const frenchDay = `${day} ${FRENCH_MONTHS[month - 1]}`;
+  const frenchDate = `${weekday.french} ${day} ${FRENCH_MONTHS[month - 1]}`;
+  const dateKanji = `${monthKanji}${dayKanji}${weekday.kanji}`;
+  const dateReadings = concatReadings([monthReadings, readingsForDay, [weekday.reading]]);
 
   if (!includeYear) {
     return {
-      prompt: frenchDay,
+      prompt: frenchDate,
       hint: "Dis cette date en japonais.",
-      kanji: `${monthKanji}${dayKanji}`,
-      readings: concatReadings([monthReadings, readingsForDay]),
+      kanji: dateKanji,
+      readings: dateReadings,
     };
   }
 
   const spelledYear = spellJapaneseNumber(year);
   return {
-    prompt: `${frenchDay} ${year}`,
+    prompt: `${frenchDate} ${year}`,
     hint: "Dis cette date en japonais.",
-    kanji: `${spelledYear.kanji}年${monthKanji}${dayKanji}`,
+    kanji: `${spelledYear.kanji}年${dateKanji}`,
     readings: concatReadings([
       spelledYear.readings.map((reading) => `${reading}ねん`),
-      monthReadings,
-      readingsForDay,
+      dateReadings,
     ]),
   };
 }
